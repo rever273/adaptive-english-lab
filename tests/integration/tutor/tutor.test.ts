@@ -232,7 +232,7 @@ describe("bounded export and the Copy Agent Task text", () => {
     const { sessionId, slots } = await practised(1);
     const t = agentTask(env!.db, "session", sessionId);
     expect(t).toContain(`npm run lab:export -- session ${sessionId}`);
-    expect(t).toContain("documentation/spec/");
+    expect(t).toContain("content/review-guidelines.md");
     expect(t).not.toMatch(/[A-Za-z]:\\/);
     expect(t.length).toBeLessThan(400);
     const rev = one<{ id: string }>(env!.db, "SELECT exercise_revision_id AS id FROM session_slots WHERE id = ?", slots[0]!.id).id;
@@ -248,11 +248,11 @@ describe("bounded export and the Copy Agent Task text", () => {
     for (const kind of ["progress", "lessons"] as const) {
       const t = agentTask(env!.db, kind);
       expect(t).toContain(sessionId);
-      expect(t).toContain("AGENTS.md");
+      expect(t).toContain("content/review-guidelines.md");
       expect(t).toContain("npm run pack -- check");
       expect(t).toContain("npm run pack -- publish");
       expect(t).toContain("DIFFERENT reviewer");
-      expect(t).not.toMatch(/[A-Za-z]:\/);
+      expect(t).not.toMatch(/[A-Za-z]:\\/);
       expect(t).not.toContain("raw_answer");
     }
     expect(agentTask(env!.db, "progress")).toContain(`npm run lab:export -- session <id>`);

@@ -92,20 +92,20 @@ export function exportExercise(db: Db, revisionId: string): { json: object; mark
 /** The short text the learner copies for the VS Code agent: IDs, a relative spec path and an allowlisted command - never data. */
 export function agentTask(db: Db, kind: AgentTaskKind, id?: string): string {
   if (kind === "progress" || kind === "lessons") return workflowTask(db, kind);
-  if (kind === "coverage") return "Check the content coverage. Run: npm run lab:export -- coverage. Use documentation/spec/05_EXERCISE_FORMAT.md. Report gaps; do not modify raw attempts.";
-  if (kind === "findings") return "Review the tentative AI findings. Run: npm run lab:export -- findings --status tentative --limit 100. Use documentation/spec/06_AI_PIPELINE.md. Return a finding-review-v1 manifest; preserve raw attempts.";
+  if (kind === "coverage") return "Check the content coverage. Run: npm run lab:export -- coverage. Use content/review-guidelines.md. Report gaps; do not modify raw attempts.";
+  if (kind === "findings") return "Review the tentative AI findings. Run: npm run lab:export -- findings --status tentative --limit 100. Use content/review-guidelines.md. Return a finding-review-v1 manifest; preserve raw attempts.";
   mustBeId(id ?? "", `${kind} id`);
   if (kind === "session") {
     if (!db.prepare("SELECT 1 FROM sessions WHERE id = ?").get(id)) throw new ApiError(404, "SESSION_NOT_FOUND", "Unknown session");
-    return `Review session ${id}. Run: npm run lab:export -- session ${id}. Use documentation/spec/06_AI_PIPELINE.md. Return review notes or a finding-review-v1 manifest; preserve raw attempts.`;
+    return `Review session ${id}. Run: npm run lab:export -- session ${id}. Use content/review-guidelines.md. Return review notes or a finding-review-v1 manifest; preserve raw attempts.`;
   }
   if (kind === "exercise") {
     const r = db.prepare("SELECT revision FROM exercise_revisions WHERE id = ?").get(id) as { revision: number } | undefined;
     if (!r) throw new ApiError(404, "REVISION_NOT_FOUND", "Unknown exercise revision");
-    return `Review exercise revision ${id} (revision ${r.revision}). Run: npm run lab:export -- exercise ${id}. Use documentation/spec/05_EXERCISE_FORMAT.md. Return a content-review-v1 manifest; preserve raw attempts.`;
+    return `Review exercise revision ${id} (revision ${r.revision}). Run: npm run lab:export -- exercise ${id}. Use content/review-guidelines.md. Return a content-review-v1 manifest; preserve raw attempts.`;
   }
   if (!db.prepare("SELECT 1 FROM batches WHERE id = ?").get(id)) throw new ApiError(404, "BATCH_NOT_FOUND", "Unknown batch");
-  return `Review batch ${id} using lab:export. Run: npm run lab:export -- batch ${id}. Use documentation/spec/05_EXERCISE_FORMAT.md. Return a content-review-v1 manifest; do not modify raw attempts.`;
+  return `Review batch ${id} using lab:export. Run: npm run lab:export -- batch ${id}. Use content/review-guidelines.md. Return a content-review-v1 manifest; do not modify raw attempts.`;
 }
 
 const PACK_STEPS = [
@@ -116,7 +116,7 @@ const PACK_STEPS = [
 ].join("\n");
 
 const COMMON = [
-  "Follow AGENTS.md (read it first). Work on your own and run every command yourself; do not ask me to run anything. Never edit the SQLite database or raw attempts directly; use only the commands below. Do not commit or push.",
+  "Read content/review-guidelines.md and follow any local project instructions. Work on your own and run every command yourself; do not ask me to run anything. Never edit the SQLite database or raw attempts directly; use only the commands below. Do not commit or push.",
   "If you change code, run npm run typecheck and the tests of the area you changed before you finish.",
 ].join("\n");
 

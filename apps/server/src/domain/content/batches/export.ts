@@ -46,7 +46,7 @@ export function exportBatch(db: Db, batchId: string): { json: object; markdown: 
         `purpose: ${batch.purpose} / mode: ${batch.mode} / prompt: ${batch.promptVersion} / requested ${batch.requestedCount}`,
         `counts: ${Object.entries(batch.counts).map(([k, v]) => `${k}=${v}`).join(", ")}`,
         "",
-        "Review EVERY item individually against documentation/spec/05_EXERCISE_FORMAT.md (checklist). Return a content-review-v1 manifest; do not modify the database.",
+        "Review EVERY item individually against content/review-guidelines.md (checklist). Return a content-review-v1 manifest; do not modify the database.",
         "",
         ...items.flatMap((i) => [`## #${i.ordinal} ${i.plan.type} / ${i.plan.target_skill} / ${i.status}`, i.revisionId ? `revision ${i.revisionId} hash ${i.contentHash}` : `no draft: ${JSON.stringify(i.error)}`, ...(i.advisoryHints && (i.advisoryHints.flags as unknown[]).length > 0 ? [`HINTS (small-model advice, verify yourself): ${(i.advisoryHints.flags as Array<{ code: string; text: string; score: number }>).map((f) => `${f.code} "${f.text}" (${f.score})`).join("; ")}`] : []), ...(i.content ? ["```json", JSON.stringify(i.content, null, 1), "```"] : []), ""]),
       ].join("\n");

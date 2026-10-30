@@ -23,6 +23,7 @@ const OUT = path.resolve(arg("--out", path.join(projectRoot, "documentation", "s
 mkdirSync(OUT, { recursive: true });
 
 const sha = (b) => createHash("sha256").update(b).digest("hex");
+if (!existsSync(manifestPath)) throw new Error("Benchmark manifest not found. Supply your own reviewed cases with --manifest <file>; the private development manifest is not included in the public repository.");
 const manifestBytes = readFileSync(manifestPath);
 const manifest = JSON.parse(manifestBytes.toString("utf8"));
 const cases = manifest.cases.filter(c => SPLIT === "all" || c.split === SPLIT).slice(0, LIMIT || undefined).map((c) => ({ id: c.id, group: c.group, topic: c.topic, text: c.text, expected: c.expected, skill_id: c.skill_id, split: c.split }));

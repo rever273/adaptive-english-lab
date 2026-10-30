@@ -173,7 +173,7 @@ function BatchDetail({ id, onChanged }: { id: string; onChanged: () => Promise<v
   if (!data) return <p role="status" className="muted">Loading…</p>;
   const approved = data.items.filter((i) => i.status === "approved" && i.revisionId);
   const command = `npm run lab:export -- batch ${id}`;
-  const task = `Review batch ${id} using ${command}. Read documentation/spec/05_EXERCISE_FORMAT.md and judge EVERY item against the checklist. Return a content-review-v1 manifest (use reviewManifestTemplate from the export). Do not modify the database.`;
+  const task = `Review batch ${id} using ${command}. Read content/review-guidelines.md and judge EVERY item against the checklist. Return a content-review-v1 manifest (use reviewManifestTemplate from the export). Do not modify the database.`;
 
   const doImport = async () => {
     setErr(null);

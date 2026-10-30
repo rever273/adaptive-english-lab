@@ -1,12 +1,14 @@
 // Prepare a blind label review packet. CPU/files only; never calls an external service or model.
 import {createHash} from "node:crypto";
-import {readFileSync,writeFileSync,mkdirSync} from "node:fs";
+import {existsSync,readFileSync,writeFileSync,mkdirSync} from "node:fs";
 import path from "node:path";
 import {projectRoot} from "./_common.mjs";
-const source=path.join(projectRoot,"documentation/spec/benchmark-cases.json");
+const arg=(name, fallback)=>process.argv.includes(name)?process.argv[process.argv.indexOf(name)+1]:fallback;
+const source=path.resolve(arg("--manifest",path.join(projectRoot,"documentation/spec/benchmark-cases.json")));
+if (!existsSync(source)) throw new Error("Benchmark manifest not found. Supply your own reviewed cases with --manifest <file>; the private development manifest is not included in the public repository.");
 const bytes=readFileSync(source);const manifest=JSON.parse(bytes);
 const sha=x=>createHash("sha256").update(x).digest("hex");
-const out=path.join(projectRoot,"documentation/spec/evidence/task-009/repair-20261029/label-review");mkdirSync(out,{recursive:true});
+const out=path.resolve(arg("--out",path.join(projectRoot,"var/benchmark-label-review")));mkdirSync(out,{recursive:true});
 const rows=manifest.cases.map(c=>({review_id:sha(`blind-review-v1:${c.id}`).slice(0,24),text:c.text})).sort((a,b)=>a.review_id.localeCompare(b.review_id));
 const packet={schema_version:"blind-label-review-v1",source_sha256:sha(bytes),status:"pending_independent_review",
   instructions:["Judge each text independently, without seeing expected labels, class-coded IDs, test split or model outputs.","Use correct/grammar_error/context_ambiguous/incomplete_input/unresolved. Ordinary grammatical dialect variants and style preferences are not errors.","For grammar_error cite the offending words, a minimal correction and a defensible rule. Preserve meaning. For ambiguity name the required context; unreadable ASR belongs to incomplete_input.","Record reviewer identity, whether you authored the case, initial label and confidence before discussion. Keep disagreements and adjudication reasons; do not resolve them by majority of correlated model outputs.","Do not inspect reference-private.json before completing the independent pass. Full project filesystem access is not a technical blindness guarantee."],cases:rows};

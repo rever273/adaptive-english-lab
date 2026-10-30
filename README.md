@@ -197,3 +197,7 @@ Feedback, bug reports and ideas are welcome — please open an issue. Because th
 Released under the [PolyForm Noncommercial License 1.0.0](LICENSE). In plain terms: you may use, study and modify the code for personal use, learning, research and other non-commercial purposes. Commercial use requires separate permission from the author. This is a source-available licence, not an OSI-approved open-source one.
 
 The first commit of this repository was briefly published under the MIT licence; the PolyForm Noncommercial licence replaces it for all later versions.
+
+### Review and benchmark materials
+
+Reviewers can use [the content and AI review guidelines](content/review-guidelines.md). Internal development documents and benchmark cases are not included. To run `npm run benchmark:ai`, provide your own reviewed manifest with `--manifest <file>`; the same option is available for `scripts/nimble-tune.mjs` and `scripts/benchmark-review-packet.mjs`. Benchmark labels still require independent review.
