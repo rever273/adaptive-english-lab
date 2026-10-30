@@ -1,0 +1,49 @@
+{
+  "schema_version": "exercise-v1",
+  "id": "6f1c2a10-5d0e-4b6a-8c11-0a1b2c3d4e01",
+  "revision": 1,
+  "status": "draft",
+  "target_skill": "tenses.perfect_vs_past",
+  "additional_skills": [],
+  "dimension": "recognition",
+  "difficulty": "B2",
+  "context_level": "B2",
+  "topic": "council",
+  "context_id": "fx-council-timetable",
+  "template_cluster": "fx-tpl-perfect-past-yesterday",
+  "bank_role": "practice",
+  "prompt_en": "The council ___ the revised timetable yesterday.",
+  "hints_ru": [
+    "Обратите внимание на слово yesterday."
+  ],
+  "explanation_ru": "Слово yesterday указывает на завершённый момент в прошлом, поэтому нужен Past Simple (published), а не Present Perfect.",
+  "sources": [],
+  "provenance": {
+    "origin": "manual",
+    "model_tag": null,
+    "model_digest": null,
+    "prompt_version": "fixture-v1"
+  },
+  "rubric_version": "rubric-v1",
+  "type": "choose_form",
+  "payload": {
+    "options": [
+      {
+        "id": "a",
+        "text": "published"
+      },
+      {
+        "id": "b",
+        "text": "has published"
+      },
+      {
+        "id": "c",
+        "text": "publish"
+      }
+    ],
+    "accepted_option_ids": [
+      "a"
+    ],
+    "multiple": false
+  }
+}

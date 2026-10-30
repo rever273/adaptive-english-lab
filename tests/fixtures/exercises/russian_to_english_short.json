@@ -1,0 +1,46 @@
+{
+  "schema_version": "exercise-v1",
+  "id": "6f1c2a10-5d0e-4b6a-8c11-0a1b2c3d4e05",
+  "revision": 1,
+  "status": "draft",
+  "target_skill": "questions.embedded_whether",
+  "additional_skills": [],
+  "dimension": "production",
+  "difficulty": "B2",
+  "context_level": "B2",
+  "topic": "library",
+  "context_id": "fx-library-hours",
+  "template_cluster": "fx-tpl-embedded-when",
+  "bank_role": "practice",
+  "prompt_en": "Translate the idea into natural English.",
+  "hints_ru": [
+    "Во вложенном вопросе порядок слов прямой."
+  ],
+  "explanation_ru": "Во вложенном вопросе после when используется прямой порядок слов: when the library closes.",
+  "sources": [],
+  "provenance": {
+    "origin": "manual",
+    "model_tag": null,
+    "model_digest": null,
+    "prompt_version": "fixture-v1"
+  },
+  "rubric_version": "rubric-v1",
+  "type": "russian_to_english_short",
+  "payload": {
+    "cue_ru": "Не могли бы вы сказать, когда закрывается библиотека?",
+    "max_words": 15,
+    "accepted_answers": [
+      "Could you tell me when the library closes?",
+      "Could you tell me what time the library closes?"
+    ],
+    "rubric": {
+      "meaning_ru": "Вежливая просьба сообщить время закрытия библиотеки.",
+      "target_markers": [
+        "вложенный вопрос с прямым порядком слов"
+      ],
+      "acceptable_variation_ru": "Допустимы другие вежливые формулировки с прямым порядком слов.",
+      "reject_conditions_ru": "Вопросительный порядок слов внутри придаточной части (when does the library close) не принимается."
+    },
+    "allow_voice": true
+  }
+}

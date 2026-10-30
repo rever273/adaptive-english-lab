@@ -1,0 +1,49 @@
+{
+  "schema_version": "exercise-v1",
+  "id": "6f1c2a10-5d0e-4b6a-8c11-0a1b2c3d4e02",
+  "revision": 1,
+  "status": "draft",
+  "target_skill": "prepositions.listen_to",
+  "additional_skills": [],
+  "dimension": "recognition",
+  "difficulty": "B2",
+  "context_level": "B2",
+  "topic": "safety",
+  "context_id": "fx-safety-announcement",
+  "template_cluster": "fx-tpl-listen-to-announcement",
+  "bank_role": "practice",
+  "prompt_en": "The organiser asked us to listen ___ the safety announcement before entering the site.",
+  "hints_ru": [
+    "Какой предлог нужен после listen перед объектом?"
+  ],
+  "explanation_ru": "После listen перед объектом требуется предлог to: listen to the announcement.",
+  "sources": [],
+  "provenance": {
+    "origin": "manual",
+    "model_tag": null,
+    "model_digest": null,
+    "prompt_version": "fixture-v1"
+  },
+  "rubric_version": "rubric-v1",
+  "type": "choose_missing_fragment",
+  "payload": {
+    "options": [
+      {
+        "id": "a",
+        "text": "to"
+      },
+      {
+        "id": "b",
+        "text": "for"
+      },
+      {
+        "id": "c",
+        "text": "at"
+      }
+    ],
+    "accepted_option_ids": [
+      "a"
+    ],
+    "multiple": false
+  }
+}

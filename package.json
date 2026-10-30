@@ -1,0 +1,53 @@
+{
+  "name": "english-lab",
+  "private": true,
+  "version": "0.1.0",
+  "type": "module",
+  "description": "English Lab - personal local-only adaptive English practice (TASK_003 foundation)",
+  "engines": {
+    "node": ">=22.17.0 <23"
+  },
+  "workspaces": [
+    "packages/*",
+    "apps/*"
+  ],
+  "scripts": {
+    "build": "npm run build -w @english-lab/contracts && npm run build -w @english-lab/learning && npm run build -w @english-lab/server && npm run build -w @english-lab/web",
+    "typecheck": "npm run build -w @english-lab/contracts && npm run build -w @english-lab/learning && tsc -p apps/server --noEmit && tsc -p apps/web --noEmit",
+    "test:unit": "vitest --config vitest.unit.config.ts",
+    "test:integration": "vitest",
+    "start": "node scripts/start.mjs",
+    "lab": "node scripts/start.mjs --attached",
+    "stop": "node scripts/stop.mjs",
+    "backup": "node scripts/backup.mjs",
+    "restore": "node scripts/restore.mjs",
+    "lab:export": "node scripts/lab-export.mjs",
+    "content:validate": "node scripts/content-validate.mjs",
+    "trial:generate": "node scripts/generation-trial.mjs",
+    "verify:stt": "node scripts/verify-stt.mjs",
+    "test:python": "py -3.11 -m unittest discover -s tests/python -v",
+    "gen:taxonomy-seed": "node scripts/gen-taxonomy-seed.mjs",
+    "slice:seed": "node scripts/seed-slice.mjs",
+    "first10:check": "node scripts/first10-check.mjs",
+    "first10:seed": "node scripts/first10-seed.mjs",
+    "pack": "node scripts/content-pack.mjs",
+    "slice": "node scripts/slice.mjs",
+    "verify:gpu": "node scripts/verify-gpu.mjs",
+    "verify:windows": "node scripts/verify-windows.mjs",
+    "verify:backup-restore": "node scripts/verify-windows.mjs --backup-restore",
+    "benchmark:ai": "node scripts/benchmark-ai.mjs",
+    "slice:stop": "node scripts/slice-stop.mjs",
+    "test:e2e": "vitest --config vitest.e2e.config.ts"
+  },
+  "devDependencies": {
+    "@types/better-sqlite3": "9.6.0",
+    "@types/node": "22.20.5",
+    "@types/react": "19.3.0",
+    "@types/react-dom": "19.3.0",
+    "@vitejs/plugin-react": "6.1.2",
+    "playwright-core": "1.64.1",
+    "typescript": "7.0.2",
+    "vite": "8.3.5",
+    "vitest": "5.0.5"
+  }
+}

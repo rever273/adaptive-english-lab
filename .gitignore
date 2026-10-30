@@ -1,0 +1,27 @@
+node_modules/
+dist/
+var/
+*.sqlite
+*.sqlite-wal
+*.sqlite-shm
+.env
+.env.*
+englishlab.local.json
+*.tsbuildinfo
+
+# Personal / machine-specific material: keep local, never publish
+documentation/reference/
+documentation/spec/evidence/
+*.zip
+*.log
+__pycache__/
+*.pyc
+.claude/
+.vscode/
+
+# Project specs, task files, decision log and agent instructions stay local (user decision 2026-10-30, D62).
+# The public repository carries code, migrations, tests, schemas, content, README and LICENSE only.
+documentation/*
+!documentation/images/
+AGENTS.md
+CLAUDE.md

@@ -1,0 +1,19 @@
+{
+  "name": "@english-lab/server",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "main": "dist/index.js",
+  "scripts": {
+    "build": "tsc -p ."
+  },
+  "dependencies": {
+    "@english-lab/contracts": "0.1.0",
+    "@english-lab/learning": "0.1.0",
+    "@fastify/static": "10.1.8",
+    "ajv": "8.20.0",
+    "better-sqlite3": "13.0.3",
+    "fastify": "5.12.7",
+    "zod": "4.6.7"
+  }
+}

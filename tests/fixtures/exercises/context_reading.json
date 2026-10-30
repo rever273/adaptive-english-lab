@@ -1,0 +1,103 @@
+{
+  "schema_version": "exercise-v1",
+  "id": "6f1c2a10-5d0e-4b6a-8c11-0a1b2c3d4e06",
+  "revision": 1,
+  "status": "draft",
+  "target_skill": "linking.cause",
+  "additional_skills": [],
+  "dimension": "recognition",
+  "difficulty": "B2",
+  "context_level": "B2",
+  "topic": "heat",
+  "context_id": "fx-heat-festival",
+  "template_cluster": "fx-tpl-heat-postponed",
+  "bank_role": "practice",
+  "prompt_en": "Read the notice and answer the questions.",
+  "hints_ru": [
+    "Найдите в тексте причину решения."
+  ],
+  "explanation_ru": "Причина решения указана после because of; местоимение it относится к решению отложить фестиваль.",
+  "sources": [],
+  "provenance": {
+    "origin": "manual",
+    "model_tag": null,
+    "model_digest": null,
+    "prompt_version": "fixture-v1"
+  },
+  "rubric_version": "rubric-v1",
+  "type": "context_reading",
+  "payload": {
+    "paragraphs": [
+      "The Riverside Lantern Festival has been postponed until next month. Organisers made the decision on Tuesday because of the extreme heat forecast for the weekend, and they announced it on the festival website.",
+      "Tickets that were bought for the original date will remain valid. Anyone who cannot attend the new date can ask for a full refund through the festival website."
+    ],
+    "questions": [
+      {
+        "id": "q1",
+        "prompt": "Why did the organisers postpone the event?",
+        "options": [
+          {
+            "id": "a",
+            "text": "A heatwave was expected."
+          },
+          {
+            "id": "b",
+            "text": "Too few tickets were sold."
+          },
+          {
+            "id": "c",
+            "text": "The venue was closed for repairs."
+          }
+        ],
+        "accepted_option_ids": [
+          "a"
+        ],
+        "target_skill": "linking.cause"
+      },
+      {
+        "id": "q2",
+        "prompt": "What does the word 'it' refer to in the first paragraph?",
+        "options": [
+          {
+            "id": "a",
+            "text": "The decision to postpone the festival."
+          },
+          {
+            "id": "b",
+            "text": "The weekend weather forecast."
+          },
+          {
+            "id": "c",
+            "text": "The festival website."
+          }
+        ],
+        "accepted_option_ids": [
+          "a"
+        ],
+        "target_skill": "pronouns.subject_object"
+      },
+      {
+        "id": "q3",
+        "prompt": "What can ticket holders do if the new date does not suit them?",
+        "options": [
+          {
+            "id": "a",
+            "text": "They can request their money back."
+          },
+          {
+            "id": "b",
+            "text": "They can swap tickets at the gate."
+          },
+          {
+            "id": "c",
+            "text": "They can attend for free next year."
+          }
+        ],
+        "accepted_option_ids": [
+          "a"
+        ],
+        "target_skill": "collocations.natural_phrases"
+      }
+    ]
+  }
+}

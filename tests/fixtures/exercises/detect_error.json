@@ -1,0 +1,54 @@
+{
+  "schema_version": "exercise-v1",
+  "id": "6f1c2a10-5d0e-4b6a-8c11-0a1b2c3d4e03",
+  "revision": 1,
+  "status": "draft",
+  "target_skill": "verb_patterns.suggest_doing",
+  "additional_skills": [],
+  "dimension": "correction",
+  "difficulty": "B2",
+  "context_level": "B2",
+  "topic": "beach",
+  "context_id": "fx-beach-suggestion",
+  "template_cluster": "fx-tpl-suggest-gerund",
+  "bank_role": "practice",
+  "prompt_en": "Find the part of the sentence that contains a mistake, or choose No mistake.",
+  "hints_ru": [
+    "Какая форма глагола следует за suggest?"
+  ],
+  "explanation_ru": "После suggest используется форма с -ing: suggested going. Конструкция suggested to go неверна.",
+  "sources": [],
+  "provenance": {
+    "origin": "manual",
+    "model_tag": null,
+    "model_digest": null,
+    "prompt_version": "fixture-v1"
+  },
+  "rubric_version": "rubric-v1",
+  "type": "detect_error",
+  "payload": {
+    "sentence": "He suggested to go to the beach after work.",
+    "segments": [
+      {
+        "id": "s1",
+        "text": "He suggested "
+      },
+      {
+        "id": "s2",
+        "text": "to go"
+      },
+      {
+        "id": "s3",
+        "text": " to the beach after work."
+      }
+    ],
+    "accepted_segment_ids": [
+      "s2"
+    ],
+    "no_mistake": false,
+    "corrections": [
+      "He suggested going to the beach after work."
+    ],
+    "optional_correction": true
+  }
+}

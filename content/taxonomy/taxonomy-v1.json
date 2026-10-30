@@ -1,0 +1,486 @@
+{
+  "schema_version": "taxonomy-v1",
+  "status": "pending_review",
+  "skills": [
+    {
+      "id": "articles.indefinite",
+      "domain": "grammar",
+      "family": "articles",
+      "specific": "indefinite"
+    },
+    {
+      "id": "articles.definite",
+      "domain": "grammar",
+      "family": "articles",
+      "specific": "definite"
+    },
+    {
+      "id": "articles.zero_general",
+      "domain": "grammar",
+      "family": "articles",
+      "specific": "zero_general"
+    },
+    {
+      "id": "articles.possessive_no_article",
+      "domain": "grammar",
+      "family": "articles",
+      "specific": "possessive_no_article"
+    },
+    {
+      "id": "articles.quantifiers",
+      "domain": "grammar",
+      "family": "articles",
+      "specific": "quantifiers"
+    },
+    {
+      "id": "countability.mass_nouns",
+      "domain": "grammar",
+      "family": "countability",
+      "specific": "mass_nouns"
+    },
+    {
+      "id": "countability.singular_plural",
+      "domain": "grammar",
+      "family": "countability",
+      "specific": "singular_plural"
+    },
+    {
+      "id": "countability.few_little",
+      "domain": "grammar",
+      "family": "countability",
+      "specific": "few_little"
+    },
+    {
+      "id": "countability.much_many",
+      "domain": "grammar",
+      "family": "countability",
+      "specific": "much_many"
+    },
+    {
+      "id": "countability.agreement_quantity",
+      "domain": "grammar",
+      "family": "countability",
+      "specific": "agreement_quantity"
+    },
+    {
+      "id": "tenses.past_simple",
+      "domain": "grammar",
+      "family": "tenses",
+      "specific": "past_simple"
+    },
+    {
+      "id": "tenses.present_simple",
+      "domain": "grammar",
+      "family": "tenses",
+      "specific": "present_simple"
+    },
+    {
+      "id": "tenses.present_continuous",
+      "domain": "grammar",
+      "family": "tenses",
+      "specific": "present_continuous"
+    },
+    {
+      "id": "tenses.past_continuous",
+      "domain": "grammar",
+      "family": "tenses",
+      "specific": "past_continuous"
+    },
+    {
+      "id": "tenses.present_perfect",
+      "domain": "grammar",
+      "family": "tenses",
+      "specific": "present_perfect"
+    },
+    {
+      "id": "tenses.perfect_vs_past",
+      "domain": "grammar",
+      "family": "tenses",
+      "specific": "perfect_vs_past"
+    },
+    {
+      "id": "tenses.future_forms",
+      "domain": "grammar",
+      "family": "tenses",
+      "specific": "future_forms"
+    },
+    {
+      "id": "tenses.past_perfect",
+      "domain": "grammar",
+      "family": "tenses",
+      "specific": "past_perfect"
+    },
+    {
+      "id": "tenses.tense_sequence",
+      "domain": "grammar",
+      "family": "tenses",
+      "specific": "tense_sequence"
+    },
+    {
+      "id": "tenses.habitual_used_to",
+      "domain": "grammar",
+      "family": "tenses",
+      "specific": "habitual_used_to"
+    },
+    {
+      "id": "verb_patterns.stop_doing_vs_stop_to_do",
+      "domain": "grammar",
+      "family": "verb_patterns",
+      "specific": "stop_doing_vs_stop_to_do"
+    },
+    {
+      "id": "verb_patterns.think_of_doing",
+      "domain": "grammar",
+      "family": "verb_patterns",
+      "specific": "think_of_doing"
+    },
+    {
+      "id": "verb_patterns.would_rather",
+      "domain": "grammar",
+      "family": "verb_patterns",
+      "specific": "would_rather"
+    },
+    {
+      "id": "verb_patterns.enjoy_doing",
+      "domain": "grammar",
+      "family": "verb_patterns",
+      "specific": "enjoy_doing"
+    },
+    {
+      "id": "verb_patterns.want_to",
+      "domain": "grammar",
+      "family": "verb_patterns",
+      "specific": "want_to"
+    },
+    {
+      "id": "verb_patterns.make_let_bare",
+      "domain": "grammar",
+      "family": "verb_patterns",
+      "specific": "make_let_bare"
+    },
+    {
+      "id": "verb_patterns.spend_time_doing",
+      "domain": "grammar",
+      "family": "verb_patterns",
+      "specific": "spend_time_doing"
+    },
+    {
+      "id": "verb_patterns.suggest_doing",
+      "domain": "grammar",
+      "family": "verb_patterns",
+      "specific": "suggest_doing"
+    },
+    {
+      "id": "prepositions.listen_to",
+      "domain": "grammar",
+      "family": "prepositions",
+      "specific": "listen_to"
+    },
+    {
+      "id": "prepositions.wait_for",
+      "domain": "grammar",
+      "family": "prepositions",
+      "specific": "wait_for"
+    },
+    {
+      "id": "prepositions.explain_to",
+      "domain": "grammar",
+      "family": "prepositions",
+      "specific": "explain_to"
+    },
+    {
+      "id": "prepositions.depend_on",
+      "domain": "grammar",
+      "family": "prepositions",
+      "specific": "depend_on"
+    },
+    {
+      "id": "prepositions.interested_in",
+      "domain": "grammar",
+      "family": "prepositions",
+      "specific": "interested_in"
+    },
+    {
+      "id": "prepositions.time_at_on_in",
+      "domain": "grammar",
+      "family": "prepositions",
+      "specific": "time_at_on_in"
+    },
+    {
+      "id": "prepositions.place_at_on_in",
+      "domain": "grammar",
+      "family": "prepositions",
+      "specific": "place_at_on_in"
+    },
+    {
+      "id": "prepositions.movement",
+      "domain": "grammar",
+      "family": "prepositions",
+      "specific": "movement"
+    },
+    {
+      "id": "agreement.third_person",
+      "domain": "grammar",
+      "family": "agreement",
+      "specific": "third_person"
+    },
+    {
+      "id": "agreement.be_auxiliary",
+      "domain": "grammar",
+      "family": "agreement",
+      "specific": "be_auxiliary"
+    },
+    {
+      "id": "agreement.do_auxiliary",
+      "domain": "grammar",
+      "family": "agreement",
+      "specific": "do_auxiliary"
+    },
+    {
+      "id": "agreement.have_auxiliary",
+      "domain": "grammar",
+      "family": "agreement",
+      "specific": "have_auxiliary"
+    },
+    {
+      "id": "agreement.collective_nouns",
+      "domain": "grammar",
+      "family": "agreement",
+      "specific": "collective_nouns"
+    },
+    {
+      "id": "questions.direct_auxiliary",
+      "domain": "grammar",
+      "family": "questions",
+      "specific": "direct_auxiliary"
+    },
+    {
+      "id": "questions.embedded_order",
+      "domain": "grammar",
+      "family": "questions",
+      "specific": "embedded_order"
+    },
+    {
+      "id": "questions.embedded_whether",
+      "domain": "grammar",
+      "family": "questions",
+      "specific": "embedded_whether"
+    },
+    {
+      "id": "questions.subject_questions",
+      "domain": "grammar",
+      "family": "questions",
+      "specific": "subject_questions"
+    },
+    {
+      "id": "questions.question_tags",
+      "domain": "grammar",
+      "family": "questions",
+      "specific": "question_tags"
+    },
+    {
+      "id": "modals.ability",
+      "domain": "grammar",
+      "family": "modals",
+      "specific": "ability"
+    },
+    {
+      "id": "modals.obligation",
+      "domain": "grammar",
+      "family": "modals",
+      "specific": "obligation"
+    },
+    {
+      "id": "modals.advice",
+      "domain": "grammar",
+      "family": "modals",
+      "specific": "advice"
+    },
+    {
+      "id": "modals.deduction",
+      "domain": "grammar",
+      "family": "modals",
+      "specific": "deduction"
+    },
+    {
+      "id": "modals.polite_requests",
+      "domain": "grammar",
+      "family": "modals",
+      "specific": "polite_requests"
+    },
+    {
+      "id": "conditionals.zero",
+      "domain": "grammar",
+      "family": "conditionals",
+      "specific": "zero"
+    },
+    {
+      "id": "conditionals.first",
+      "domain": "grammar",
+      "family": "conditionals",
+      "specific": "first"
+    },
+    {
+      "id": "conditionals.second",
+      "domain": "grammar",
+      "family": "conditionals",
+      "specific": "second"
+    },
+    {
+      "id": "conditionals.third",
+      "domain": "grammar",
+      "family": "conditionals",
+      "specific": "third"
+    },
+    {
+      "id": "conditionals.mixed",
+      "domain": "grammar",
+      "family": "conditionals",
+      "specific": "mixed"
+    },
+    {
+      "id": "passive.present",
+      "domain": "grammar",
+      "family": "passive",
+      "specific": "present"
+    },
+    {
+      "id": "passive.past",
+      "domain": "grammar",
+      "family": "passive",
+      "specific": "past"
+    },
+    {
+      "id": "passive.perfect",
+      "domain": "grammar",
+      "family": "passive",
+      "specific": "perfect"
+    },
+    {
+      "id": "reported_speech.statements",
+      "domain": "grammar",
+      "family": "reported_speech",
+      "specific": "statements"
+    },
+    {
+      "id": "reported_speech.questions",
+      "domain": "grammar",
+      "family": "reported_speech",
+      "specific": "questions"
+    },
+    {
+      "id": "reported_speech.time_reference",
+      "domain": "grammar",
+      "family": "reported_speech",
+      "specific": "time_reference"
+    },
+    {
+      "id": "relatives.defining",
+      "domain": "grammar",
+      "family": "relatives",
+      "specific": "defining"
+    },
+    {
+      "id": "relatives.nondefining",
+      "domain": "grammar",
+      "family": "relatives",
+      "specific": "nondefining"
+    },
+    {
+      "id": "relatives.relative_pronouns",
+      "domain": "grammar",
+      "family": "relatives",
+      "specific": "relative_pronouns"
+    },
+    {
+      "id": "word_order.adverbs",
+      "domain": "grammar",
+      "family": "word_order",
+      "specific": "adverbs"
+    },
+    {
+      "id": "word_order.negation",
+      "domain": "grammar",
+      "family": "word_order",
+      "specific": "negation"
+    },
+    {
+      "id": "word_order.adjective_order",
+      "domain": "grammar",
+      "family": "word_order",
+      "specific": "adjective_order"
+    },
+    {
+      "id": "pronouns.subject_object",
+      "domain": "grammar",
+      "family": "pronouns",
+      "specific": "subject_object"
+    },
+    {
+      "id": "pronouns.reflexives",
+      "domain": "grammar",
+      "family": "pronouns",
+      "specific": "reflexives"
+    },
+    {
+      "id": "pronouns.demonstratives",
+      "domain": "grammar",
+      "family": "pronouns",
+      "specific": "demonstratives"
+    },
+    {
+      "id": "collocations.make_do",
+      "domain": "lexis",
+      "family": "collocations",
+      "specific": "make_do"
+    },
+    {
+      "id": "collocations.job_and_work",
+      "domain": "lexis",
+      "family": "collocations",
+      "specific": "job_and_work"
+    },
+    {
+      "id": "collocations.natural_phrases",
+      "domain": "lexis",
+      "family": "collocations",
+      "specific": "natural_phrases"
+    },
+    {
+      "id": "register.politeness",
+      "domain": "lexis",
+      "family": "register",
+      "specific": "politeness"
+    },
+    {
+      "id": "register.formal_informal",
+      "domain": "lexis",
+      "family": "register",
+      "specific": "formal_informal"
+    },
+    {
+      "id": "register.dialect_variants",
+      "domain": "lexis",
+      "family": "register",
+      "specific": "dialect_variants"
+    },
+    {
+      "id": "linking.contrast",
+      "domain": "grammar",
+      "family": "linking",
+      "specific": "contrast"
+    },
+    {
+      "id": "linking.cause",
+      "domain": "grammar",
+      "family": "linking",
+      "specific": "cause"
+    },
+    {
+      "id": "linking.concession",
+      "domain": "grammar",
+      "family": "linking",
+      "specific": "concession"
+    }
+  ]
+}

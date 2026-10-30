@@ -1,0 +1,46 @@
+{
+  "schema_version": "exercise-v1",
+  "id": "6f1c2a10-5d0e-4b6a-8c11-0a1b2c3d4e04",
+  "revision": 1,
+  "status": "draft",
+  "target_skill": "verb_patterns.stop_doing_vs_stop_to_do",
+  "additional_skills": [],
+  "dimension": "production",
+  "difficulty": "B2",
+  "context_level": "B2",
+  "topic": "workplace",
+  "context_id": "fx-employee-email",
+  "template_cluster": "fx-tpl-stop-gerund",
+  "bank_role": "practice",
+  "prompt_en": "Complete the sentence in your own words, starting with: The employee stopped...",
+  "hints_ru": [
+    "После stop действие, которое прекратили, выражается формой на -ing."
+  ],
+  "explanation_ru": "Прекращённое действие после stop выражается герундием: stopped checking emails.",
+  "sources": [],
+  "provenance": {
+    "origin": "manual",
+    "model_tag": null,
+    "model_digest": null,
+    "prompt_version": "fixture-v1"
+  },
+  "rubric_version": "rubric-v1",
+  "type": "guided_short_answer",
+  "payload": {
+    "cue_ru": "Сотрудник перестал проверять почту после смены. Начни: The employee stopped…",
+    "max_words": 15,
+    "accepted_answers": [
+      "The employee stopped checking emails after the shift.",
+      "The employee stopped checking email after work."
+    ],
+    "rubric": {
+      "meaning_ru": "Сотрудник прекратил проверять почту после рабочей смены.",
+      "target_markers": [
+        "stop + -ing"
+      ],
+      "acceptable_variation_ru": "Допустимы email/emails и after work/after the shift.",
+      "reject_conditions_ru": "Форма stopped to check меняет смысл и не принимается."
+    },
+    "allow_voice": true
+  }
+}

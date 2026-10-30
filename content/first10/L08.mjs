@@ -1,0 +1,37 @@
+// L08 Problems and practical solutions: present perfect, past continuous, explain to, obligation, third conditional.
+export const L08 = {
+  form: [
+    ["tenses.present_perfect", "printer", "The printer ___ properly since the update.", ["hasn't worked", "didn't work", "doesn't work"], 0, "Слово since связывает прошлое с настоящим.", "С since используется Present Perfect: hasn't worked."],
+    ["conditionals.third", "outage", "If the technician ___ earlier, the system would not have crashed.", ["had arrived", "arrived", "has arrived"], 0, "Условие относится к прошлому и уже не реально.", "В условной части третьего типа используется Past Perfect: had arrived.", "B2"],
+    ["tenses.past_continuous", "power", "I ___ the report when the power went out.", ["was writing", "wrote", "have written"], 0, "Длительное действие было прервано коротким.", "Длительное действие, прерванное другим, выражается Past Continuous: was writing.", "A2"],
+    ["modals.obligation", "visitors", "Visitors ___ sign in at reception; it's a legal requirement.", ["must", "can", "might"], 0, "Это требование закона.", "Для обязанности, заданной правилом или законом, используется must.", "A2"],
+    ["conditionals.third", "cables", "If we had checked the cables, we ___ the fault earlier.", ["would have found", "will find", "would find"], 0, "Условие относится к прошлому и уже не реально.", "В третьем условном предложении главная часть строится как would have + третья форма.", "B2"],
+    ["modals.obligation", "router", "You ___ restart the router before calling support.", ["have to", "must to", "are must"], 0, "Нужна форма, выражающая необходимость.", "Необходимость выражается have to + инфинитив; must не сочетается с to.", "B1"],
+  ],
+  fragment: [
+    ["prepositions.explain_to", "delay", "The manager explained the delay ___ the angry passengers.", ["to", "at", "by"], 0, "Кому объясняли — адресат вводится предлогом.", "Адресат при explain вводится предлогом to: explained the delay to the passengers."],
+    ["prepositions.explain_to", "rules", "He carefully explained the safety rules ___ the new volunteers.", ["to", "at", "by"], 0, "Кому объясняли — предлог для адресата.", "Адресат при explain вводится предлогом to."],
+    ["tenses.past_continuous", "cables", "While they ___ the cables, the lights went out.", ["were checking", "checked", "have checked"], 0, "Длительное действие в момент, когда произошло другое.", "Длительное действие, на фоне которого произошло другое, выражается Past Continuous: were checking."],
+    ["prepositions.explain_to", "procedure", "She patiently explained the new procedure ___ everyone in the office.", ["to", "at", "by"], 0, "Кому объясняли — предлог для адресата.", "Адресат при explain вводится предлогом to."],
+    ["modals.obligation", "road", "Drivers ___ stop at the red light; it's the law.", ["have to", "can", "may"], 0, "Это закон.", "Для обязанности, заданной законом, используется have to или must.", "A2"],
+    ["conditionals.third", "instructions", "If she ___ the instructions, she wouldn't have made the mistake.", ["had read", "read", "has read"], 0, "Условие относится к прошлому.", "В условной части третьего типа используется Past Perfect: had read.", "B2"],
+  ],
+  detect: [
+    ["tenses.present_perfect", "repairs", ["I ", "am waiting", " for the repair team since eight o'clock."], 1, ["I have been waiting for the repair team since eight o'clock."], "Слово since требует другого времени.", "С since используется Present Perfect: have been waiting."],
+    ["tenses.past_continuous", "alarm", ["I ", "was cook", " dinner when the smoke alarm went off."], 1, ["I was cooking dinner when the smoke alarm went off."], "Какая форма глагола нужна в Past Continuous?", "В Past Continuous после was ставится форма на -ing: was cooking.", "A2"],
+    ["prepositions.explain_to", "rules", ["She explained the new rules ", "for the staff", " after lunch."], 1, ["She explained the new rules to the staff after lunch."], "Какой предлог вводит адресата объяснения?", "Адресат при explain вводится предлогом to: explained the rules to the staff."],
+    ["conditionals.third", "flight", ["If we ", "would have left", " earlier, we would have caught the flight."], 1, ["If we had left earlier, we would have caught the flight."], "Какая форма нужна в условной части?", "В условной части третьего типа используется Past Perfect: had left."],
+    ["modals.obligation", "safety", ["All employees must complete the safety course before starting work."], null, [], "Проверьте модальный глагол.", "Предложение верно: must выражает обязанность, после него инфинитив без to."],
+    ["modals.obligation", "cycling", ["Cyclists must wear helmets on public roads in this state."], null, [], "Проверьте модальный глагол.", "Предложение верно: must выражает обязанность, после него инфинитив без to."],
+  ],
+  guided: [
+    ["tenses.present_perfect", "support", "Complete the sentence in your own words, starting with: We have...", "Мы уже дважды звонили в службу поддержки. Начни: We have…", ["We have already called the support team twice.", "We have called the support team twice already.", "We have already phoned support twice.", "We have called support twice."], "Результат важен сейчас.", ["have + третья форма"], "Для действия с результатом в настоящем используется Present Perfect."],
+    ["conditionals.third", "delay", "Complete the sentence in your own words, starting with: If I had known about the delay,...", "Если бы я знал о задержке, я бы вышел позже. Начни: If I had known about the delay,…", ["If I had known about the delay, I would have left later.", "If I had known about the delay, I'd have left later.", "If I had known about the delay, I would have set off later."], "Главная часть третьего условного.", ["would have + третья форма"], "В главной части третьего условного предложения используется would have + третья форма."],
+    ["prepositions.explain_to", "customer", "Complete the sentence in your own words, starting with: He explained...", "Он объяснил проблему клиенту очень спокойно. Начни: He explained…", ["He explained the problem to the customer very calmly.", "He explained the problem to the client very calmly.", "He explained the problem very calmly to the customer."], "Какой предлог вводит адресата?", ["explain to"], "Адресат при explain вводится предлогом to."],
+  ],
+  translate: [
+    ["modals.obligation", "faults", "Вы обязаны сообщить о поломке.", ["You must report the fault.", "You have to report the fault.", "You must report the breakdown.", "You have to report the breakdown.", "You are required to report the fault."], "Обязанность выражается модальным глаголом.", "Обязанность выражается must, have to или are required to."],
+    ["tenses.past_continuous", "phone", "Когда зазвонил телефон, я готовил ужин.", ["I was cooking dinner when the phone rang.", "I was making dinner when the phone rang.", "When the phone rang, I was cooking dinner.", "When the phone rang, I was making dinner."], "Длительное действие прервано коротким.", "Длительное действие выражается Past Continuous, короткое событие — Past Simple.", "A2"],
+    ["prepositions.explain_to", "system", "Он объяснил мне, как работает эта система.", ["He explained to me how the system works.", "He explained to me how this system works.", "He explained how the system works to me.", "He explained how this system works to me."], "Кому объяснили — адресат вводится предлогом.", "Адресат при explain вводится предлогом to: explained to me."],
+  ],
+};

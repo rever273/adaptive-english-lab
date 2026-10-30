@@ -1,0 +1,50 @@
+{
+  "schema_version": "exercise-v1",
+  "id": "6f1c2a10-5d0e-4b6a-8c11-0a1b2c3d4e07",
+  "revision": 1,
+  "status": "draft",
+  "target_skill": "questions.embedded_order",
+  "additional_skills": [],
+  "dimension": "correction",
+  "difficulty": "B2",
+  "context_level": "B2",
+  "topic": "transport",
+  "context_id": "fx-tram-stop",
+  "template_cluster": "fx-tpl-embedded-where",
+  "bank_role": "practice",
+  "prompt_en": "Find the part of the sentence that contains a mistake, or choose No mistake.",
+  "hints_ru": [
+    "Проверьте порядок слов после where."
+  ],
+  "explanation_ru": "Предложение верно: во вложенном вопросе используется прямой порядок слов (where the nearest tram stop is).",
+  "sources": [],
+  "provenance": {
+    "origin": "manual",
+    "model_tag": null,
+    "model_digest": null,
+    "prompt_version": "fixture-v1"
+  },
+  "rubric_version": "rubric-v1",
+  "type": "detect_error",
+  "payload": {
+    "sentence": "Could you tell me where the nearest tram stop is?",
+    "segments": [
+      {
+        "id": "s1",
+        "text": "Could you tell me "
+      },
+      {
+        "id": "s2",
+        "text": "where the nearest tram stop is"
+      },
+      {
+        "id": "s3",
+        "text": "?"
+      }
+    ],
+    "accepted_segment_ids": [],
+    "no_mistake": true,
+    "corrections": [],
+    "optional_correction": false
+  }
+}

@@ -1,0 +1,299 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "urn:english-lab:ai-output-v1",
+  "oneOf": [
+    {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "schema_version": {
+          "const": "triage-v1"
+        },
+        "needs_deep_review": {
+          "type": "boolean"
+        },
+        "reason": {
+          "enum": [
+            "open_answer",
+            "ambiguous",
+            "possible_error",
+            "no_issue",
+            "unsupported"
+          ]
+        },
+        "skill_candidates": {
+          "type": "array",
+          "items": {
+            "type": "string",
+            "minLength": 1
+          }
+        }
+      },
+      "required": [
+        "schema_version",
+        "needs_deep_review",
+        "reason",
+        "skill_candidates"
+      ]
+    },
+    {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "schema_version": {
+          "const": "analysis-v1"
+        },
+        "attempt_id": {
+          "type": "string",
+          "minLength": 1
+        },
+        "judgement": {
+          "enum": [
+            "acceptable",
+            "incorrect_candidate",
+            "ambiguous",
+            "abstain"
+          ]
+        },
+        "findings": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "additionalProperties": false,
+            "properties": {
+              "skill_id": {
+                "type": "string",
+                "minLength": 1
+              },
+              "kind": {
+                "enum": [
+                  "grammar",
+                  "style",
+                  "ambiguity"
+                ]
+              },
+              "start": {
+                "type": "integer",
+                "minimum": 0
+              },
+              "end": {
+                "type": "integer",
+                "minimum": 0
+              },
+              "suggestion": {
+                "type": "string",
+                "minLength": 1
+              },
+              "explanation_ru": {
+                "type": "string",
+                "minLength": 1
+              },
+              "confidence": {
+                "type": "number",
+                "minimum": 0,
+                "maximum": 1
+              }
+            },
+            "required": [
+              "skill_id",
+              "kind",
+              "start",
+              "end",
+              "suggestion",
+              "explanation_ru",
+              "confidence"
+            ]
+          }
+        },
+        "explanation_ru": {
+          "type": "string",
+          "minLength": 1
+        }
+      },
+      "required": [
+        "schema_version",
+        "attempt_id",
+        "judgement",
+        "findings",
+        "explanation_ru"
+      ]
+    },
+    {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "schema_version": {
+          "const": "vocabulary-v1"
+        },
+        "entry_id": {
+          "type": "string",
+          "minLength": 1
+        },
+        "translation_ru": {
+          "type": "string",
+          "minLength": 1
+        },
+        "part_of_speech": {
+          "type": "string",
+          "minLength": 1
+        },
+        "example_en": {
+          "type": "string",
+          "minLength": 1
+        },
+        "collocations": {
+          "type": "array",
+          "minItems": 1,
+          "items": {
+            "type": "string",
+            "minLength": 1
+          }
+        }
+      },
+      "required": [
+        "schema_version",
+        "entry_id",
+        "translation_ru",
+        "part_of_speech",
+        "example_en",
+        "collocations"
+      ]
+    },
+    {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "schema_version": {
+          "const": "tutor-v1"
+        },
+        "explanation_ru": {
+          "type": "string",
+          "minLength": 1
+        },
+        "examples_en": {
+          "type": "array",
+          "minItems": 0,
+          "maxItems": 3,
+          "items": {
+            "type": "string",
+            "minLength": 1
+          }
+        },
+        "uncertainty_note": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "schema_version",
+        "explanation_ru",
+        "examples_en",
+        "uncertainty_note"
+      ]
+    },
+    {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "schema_version": {
+          "const": "analysis-v2"
+        },
+        "attempt_id": {
+          "type": "string",
+          "minLength": 1
+        },
+        "judgement": {
+          "enum": [
+            "acceptable",
+            "incorrect_candidate",
+            "ambiguous",
+            "abstain"
+          ]
+        },
+        "findings": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "additionalProperties": false,
+            "properties": {
+              "skill_id": {
+                "type": "string",
+                "minLength": 1
+              },
+              "kind": {
+                "enum": [
+                  "grammar",
+                  "style",
+                  "ambiguity"
+                ]
+              },
+              "start": {
+                "type": "integer",
+                "minimum": 0
+              },
+              "end": {
+                "type": "integer",
+                "minimum": 0
+              },
+              "suggestion": {
+                "type": "string",
+                "minLength": 1
+              },
+              "explanation_ru": {
+                "type": "string",
+                "minLength": 1
+              },
+              "confidence": {
+                "type": "number",
+                "minimum": 0,
+                "maximum": 1
+              },
+              "original": {
+                "type": "string",
+                "minLength": 1
+              }
+            },
+            "required": [
+              "skill_id",
+              "kind",
+              "start",
+              "end",
+              "suggestion",
+              "explanation_ru",
+              "confidence",
+              "original"
+            ]
+          }
+        },
+        "explanation_ru": {
+          "type": "string",
+          "minLength": 1
+        },
+        "reason_code": {
+          "enum": [
+            "grammatical",
+            "dialect_or_style",
+            "grammar_violation",
+            "context_required",
+            "incomplete_input",
+            "insufficient_evidence"
+          ]
+        },
+        "missing_context": {
+          "type": [
+            "string",
+            "null"
+          ]
+        }
+      },
+      "required": [
+        "schema_version",
+        "attempt_id",
+        "judgement",
+        "findings",
+        "explanation_ru",
+        "reason_code",
+        "missing_context"
+      ]
+    }
+  ]
+}

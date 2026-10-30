@@ -1,0 +1,1358 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "urn:english-lab:exercise-v1",
+  "title": "Exercise version v1",
+  "oneOf": [
+    {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "schema_version": {
+          "const": "exercise-v1"
+        },
+        "id": {
+          "type": "string",
+          "minLength": 1
+        },
+        "revision": {
+          "type": "integer",
+          "minimum": 1
+        },
+        "status": {
+          "enum": [
+            "draft",
+            "validated",
+            "pending_review",
+            "approved",
+            "flagged",
+            "rejected"
+          ]
+        },
+        "target_skill": {
+          "type": "string",
+          "minLength": 1
+        },
+        "additional_skills": {
+          "type": "array",
+          "items": {
+            "type": "string",
+            "minLength": 1
+          },
+          "uniqueItems": true
+        },
+        "dimension": {
+          "enum": [
+            "recognition",
+            "correction",
+            "production"
+          ]
+        },
+        "difficulty": {
+          "enum": [
+            "A2",
+            "B1",
+            "B2",
+            "C1"
+          ]
+        },
+        "context_level": {
+          "enum": [
+            "B2",
+            "C1"
+          ]
+        },
+        "topic": {
+          "type": "string",
+          "minLength": 1
+        },
+        "context_id": {
+          "type": "string",
+          "minLength": 1
+        },
+        "template_cluster": {
+          "type": "string",
+          "minLength": 1
+        },
+        "bank_role": {
+          "enum": [
+            "practice",
+            "diagnostic",
+            "heldout"
+          ]
+        },
+        "prompt_en": {
+          "type": "string",
+          "minLength": 1
+        },
+        "hints_ru": {
+          "type": "array",
+          "items": {
+            "type": "string",
+            "minLength": 1
+          }
+        },
+        "explanation_ru": {
+          "type": "string",
+          "minLength": 1
+        },
+        "sources": {
+          "type": "array",
+          "items": {
+            "type": "string",
+            "minLength": 1
+          }
+        },
+        "provenance": {
+          "type": "object",
+          "additionalProperties": false,
+          "properties": {
+            "origin": {
+              "enum": [
+                "qwen",
+                "agent",
+                "manual"
+              ]
+            },
+            "model_tag": {
+              "type": [
+                "string",
+                "null"
+              ]
+            },
+            "model_digest": {
+              "type": [
+                "string",
+                "null"
+              ]
+            },
+            "prompt_version": {
+              "type": "string",
+              "minLength": 1
+            }
+          },
+          "required": [
+            "origin",
+            "model_tag",
+            "model_digest",
+            "prompt_version"
+          ]
+        },
+        "rubric_version": {
+          "type": "string",
+          "minLength": 1
+        },
+        "type": {
+          "const": "choose_form"
+        },
+        "payload": {
+          "type": "object",
+          "additionalProperties": false,
+          "properties": {
+            "options": {
+              "type": "array",
+              "minItems": 2,
+              "items": {
+                "type": "object",
+                "additionalProperties": false,
+                "properties": {
+                  "id": {
+                    "type": "string",
+                    "minLength": 1
+                  },
+                  "text": {
+                    "type": "string",
+                    "minLength": 1
+                  }
+                },
+                "required": [
+                  "id",
+                  "text"
+                ]
+              }
+            },
+            "accepted_option_ids": {
+              "type": "array",
+              "minItems": 1,
+              "items": {
+                "type": "string",
+                "minLength": 1
+              }
+            },
+            "multiple": {
+              "type": "boolean"
+            }
+          },
+          "required": [
+            "options",
+            "accepted_option_ids",
+            "multiple"
+          ]
+        }
+      },
+      "required": [
+        "schema_version",
+        "id",
+        "revision",
+        "status",
+        "target_skill",
+        "additional_skills",
+        "dimension",
+        "difficulty",
+        "context_level",
+        "topic",
+        "context_id",
+        "template_cluster",
+        "bank_role",
+        "prompt_en",
+        "hints_ru",
+        "explanation_ru",
+        "sources",
+        "provenance",
+        "rubric_version",
+        "type",
+        "payload"
+      ]
+    },
+    {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "schema_version": {
+          "const": "exercise-v1"
+        },
+        "id": {
+          "type": "string",
+          "minLength": 1
+        },
+        "revision": {
+          "type": "integer",
+          "minimum": 1
+        },
+        "status": {
+          "enum": [
+            "draft",
+            "validated",
+            "pending_review",
+            "approved",
+            "flagged",
+            "rejected"
+          ]
+        },
+        "target_skill": {
+          "type": "string",
+          "minLength": 1
+        },
+        "additional_skills": {
+          "type": "array",
+          "items": {
+            "type": "string",
+            "minLength": 1
+          },
+          "uniqueItems": true
+        },
+        "dimension": {
+          "enum": [
+            "recognition",
+            "correction",
+            "production"
+          ]
+        },
+        "difficulty": {
+          "enum": [
+            "A2",
+            "B1",
+            "B2",
+            "C1"
+          ]
+        },
+        "context_level": {
+          "enum": [
+            "B2",
+            "C1"
+          ]
+        },
+        "topic": {
+          "type": "string",
+          "minLength": 1
+        },
+        "context_id": {
+          "type": "string",
+          "minLength": 1
+        },
+        "template_cluster": {
+          "type": "string",
+          "minLength": 1
+        },
+        "bank_role": {
+          "enum": [
+            "practice",
+            "diagnostic",
+            "heldout"
+          ]
+        },
+        "prompt_en": {
+          "type": "string",
+          "minLength": 1
+        },
+        "hints_ru": {
+          "type": "array",
+          "items": {
+            "type": "string",
+            "minLength": 1
+          }
+        },
+        "explanation_ru": {
+          "type": "string",
+          "minLength": 1
+        },
+        "sources": {
+          "type": "array",
+          "items": {
+            "type": "string",
+            "minLength": 1
+          }
+        },
+        "provenance": {
+          "type": "object",
+          "additionalProperties": false,
+          "properties": {
+            "origin": {
+              "enum": [
+                "qwen",
+                "agent",
+                "manual"
+              ]
+            },
+            "model_tag": {
+              "type": [
+                "string",
+                "null"
+              ]
+            },
+            "model_digest": {
+              "type": [
+                "string",
+                "null"
+              ]
+            },
+            "prompt_version": {
+              "type": "string",
+              "minLength": 1
+            }
+          },
+          "required": [
+            "origin",
+            "model_tag",
+            "model_digest",
+            "prompt_version"
+          ]
+        },
+        "rubric_version": {
+          "type": "string",
+          "minLength": 1
+        },
+        "type": {
+          "const": "choose_missing_fragment"
+        },
+        "payload": {
+          "type": "object",
+          "additionalProperties": false,
+          "properties": {
+            "options": {
+              "type": "array",
+              "minItems": 2,
+              "items": {
+                "type": "object",
+                "additionalProperties": false,
+                "properties": {
+                  "id": {
+                    "type": "string",
+                    "minLength": 1
+                  },
+                  "text": {
+                    "type": "string",
+                    "minLength": 1
+                  }
+                },
+                "required": [
+                  "id",
+                  "text"
+                ]
+              }
+            },
+            "accepted_option_ids": {
+              "type": "array",
+              "minItems": 1,
+              "items": {
+                "type": "string",
+                "minLength": 1
+              }
+            },
+            "multiple": {
+              "type": "boolean"
+            }
+          },
+          "required": [
+            "options",
+            "accepted_option_ids",
+            "multiple"
+          ]
+        }
+      },
+      "required": [
+        "schema_version",
+        "id",
+        "revision",
+        "status",
+        "target_skill",
+        "additional_skills",
+        "dimension",
+        "difficulty",
+        "context_level",
+        "topic",
+        "context_id",
+        "template_cluster",
+        "bank_role",
+        "prompt_en",
+        "hints_ru",
+        "explanation_ru",
+        "sources",
+        "provenance",
+        "rubric_version",
+        "type",
+        "payload"
+      ]
+    },
+    {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "schema_version": {
+          "const": "exercise-v1"
+        },
+        "id": {
+          "type": "string",
+          "minLength": 1
+        },
+        "revision": {
+          "type": "integer",
+          "minimum": 1
+        },
+        "status": {
+          "enum": [
+            "draft",
+            "validated",
+            "pending_review",
+            "approved",
+            "flagged",
+            "rejected"
+          ]
+        },
+        "target_skill": {
+          "type": "string",
+          "minLength": 1
+        },
+        "additional_skills": {
+          "type": "array",
+          "items": {
+            "type": "string",
+            "minLength": 1
+          },
+          "uniqueItems": true
+        },
+        "dimension": {
+          "enum": [
+            "recognition",
+            "correction",
+            "production"
+          ]
+        },
+        "difficulty": {
+          "enum": [
+            "A2",
+            "B1",
+            "B2",
+            "C1"
+          ]
+        },
+        "context_level": {
+          "enum": [
+            "B2",
+            "C1"
+          ]
+        },
+        "topic": {
+          "type": "string",
+          "minLength": 1
+        },
+        "context_id": {
+          "type": "string",
+          "minLength": 1
+        },
+        "template_cluster": {
+          "type": "string",
+          "minLength": 1
+        },
+        "bank_role": {
+          "enum": [
+            "practice",
+            "diagnostic",
+            "heldout"
+          ]
+        },
+        "prompt_en": {
+          "type": "string",
+          "minLength": 1
+        },
+        "hints_ru": {
+          "type": "array",
+          "items": {
+            "type": "string",
+            "minLength": 1
+          }
+        },
+        "explanation_ru": {
+          "type": "string",
+          "minLength": 1
+        },
+        "sources": {
+          "type": "array",
+          "items": {
+            "type": "string",
+            "minLength": 1
+          }
+        },
+        "provenance": {
+          "type": "object",
+          "additionalProperties": false,
+          "properties": {
+            "origin": {
+              "enum": [
+                "qwen",
+                "agent",
+                "manual"
+              ]
+            },
+            "model_tag": {
+              "type": [
+                "string",
+                "null"
+              ]
+            },
+            "model_digest": {
+              "type": [
+                "string",
+                "null"
+              ]
+            },
+            "prompt_version": {
+              "type": "string",
+              "minLength": 1
+            }
+          },
+          "required": [
+            "origin",
+            "model_tag",
+            "model_digest",
+            "prompt_version"
+          ]
+        },
+        "rubric_version": {
+          "type": "string",
+          "minLength": 1
+        },
+        "type": {
+          "const": "detect_error"
+        },
+        "payload": {
+          "type": "object",
+          "additionalProperties": false,
+          "properties": {
+            "sentence": {
+              "type": "string",
+              "minLength": 1
+            },
+            "segments": {
+              "type": "array",
+              "minItems": 1,
+              "items": {
+                "type": "object",
+                "additionalProperties": false,
+                "properties": {
+                  "id": {
+                    "type": "string",
+                    "minLength": 1
+                  },
+                  "text": {
+                    "type": "string",
+                    "minLength": 1
+                  }
+                },
+                "required": [
+                  "id",
+                  "text"
+                ]
+              }
+            },
+            "accepted_segment_ids": {
+              "type": "array",
+              "items": {
+                "type": "string",
+                "minLength": 1
+              }
+            },
+            "no_mistake": {
+              "type": "boolean"
+            },
+            "corrections": {
+              "type": "array",
+              "items": {
+                "type": "string",
+                "minLength": 1
+              }
+            },
+            "optional_correction": {
+              "type": "boolean"
+            }
+          },
+          "required": [
+            "sentence",
+            "segments",
+            "accepted_segment_ids",
+            "no_mistake",
+            "corrections",
+            "optional_correction"
+          ]
+        }
+      },
+      "required": [
+        "schema_version",
+        "id",
+        "revision",
+        "status",
+        "target_skill",
+        "additional_skills",
+        "dimension",
+        "difficulty",
+        "context_level",
+        "topic",
+        "context_id",
+        "template_cluster",
+        "bank_role",
+        "prompt_en",
+        "hints_ru",
+        "explanation_ru",
+        "sources",
+        "provenance",
+        "rubric_version",
+        "type",
+        "payload"
+      ]
+    },
+    {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "schema_version": {
+          "const": "exercise-v1"
+        },
+        "id": {
+          "type": "string",
+          "minLength": 1
+        },
+        "revision": {
+          "type": "integer",
+          "minimum": 1
+        },
+        "status": {
+          "enum": [
+            "draft",
+            "validated",
+            "pending_review",
+            "approved",
+            "flagged",
+            "rejected"
+          ]
+        },
+        "target_skill": {
+          "type": "string",
+          "minLength": 1
+        },
+        "additional_skills": {
+          "type": "array",
+          "items": {
+            "type": "string",
+            "minLength": 1
+          },
+          "uniqueItems": true
+        },
+        "dimension": {
+          "enum": [
+            "recognition",
+            "correction",
+            "production"
+          ]
+        },
+        "difficulty": {
+          "enum": [
+            "A2",
+            "B1",
+            "B2",
+            "C1"
+          ]
+        },
+        "context_level": {
+          "enum": [
+            "B2",
+            "C1"
+          ]
+        },
+        "topic": {
+          "type": "string",
+          "minLength": 1
+        },
+        "context_id": {
+          "type": "string",
+          "minLength": 1
+        },
+        "template_cluster": {
+          "type": "string",
+          "minLength": 1
+        },
+        "bank_role": {
+          "enum": [
+            "practice",
+            "diagnostic",
+            "heldout"
+          ]
+        },
+        "prompt_en": {
+          "type": "string",
+          "minLength": 1
+        },
+        "hints_ru": {
+          "type": "array",
+          "items": {
+            "type": "string",
+            "minLength": 1
+          }
+        },
+        "explanation_ru": {
+          "type": "string",
+          "minLength": 1
+        },
+        "sources": {
+          "type": "array",
+          "items": {
+            "type": "string",
+            "minLength": 1
+          }
+        },
+        "provenance": {
+          "type": "object",
+          "additionalProperties": false,
+          "properties": {
+            "origin": {
+              "enum": [
+                "qwen",
+                "agent",
+                "manual"
+              ]
+            },
+            "model_tag": {
+              "type": [
+                "string",
+                "null"
+              ]
+            },
+            "model_digest": {
+              "type": [
+                "string",
+                "null"
+              ]
+            },
+            "prompt_version": {
+              "type": "string",
+              "minLength": 1
+            }
+          },
+          "required": [
+            "origin",
+            "model_tag",
+            "model_digest",
+            "prompt_version"
+          ]
+        },
+        "rubric_version": {
+          "type": "string",
+          "minLength": 1
+        },
+        "type": {
+          "const": "guided_short_answer"
+        },
+        "payload": {
+          "type": "object",
+          "additionalProperties": false,
+          "properties": {
+            "cue_ru": {
+              "type": "string",
+              "minLength": 1
+            },
+            "max_words": {
+              "type": "integer",
+              "minimum": 1,
+              "maximum": 40
+            },
+            "accepted_answers": {
+              "type": "array",
+              "items": {
+                "type": "string",
+                "minLength": 1
+              }
+            },
+            "rubric": {
+              "type": "object",
+              "additionalProperties": false,
+              "properties": {
+                "meaning_ru": {
+                  "type": "string",
+                  "minLength": 1
+                },
+                "target_markers": {
+                  "type": "array",
+                  "minItems": 1,
+                  "items": {
+                    "type": "string",
+                    "minLength": 1
+                  }
+                },
+                "acceptable_variation_ru": {
+                  "type": "string",
+                  "minLength": 1
+                },
+                "reject_conditions_ru": {
+                  "type": "string",
+                  "minLength": 1
+                }
+              },
+              "required": [
+                "meaning_ru",
+                "target_markers",
+                "acceptable_variation_ru",
+                "reject_conditions_ru"
+              ]
+            },
+            "allow_voice": {
+              "type": "boolean"
+            }
+          },
+          "required": [
+            "cue_ru",
+            "max_words",
+            "accepted_answers",
+            "rubric",
+            "allow_voice"
+          ]
+        }
+      },
+      "required": [
+        "schema_version",
+        "id",
+        "revision",
+        "status",
+        "target_skill",
+        "additional_skills",
+        "dimension",
+        "difficulty",
+        "context_level",
+        "topic",
+        "context_id",
+        "template_cluster",
+        "bank_role",
+        "prompt_en",
+        "hints_ru",
+        "explanation_ru",
+        "sources",
+        "provenance",
+        "rubric_version",
+        "type",
+        "payload"
+      ]
+    },
+    {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "schema_version": {
+          "const": "exercise-v1"
+        },
+        "id": {
+          "type": "string",
+          "minLength": 1
+        },
+        "revision": {
+          "type": "integer",
+          "minimum": 1
+        },
+        "status": {
+          "enum": [
+            "draft",
+            "validated",
+            "pending_review",
+            "approved",
+            "flagged",
+            "rejected"
+          ]
+        },
+        "target_skill": {
+          "type": "string",
+          "minLength": 1
+        },
+        "additional_skills": {
+          "type": "array",
+          "items": {
+            "type": "string",
+            "minLength": 1
+          },
+          "uniqueItems": true
+        },
+        "dimension": {
+          "enum": [
+            "recognition",
+            "correction",
+            "production"
+          ]
+        },
+        "difficulty": {
+          "enum": [
+            "A2",
+            "B1",
+            "B2",
+            "C1"
+          ]
+        },
+        "context_level": {
+          "enum": [
+            "B2",
+            "C1"
+          ]
+        },
+        "topic": {
+          "type": "string",
+          "minLength": 1
+        },
+        "context_id": {
+          "type": "string",
+          "minLength": 1
+        },
+        "template_cluster": {
+          "type": "string",
+          "minLength": 1
+        },
+        "bank_role": {
+          "enum": [
+            "practice",
+            "diagnostic",
+            "heldout"
+          ]
+        },
+        "prompt_en": {
+          "type": "string",
+          "minLength": 1
+        },
+        "hints_ru": {
+          "type": "array",
+          "items": {
+            "type": "string",
+            "minLength": 1
+          }
+        },
+        "explanation_ru": {
+          "type": "string",
+          "minLength": 1
+        },
+        "sources": {
+          "type": "array",
+          "items": {
+            "type": "string",
+            "minLength": 1
+          }
+        },
+        "provenance": {
+          "type": "object",
+          "additionalProperties": false,
+          "properties": {
+            "origin": {
+              "enum": [
+                "qwen",
+                "agent",
+                "manual"
+              ]
+            },
+            "model_tag": {
+              "type": [
+                "string",
+                "null"
+              ]
+            },
+            "model_digest": {
+              "type": [
+                "string",
+                "null"
+              ]
+            },
+            "prompt_version": {
+              "type": "string",
+              "minLength": 1
+            }
+          },
+          "required": [
+            "origin",
+            "model_tag",
+            "model_digest",
+            "prompt_version"
+          ]
+        },
+        "rubric_version": {
+          "type": "string",
+          "minLength": 1
+        },
+        "type": {
+          "const": "russian_to_english_short"
+        },
+        "payload": {
+          "type": "object",
+          "additionalProperties": false,
+          "properties": {
+            "cue_ru": {
+              "type": "string",
+              "minLength": 1
+            },
+            "max_words": {
+              "type": "integer",
+              "minimum": 1,
+              "maximum": 40
+            },
+            "accepted_answers": {
+              "type": "array",
+              "items": {
+                "type": "string",
+                "minLength": 1
+              }
+            },
+            "rubric": {
+              "type": "object",
+              "additionalProperties": false,
+              "properties": {
+                "meaning_ru": {
+                  "type": "string",
+                  "minLength": 1
+                },
+                "target_markers": {
+                  "type": "array",
+                  "minItems": 1,
+                  "items": {
+                    "type": "string",
+                    "minLength": 1
+                  }
+                },
+                "acceptable_variation_ru": {
+                  "type": "string",
+                  "minLength": 1
+                },
+                "reject_conditions_ru": {
+                  "type": "string",
+                  "minLength": 1
+                }
+              },
+              "required": [
+                "meaning_ru",
+                "target_markers",
+                "acceptable_variation_ru",
+                "reject_conditions_ru"
+              ]
+            },
+            "allow_voice": {
+              "type": "boolean"
+            }
+          },
+          "required": [
+            "cue_ru",
+            "max_words",
+            "accepted_answers",
+            "rubric",
+            "allow_voice"
+          ]
+        }
+      },
+      "required": [
+        "schema_version",
+        "id",
+        "revision",
+        "status",
+        "target_skill",
+        "additional_skills",
+        "dimension",
+        "difficulty",
+        "context_level",
+        "topic",
+        "context_id",
+        "template_cluster",
+        "bank_role",
+        "prompt_en",
+        "hints_ru",
+        "explanation_ru",
+        "sources",
+        "provenance",
+        "rubric_version",
+        "type",
+        "payload"
+      ]
+    },
+    {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "schema_version": {
+          "const": "exercise-v1"
+        },
+        "id": {
+          "type": "string",
+          "minLength": 1
+        },
+        "revision": {
+          "type": "integer",
+          "minimum": 1
+        },
+        "status": {
+          "enum": [
+            "draft",
+            "validated",
+            "pending_review",
+            "approved",
+            "flagged",
+            "rejected"
+          ]
+        },
+        "target_skill": {
+          "type": "string",
+          "minLength": 1
+        },
+        "additional_skills": {
+          "type": "array",
+          "items": {
+            "type": "string",
+            "minLength": 1
+          },
+          "uniqueItems": true
+        },
+        "dimension": {
+          "enum": [
+            "recognition",
+            "correction",
+            "production"
+          ]
+        },
+        "difficulty": {
+          "enum": [
+            "A2",
+            "B1",
+            "B2",
+            "C1"
+          ]
+        },
+        "context_level": {
+          "enum": [
+            "B2",
+            "C1"
+          ]
+        },
+        "topic": {
+          "type": "string",
+          "minLength": 1
+        },
+        "context_id": {
+          "type": "string",
+          "minLength": 1
+        },
+        "template_cluster": {
+          "type": "string",
+          "minLength": 1
+        },
+        "bank_role": {
+          "enum": [
+            "practice",
+            "diagnostic",
+            "heldout"
+          ]
+        },
+        "prompt_en": {
+          "type": "string",
+          "minLength": 1
+        },
+        "hints_ru": {
+          "type": "array",
+          "items": {
+            "type": "string",
+            "minLength": 1
+          }
+        },
+        "explanation_ru": {
+          "type": "string",
+          "minLength": 1
+        },
+        "sources": {
+          "type": "array",
+          "items": {
+            "type": "string",
+            "minLength": 1
+          }
+        },
+        "provenance": {
+          "type": "object",
+          "additionalProperties": false,
+          "properties": {
+            "origin": {
+              "enum": [
+                "qwen",
+                "agent",
+                "manual"
+              ]
+            },
+            "model_tag": {
+              "type": [
+                "string",
+                "null"
+              ]
+            },
+            "model_digest": {
+              "type": [
+                "string",
+                "null"
+              ]
+            },
+            "prompt_version": {
+              "type": "string",
+              "minLength": 1
+            }
+          },
+          "required": [
+            "origin",
+            "model_tag",
+            "model_digest",
+            "prompt_version"
+          ]
+        },
+        "rubric_version": {
+          "type": "string",
+          "minLength": 1
+        },
+        "type": {
+          "const": "context_reading"
+        },
+        "payload": {
+          "type": "object",
+          "additionalProperties": false,
+          "properties": {
+            "paragraphs": {
+              "type": "array",
+              "minItems": 2,
+              "maxItems": 3,
+              "items": {
+                "type": "string",
+                "minLength": 1
+              }
+            },
+            "questions": {
+              "type": "array",
+              "minItems": 2,
+              "maxItems": 3,
+              "items": {
+                "type": "object",
+                "additionalProperties": false,
+                "properties": {
+                  "id": {
+                    "type": "string",
+                    "minLength": 1
+                  },
+                  "prompt": {
+                    "type": "string",
+                    "minLength": 1
+                  },
+                  "options": {
+                    "type": "array",
+                    "minItems": 2,
+                    "items": {
+                      "type": "object",
+                      "additionalProperties": false,
+                      "properties": {
+                        "id": {
+                          "type": "string",
+                          "minLength": 1
+                        },
+                        "text": {
+                          "type": "string",
+                          "minLength": 1
+                        }
+                      },
+                      "required": [
+                        "id",
+                        "text"
+                      ]
+                    }
+                  },
+                  "accepted_option_ids": {
+                    "type": "array",
+                    "minItems": 1,
+                    "items": {
+                      "type": "string",
+                      "minLength": 1
+                    }
+                  },
+                  "target_skill": {
+                    "type": "string",
+                    "minLength": 1
+                  }
+                },
+                "required": [
+                  "id",
+                  "prompt",
+                  "options",
+                  "accepted_option_ids",
+                  "target_skill"
+                ]
+              }
+            }
+          },
+          "required": [
+            "paragraphs",
+            "questions"
+          ]
+        }
+      },
+      "required": [
+        "schema_version",
+        "id",
+        "revision",
+        "status",
+        "target_skill",
+        "additional_skills",
+        "dimension",
+        "difficulty",
+        "context_level",
+        "topic",
+        "context_id",
+        "template_cluster",
+        "bank_role",
+        "prompt_en",
+        "hints_ru",
+        "explanation_ru",
+        "sources",
+        "provenance",
+        "rubric_version",
+        "type",
+        "payload"
+      ]
+    }
+  ]
+}

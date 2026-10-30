@@ -1,0 +1,39 @@
+// L09 Australia and local services: definite article, time prepositions, non-defining relatives, deduction modals, en-AU / standard dialect variants.
+export const L09 = {
+  form: [
+    ["articles.definite", "meeting", "I'll meet you at ___ town hall at ten.", ["the", "a", "an"], 0, "Речь об известном здании в вашем городе.", "Когда собеседники знают, о каком именно здании идёт речь, используется the: the town hall.", "A2"],
+    ["modals.deduction", "phone", "She isn't answering her phone. She ___ be in a meeting.", ["must", "can", "need"], 0, "Вы делаете уверенный вывод по фактам.", "Для уверенного вывода по фактам используется must + инфинитив."],
+    ["register.dialect_variants", "camping", "___ you got a spare torch for the camping trip?", ["Have", "Do", "Are"], 0, "Австралийский и британский вариант вопроса о наличии.", "В австралийском и британском английском естественна форма Have you got…?; Do you have…? тоже верно, но здесь это не среди вариантов."],
+    ["relatives.nondefining", "doctor", "My doctor, ___ practice is in Parramatta, is very helpful.", ["whose", "who", "which"], 0, "Нужно слово со значением «чья».", "Для принадлежности в придаточном используется whose: whose practice."],
+    ["modals.deduction", "bus", "That ___ be the right bus to the city; the sign says Airport only.", ["can't", "must", "should"], 0, "Вывод отрицательный: факты не сходятся.", "Для уверенного отрицательного вывода используется can't + инфинитив.", "B2"],
+    ["articles.definite", "directions", "Is this ___ quickest way to the harbour?", ["the", "a", "an"], 0, "Превосходная степень всегда определяет предмет.", "Перед прилагательным в превосходной степени (quickest) используется the."],
+    ["articles.definite", "pubs", "This is ___ oldest pub in the town.", ["the", "a", "an"], 0, "Превосходная степень всегда определяет предмет.", "Перед прилагательным в превосходной степени (oldest) используется the.", "A2"],
+    ["modals.deduction", "shops", "The streets are empty, so the shops ___ be closed.", ["must", "can", "need"], 0, "Вы делаете уверенный вывод по фактам.", "Для уверенного вывода по фактам используется must + инфинитив."],
+  ],
+  fragment: [
+    ["prepositions.time_at_on_in", "clinic", "The clinic is closed ___ Sundays.", ["on", "at", "in"], 0, "С днями недели используется один предлог.", "С днями недели используется on: on Sundays.", "A2"],
+    ["prepositions.time_at_on_in", "ferry", "The ferry leaves ___ half past five.", ["at", "on", "in"], 0, "Точное время на часах.", "С точным временем используется at: at half past five.", "A2"],
+    ["prepositions.time_at_on_in", "festival", "The festival takes place ___ March every year.", ["in", "on", "at"], 0, "С названиями месяцев используется один предлог.", "С названиями месяцев и более длинными периодами используется in: in March."],
+    ["relatives.nondefining", "capital", "Brisbane, ___ is the capital of Queensland, has a mild winter.", ["which", "that", "who"], 0, "Дополнительная информация о городе, выделенная запятыми.", "В неопределительных придаточных (с запятыми) для предметов используется which; that здесь не употребляется."],
+    ["register.dialect_variants", "shops", "She's just ___ to the shops for milk.", ["gone", "went", "go"], 0, "Результат важен сейчас, использована форма с just.", "В австралийском и британском английском she's just gone to the shops — естественная форма Present Perfect.", "B1"],
+    ["modals.deduction", "car", "He can't ___ at work; his car is outside the house.", ["be", "been", "being"], 0, "После can't в выводе стоит инфинитив.", "После can't в значении уверенного отрицательного вывода используется инфинитив: can't be.", "B2"],
+  ],
+  detect: [
+    ["articles.definite", "desk", ["Please hand it in at ", "a", " front desk on the ground floor."], 1, ["Please hand it in at the front desk on the ground floor."], "Известно, о какой стойке идёт речь.", "Конкретная, известная стойка требует определённого артикля: the front desk."],
+    ["prepositions.time_at_on_in", "markets", ["The markets open ", "in", " Saturday mornings."], 1, ["The markets open on Saturday mornings."], "С днями недели используется другой предлог.", "С днями недели и их частями используется on: on Saturday mornings."],
+    ["relatives.nondefining", "post", ["My neighbour, ", "that", " works at the post office, is retiring."], 1, ["My neighbour, who works at the post office, is retiring."], "После запятой that не употребляется.", "В неопределительных придаточных для человека используется who, а не that."],
+    ["modals.deduction", "work", ["He has been working all day, so he ", "must to be", " tired."], 1, ["He has been working all day, so he must be tired."], "Нужен ли to после must?", "После must инфинитив используется без to: must be."],
+    ["register.dialect_variants", "cafe", ["We popped into the chemist and then had a cuppa at the cafe."], null, [], "Проверьте, нет ли здесь настоящей ошибки.", "Предложение верно: popped into the chemist и cuppa — естественные австралийские и британские выражения."],
+    ["register.dialect_variants", "camping", ["Have you got a torch I could borrow for the camping trip?"], null, [], "Проверьте форму вопроса.", "Предложение верно: Have you got…? и torch — нормальный австралийский и британский вариант."],
+  ],
+  guided: [
+    ["prepositions.time_at_on_in", "meeting", "Complete the sentence in your own words, starting with: The meeting is...", "Собрание назначено на понедельник в девять утра. Начни: The meeting is…", ["The meeting is on Monday at nine in the morning.", "The meeting is on Monday at 9 a.m.", "The meeting is on Monday at nine o'clock in the morning.", "The meeting is scheduled for Monday at nine in the morning."], "Какие предлоги нужны для дня и точного времени?", ["on + день", "at + время"], "С днём недели используется on, с точным временем — at, с частью суток — in the morning."],
+    ["relatives.nondefining", "sister", "Complete the sentence in your own words, starting with: My sister, who...", "Моя сестра, которая живёт в Перте, приезжает в июне. Начни: My sister, who…", ["My sister, who lives in Perth, is coming in June.", "My sister, who lives in Perth, is visiting in June.", "My sister, who lives in Perth, is arriving in June.", "My sister, who lives in Perth, is coming to visit in June."], "Придаточное выделяется запятыми.", ["who lives in Perth"], "Неопределительное придаточное с who выделяется запятыми и добавляет информацию о человеке."],
+    ["modals.deduction", "work", "Complete the sentence in your own words, starting with: She must...", "Она, должно быть, очень устала после долгого дня. Начни: She must…", ["She must be very tired after such a long day.", "She must be very tired after a long day.", "She must be really tired after such a long day.", "She must be exhausted after such a long day."], "После must идёт инфинитив без to.", ["must + be"], "Уверенный вывод выражается must + инфинитив без to."],
+  ],
+  translate: [
+    ["articles.definite", "chemist", "Где ближайшая аптека?", ["Where is the nearest chemist?", "Where is the nearest pharmacy?", "Where's the nearest chemist?", "Where's the nearest pharmacy?"], "Превосходная степень требует артикля the.", "Перед прилагательным в превосходной степени (nearest) используется the.", "A2"],
+    ["register.dialect_variants", "torch", "У вас есть запасной фонарик?", ["Have you got a spare torch?", "Do you have a spare torch?"], "Допустимы оба стандартных варианта вопроса.", "В австралийском английском верны Have you got…? и Do you have…?; для фонарика обычно используется torch."],
+    ["modals.deduction", "home", "Он, наверное, дома: свет горит.", ["He must be home; the lights are on.", "He must be at home; the lights are on.", "He must be home because the lights are on.", "He must be at home because the lights are on."], "Уверенный вывод по фактам.", "Для уверенного вывода по фактам используется must + инфинитив."],
+  ],
+};
