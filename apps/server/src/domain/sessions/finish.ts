@@ -29,7 +29,7 @@ export function summarize(db: Db, sessionId: string, status: "completed" | "ende
     const latest = db.prepare("SELECT verdict FROM assessment_revisions WHERE attempt_id = ? ORDER BY sequence DESC LIMIT 1").get(latestAttempt.id) as { verdict: string };
     if (latest.verdict === "pending" || latest.verdict === "ambiguous") pendingAnalysis++;
     // the local AI check of this answer is still queued/running: nothing has been produced for it yet (a failed or finished job is not waiting)
-    if (latest.verdict === "pending" && AI_CHECK_ACTIVE.has((db.prepare("SELECT state FROM jobs WHERE idempotency_key = ?").get(`free_text_analysis:${latestAttempt.id}`) as { state: string } | undefined)?.state ?? "")) aiWaiting++;
+    if ((latest.verdict === "pending" || latest.verdict === "ambiguous") && AI_CHECK_ACTIVE.has((db.prepare("SELECT state FROM jobs WHERE idempotency_key = ?").get(`free_text_analysis:${latestAttempt.id}`) as { state: string } | undefined)?.state ?? "")) aiWaiting++;
     const firstAssessment = db.prepare("SELECT verdict, confirmation FROM assessment_revisions WHERE attempt_id = ? ORDER BY sequence DESC LIMIT 1").get(first.id) as { verdict: string; confirmation: string };
     if (first.hints > 0 || first.seen > 0) counts.assisted++;
     else if (firstAssessment.verdict === "correct" && firstAssessment.confirmation === "confirmed") {

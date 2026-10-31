@@ -1,3 +1,4 @@
+import { leaseHoldsGpu } from "../domain/sessions/microphone.js";
 import type { Db } from "../db/open.js";
 import {
   completeJob,
@@ -137,7 +138,8 @@ export class GpuScheduler {
 
   private practiceLeaseLive(): boolean {
     const live = this.db.prepare("SELECT session_id AS id FROM practice_leases WHERE expires_at > ?").all(iso(this.clock.now())) as Array<{ id: string }>;
-    return live.some((l) => !this.voiceDone.has(l.id));
+    // released explicitly by the client (voiceDone) or, after a restart, derived from the database: no voice-capable exercise left
+    return live.some((l) => !this.voiceDone.has(l.id) && leaseHoldsGpu(this.db, l.id));
   }
   practiceActive(): boolean {
     return this.practiceGrant || this.practiceLeaseLive();

@@ -7,6 +7,12 @@ import { chromium, type Browser, type Page } from "playwright-core";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import { freePort, makeScratchRoot, projectRoot } from "../../integration/helpers.js";
 
+
+/** TASK_021: a confirmed correct answer advances by itself after ~600 ms, so the Continue button may already be gone. */
+async function proceed(page: Page): Promise<void> {
+  await page.getByTestId("continue").click({ timeout: 2500 }).catch(() => undefined);
+}
+
 const T = { timeout: 20_000 };
 const SHOTS = path.join(projectRoot, "documentation", "spec", "evidence", "task-014", "screenshots");
 let scratch: ReturnType<typeof makeScratchRoot>;
@@ -89,7 +95,7 @@ describe("analytics in a browser", () => {
       if (verdict === "correct") right++;
       else wrong++;
       answered++;
-      await page.getByTestId("continue").click();
+      await proceed(page);
       await page.waitForTimeout(300);
     }
     expect(answered).toBe(4);

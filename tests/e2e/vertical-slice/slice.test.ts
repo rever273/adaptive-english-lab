@@ -9,6 +9,12 @@ import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import { freePort, makeScratchRoot, projectRoot } from "../../integration/helpers.js";
 
 
+
+/** TASK_021: a confirmed correct answer advances by itself after ~600 ms, so the Continue button may already be gone. */
+async function proceed(page: Page): Promise<void> {
+  await page.getByTestId("continue").click({ timeout: 2500 }).catch(() => undefined);
+}
+
 // vitest's expect has no Playwright matchers: small polling helpers instead (15 s each).
 const T = { timeout: 15_000 };
 const has = (l: Locator, sub: string) => expect.poll(() => l.innerText(), T).toContain(sub);
@@ -71,8 +77,8 @@ afterAll(async () => {
 
 /** What a learner would do, taken from the stored exercise behind the open slot (the harness knows the answers; the UI does not). */
 async function openSlot(): Promise<{ slotId: string; type: string; content: any; questionId: string | null; ordinal: number } | null> {
-  const cur = (await page.evaluate(async () => (await fetch("/api/v1/sessions/current")).json())) as { session: { slots: Array<{ slotId: string; state: string; ordinal: number }> } };
-  const s = cur.session.slots.find((x) => x.state !== "skipped" && x.state !== "continued");
+  const cur = (await page.evaluate(async () => (await fetch("/api/v1/sessions/current")).json())) as { session: { slots: Array<{ slotId: string; state: string; ordinal: number }> } | null };
+  const s = cur.session?.slots.find((x) => x.state !== "skipped" && x.state !== "continued");
   if (!s) return null;
   const row = q1<{ type: string; c: string; q: string | null }>("SELECT er.type AS type, er.content_json AS c, ss.question_id AS q FROM session_slots ss JOIN exercise_revisions er ON er.id = ss.exercise_revision_id WHERE ss.id = ?", s.slotId);
   return { slotId: s.slotId, type: row.type, content: JSON.parse(row.c), questionId: row.q, ordinal: s.ordinal };
@@ -149,7 +155,7 @@ describe("early UX checkpoint (non-release vertical slice) - real browser, real 
     expect(q1<{ verdict: string; confirmation: string; source: string }>("SELECT verdict, confirmation, source FROM assessment_revisions")).toEqual({ verdict: "correct", confirmation: "confirmed", source: "deterministic" });
     // answer sentences were committed to the ledger only when the feedback was sent
     expect(q1<{ n: number }>("SELECT COUNT(*) AS n FROM exposures").n).toBeGreaterThan(0);
-    await page.getByTestId("continue").click();
+    await proceed(page);
     await exactText(page.getByTestId("progress"), "2 / 18");
   });
 
@@ -164,7 +170,7 @@ describe("early UX checkpoint (non-release vertical slice) - real browser, real 
     await attrIs(page.getByTestId("feedback"), "data-verdict", "correct");
     const rows = q<{ attempt_no: number; first_attempt: number }>("SELECT attempt_no, first_attempt FROM attempts WHERE slot_id = ? ORDER BY attempt_no", s.slotId);
     expect(rows).toEqual([{ attempt_no: 1, first_attempt: 1 }, { attempt_no: 2, first_attempt: 0 }]);
-    await page.getByTestId("continue").click();
+    await proceed(page);
     step("retry", { format: s.type, attempts: rows });
   });
 
@@ -218,7 +224,7 @@ describe("early UX checkpoint (non-release vertical slice) - real browser, real 
         showDone = true;
         await page.getByTestId("show-answer").click();
         await visible(page.getByTestId("correct-answer"));
-        await page.getByTestId("continue").click();
+        await proceed(page);
         continue;
       } else if ((s.type === "choose_missing_fragment" || s.type === "choose_form") && !skipDone) {
         skipDone = true;
@@ -241,7 +247,7 @@ describe("early UX checkpoint (non-release vertical slice) - real browser, real 
         await visible(page.getByTestId("feedback"));
         if (first && s.type === "russian_to_english_short") await attrIs(page.getByTestId("feedback"), "data-verdict", "correct");
       }
-      await page.getByTestId("continue").click();
+      await proceed(page);
     }
     expect({ idkDone, hintDone, showDone, skipDone, pendingDone, noMistakeDone }).toEqual({ idkDone: true, hintDone: true, showDone: true, skipDone: true, pendingDone: true, noMistakeDone: expect.any(Boolean) });
     step("formats", { seen: [...seen] });
@@ -255,7 +261,7 @@ describe("early UX checkpoint (non-release vertical slice) - real browser, real 
       if (!s) break;
       await answerCorrectly(s);
       await visible(page.getByTestId("feedback"));
-      await page.getByTestId("continue").click();
+      await proceed(page);
     }
     await visible(page.getByTestId("summary")); // the results open by themselves after the last task
     await shot(page, "09-all-done");
