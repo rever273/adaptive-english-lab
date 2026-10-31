@@ -5,6 +5,8 @@ import { localDateIn } from "../attempts/canonical.js";
 import { nearMatchOfFirst } from "./feedback.js";
 import type { SessionDeps } from "./policy.js";
 
+const AI_CHECK_ACTIVE: ReadonlySet<string> = new Set(["queued", "waiting_for_gpu", "running", "paused"]);
+
 /**
  * Counts for the finish screen. First attempts only; assisted first attempts (hint / answer seen before) are their own bucket and
  * are never mixed into accuracy; pending answers are NOT counted as wrong; a skip is not an attempt.
@@ -13,6 +15,7 @@ export function summarize(db: Db, sessionId: string, status: "completed" | "ende
   const slots = db.prepare("SELECT id FROM session_slots WHERE session_id = ?").all(sessionId) as Array<{ id: string }>;
   const counts = { correct: 0, incorrect: 0, idk: 0, assisted: 0, pending: 0, skipped: 0, unanswered: 0 };
   let pendingAnalysis = 0;
+  let aiWaiting = 0;
   let detailDiffers = 0;
   for (const { id } of slots) {
     const first = db.prepare("SELECT id, hints_before AS hints, answer_seen_before AS seen FROM attempts WHERE slot_id = ? AND attempt_no = 1").get(id) as { id: string; hints: number; seen: number } | undefined;
@@ -25,6 +28,8 @@ export function summarize(db: Db, sessionId: string, status: "completed" | "ende
     const latestAttempt = db.prepare("SELECT id FROM attempts WHERE slot_id = ? ORDER BY attempt_no DESC LIMIT 1").get(id) as { id: string };
     const latest = db.prepare("SELECT verdict FROM assessment_revisions WHERE attempt_id = ? ORDER BY sequence DESC LIMIT 1").get(latestAttempt.id) as { verdict: string };
     if (latest.verdict === "pending" || latest.verdict === "ambiguous") pendingAnalysis++;
+    // the local AI check of this answer is still queued/running: nothing has been produced for it yet (a failed or finished job is not waiting)
+    if (latest.verdict === "pending" && AI_CHECK_ACTIVE.has((db.prepare("SELECT state FROM jobs WHERE idempotency_key = ?").get(`free_text_analysis:${latestAttempt.id}`) as { state: string } | undefined)?.state ?? "")) aiWaiting++;
     const firstAssessment = db.prepare("SELECT verdict, confirmation FROM assessment_revisions WHERE attempt_id = ? ORDER BY sequence DESC LIMIT 1").get(first.id) as { verdict: string; confirmation: string };
     if (first.hints > 0 || first.seen > 0) counts.assisted++;
     else if (firstAssessment.verdict === "correct" && firstAssessment.confirmation === "confirmed") {
@@ -55,7 +60,7 @@ export function summarize(db: Db, sessionId: string, status: "completed" | "ende
     practiseAgain = rows.map((r) => r.lemma).filter((l): l is string => Boolean(l));
   }
   if (detailDiffers > 0) notes.push(`${detailDiffers} answer(s) used the right construction with a different name or number: counted for the construction, the different word is marked in red below.`);
-  return { sessionId, status, total: slots.length, counts, pendingAnalysis, ...(detailDiffers > 0 ? { detailDiffers } : {}), category: vocabulary ? "vocabulary" : "grammar", xpEarned, ...(vocabulary ? { practiseAgain } : {}), notes };
+  return { sessionId, status, total: slots.length, counts, pendingAnalysis, aiWaiting, ...(detailDiffers > 0 ? { detailDiffers } : {}), category: vocabulary ? "vocabulary" : "grammar", xpEarned, ...(vocabulary ? { practiseAgain } : {}), notes };
 }
 
 /**

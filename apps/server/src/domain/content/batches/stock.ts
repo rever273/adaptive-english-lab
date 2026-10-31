@@ -2,6 +2,7 @@ import type { Db } from "../../../db/open.js";
 import { loadBlockedFingerprints, loadCandidates } from "../../sessions/bank.js";
 import { loadBlueprint, loadSettings } from "../../sessions/policy.js";
 import { vocabularyPracticeStatus } from "../../vocabulary/practice.js";
+import { difficultyLevels } from "@english-lab/contracts";
 import { scaleQuotas, DEFAULT_QUOTAS } from "@english-lab/learning";
 
 /** Read-only stock warning before exhaustion. Availability never counts drafts, used sentences or reservations. */
@@ -11,7 +12,7 @@ export function replenishmentStock(db: Db) {
   const policy = last ? loadBlueprint(db, last.id).policy : null;
   const pool = policy?.skillPool ?? [];
   const blocked = loadBlockedFingerprints(db);
-  const candidates = loadCandidates(db, "practice", pool);
+  const candidates = loadCandidates(db, "practice", pool, difficultyLevels(settings));
   const usable = candidates.filter(c => c.unitFingerprints.length > 0 && c.unitFingerprints.every(f => !blocked.has(f)));
   const claimed = new Set<string>();
   let available = 0;

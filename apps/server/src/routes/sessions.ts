@@ -49,6 +49,8 @@ export interface SessionRouteOptions {
   onLease?: () => void;
   /** the session was finished: anything that holds the microphone or the card for it must let go */
   onSessionEnd?: (sessionId: string) => void;
+  /** the session has no voice-capable exercise left (TASK_021): free the speech model and let the queued AI checks start */
+  onVoiceDone?: (sessionId: string) => Promise<void> | void;
 }
 
 export function registerSessionRoutes(app: FastifyInstance, db: Db, deps: SessionDeps, opts: SessionRouteOptions = {}): void {
@@ -79,6 +81,19 @@ export function registerSessionRoutes(app: FastifyInstance, db: Db, deps: Sessio
   });
 
   app.get<{ Params: { id: string } }>("/api/v1/sessions/:id", { schema: { params: idParam } }, async (req): Promise<SessionSnapshot> => getSnapshot(db, req.params.id));
+
+  // a finished session's summary, re-read while the local AI checks of its answers are still running (the live "waiting" counter)
+  app.get<{ Params: { id: string } }>("/api/v1/sessions/:id/summary", { schema: { params: idParam } }, async (req): Promise<SessionSummary> => {
+    const snap = getSnapshot(db, req.params.id);
+    if (snap.status !== "completed" && snap.status !== "ended_early") throw new ApiError(409, "SESSION_ACTIVE", "The session is not finished yet");
+    return summarize(db, req.params.id, snap.status);
+  });
+
+  app.post<{ Params: { id: string } }>("/api/v1/sessions/:id/voice-done", { schema: { params: idParam } }, async (req) => {
+    const snap = getSnapshot(db, req.params.id);
+    if (snap.status === "active") await opts.onVoiceDone?.(req.params.id);
+    return { released: snap.status === "active" };
+  });
 
   app.post<{ Params: { id: string } }>("/api/v1/sessions/:id/lease", { schema: { params: idParam } }, async (req) => {
     const body = parse(LeaseRequestSchema, req.body);

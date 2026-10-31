@@ -2,7 +2,7 @@
 import type { FastifyInstance } from "fastify";
 import { randomUUID } from "node:crypto";
 import { afterEach, describe, expect, it } from "vitest";
-import { SessionBootstrapSchema, vocabularyNewWordsPerSession, vocabularyTaskCount } from "../../../packages/contracts/src/index.js";
+import { SessionBootstrapSchema, difficultyLevels, vocabularyNewWordsPerSession, vocabularyTaskCount } from "../../../packages/contracts/src/index.js";
 import { buildApp } from "../../../apps/server/src/app.js";
 import { freePort, testConfig } from "../helpers.js";
 import { makeEnv, rows, type Env } from "../attempts/fixtures.js";
@@ -60,5 +60,14 @@ describe("settings over HTTP", () => {
     expect(newWords.statusCode).toBe(200);
     expect(newWords.json().values.vocabularyNewWordsPerSession).toBe(2);
     expect(vocabularyNewWordsPerSession((await call("GET")).json().values)).toBe(2);
+
+    // TASK_021: optional target difficulty range; absent (older revisions) means no restriction
+    expect(difficultyLevels(first.values)).toBeNull();
+    expect(JSON.parse(revs[0]!.v).difficultyMin).toBeUndefined();
+    expect((await call("POST", { difficultyMin: "C2" })).statusCode).toBe(400);
+    const range = await call("POST", { difficultyMin: "B2", difficultyMax: "C1" });
+    expect(range.statusCode).toBe(200);
+    expect(difficultyLevels(range.json().values)).toEqual(["B2", "C1"]);
+    expect(difficultyLevels((await call("GET")).json().values)).toEqual(["B2", "C1"]);
   });
 });

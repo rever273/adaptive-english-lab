@@ -1,5 +1,5 @@
 import { randomUUID } from "node:crypto";
-import { CreateBatchRequestSchema, EXERCISE_TYPES, TRIAL_PER_TYPE, TRIAL_SIZE } from "@english-lab/contracts";
+import { CreateBatchRequestSchema, EXERCISE_TYPES, difficultyLevels, TRIAL_PER_TYPE, TRIAL_SIZE } from "@english-lab/contracts";
 import type { z } from "zod";
 import type { Db } from "../../../db/open.js";
 import { ApiError } from "../../../errors.js";
@@ -10,7 +10,7 @@ import { groupUnits, planBatch, type ItemPlan } from "./plan.js";
 import { taxonomyForNewRevisions } from "../repository.js";
 import { exportVocabulary } from "../../vocabulary/practice.js";
 import { loadBlockedFingerprints, loadCandidates } from "../../sessions/bank.js";
-import { loadBlueprint } from "../../sessions/policy.js";
+import { loadBlueprint, loadSettings } from "../../sessions/policy.js";
 import { vocabularyFormat } from "./vocabularyDrafts.js";
 
 export const GENERATION_PROMPT = "generation-v5";
@@ -222,6 +222,9 @@ export function createBatch(db: Db, deps: BatchDeps, input: z.input<typeof Creat
         const lessonTypes = policy ? EXERCISE_TYPES.filter(t => t === "context_reading" ? policy.readingBlocks > 0 && (!pool.length || pool.some(s => /^linking\./.test(s))) : policy.quotas[t] > 0 && (t !== "choose_missing_fragment" || !pool.length || pool.some(s => /^(prepositions|articles|countability|linking|verb_patterns)\./.test(s)))) : undefined;
         const scoped = { ...request, ...(pool.length ? { skills: pool } : {}), ...(!request.types && lessonTypes?.length ? { types: lessonTypes } : {}) };
         plans = planBatch({ request: scoped, taxonomySkills: [...tax.skills], coverage, tag: batchId.slice(0, 8) });
+        // the learners target difficulty range (Settings): new content is requested at those levels in turn; unset keeps the historical B2
+        const levels = difficultyLevels(loadSettings(db).values);
+        if (levels) plans = plans.map((p) => ({ ...p, level: levels[p.ordinal % levels.length]! }));
       }
       const promptVersionId = ensurePromptVersion(db, request.category === "vocabulary" ? "vocabulary-generation-v2" : GENERATION_PROMPT, request.category === "vocabulary" ? JSON.stringify(vocabularyFormat(2)) : draftFormatsText());
       const now = deps.now().toISOString();

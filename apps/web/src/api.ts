@@ -60,14 +60,17 @@ async function send<T>(method: "GET" | "POST" | "PATCH", path: string, schema: Z
 export const fetchHealth = (): Promise<Health> => send("GET", "/api/v1/health", HealthSchema);
 export const fetchCapabilities = (): Promise<Capabilities> => send("GET", "/api/v1/capabilities", CapabilitiesSchema);
 
-type SettingsValues = { taskCount: number; weakRatio: number; voiceTarget: 0 | 1 | 2; voiceShare?: number; vocabularyTaskCount?: number; vocabularyNewWordsPerSession?: number };
+type SettingsValues = { taskCount: number; weakRatio: number; voiceTarget: 0 | 1 | 2; voiceShare?: number; vocabularyTaskCount?: number; vocabularyNewWordsPerSession?: number; difficultyMin?: Level; difficultyMax?: Level };
+export type Level = "A2" | "B1" | "B2" | "C1";
 type SettingsView = { revision: number; values: SettingsValues; defaults: SettingsValues };
 export const fetchSettings = () => send("GET", "/api/v1/settings", typed<SettingsView>());
-export const saveSettings = (values: { taskCount: number; weakRatio: number; voiceShare: number; vocabularyTaskCount?: number; vocabularyNewWordsPerSession?: number }) => send("POST", "/api/v1/settings", typed<SettingsView>(), values);
+export const saveSettings = (values: { taskCount: number; weakRatio: number; voiceShare: number; vocabularyTaskCount?: number; vocabularyNewWordsPerSession?: number; difficultyMin?: Level; difficultyMax?: Level }) => send("POST", "/api/v1/settings", typed<SettingsView>(), values);
 export const fetchDashboard = () => send("GET", "/api/v1/dashboard", DashboardSchema);
 export type SessionCategory = "grammar" | "vocabulary";
 export const fetchCurrentSession = (category: SessionCategory = "grammar") => send("GET", `/api/v1/sessions/current?category=${category}`, CurrentSessionResponseSchema);
 export const fetchRecentSession = (category: SessionCategory = "grammar") => send("GET", `/api/v1/sessions/recent?category=${category}`, SessionSummarySchema.nullable());
+export const fetchSummary = (id: string) => send("GET", `/api/v1/sessions/${id}/summary`, SessionSummarySchema);
+export const voiceDone = (id: string) => send("POST", `/api/v1/sessions/${id}/voice-done`, typed<{ released: boolean }>(), {});
 export const fetchSession = (id: string) => send("GET", `/api/v1/sessions/${id}`, SessionSnapshotSchema);
 export const createSession = (blueprintRevisionId: string) =>
   send("POST", "/api/v1/sessions", CreateSessionResponseSchema, { purpose: "practice", blueprintRevisionId, timezone: Intl.DateTimeFormat().resolvedOptions().timeZone || "UTC" });

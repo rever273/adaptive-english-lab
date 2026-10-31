@@ -351,6 +351,24 @@ describe("practice always wins", () => {
     expect(sid).toBeTruthy();
   });
 
+  it("TASK_021: once a session has no voice exercise left, its live lease no longer holds queued checks (other sessions still do)", async () => {
+    const r = await rig();
+    const done = startPractice(r);
+    const other = startPractice(r);
+    const a = job(r, "voice-hold");
+    await r.sched.tick();
+    await flush();
+    expect(state(r, a.id)).toBe("waiting_for_gpu");
+    r.sched.releaseVoiceHold(done);
+    await r.sched.tick();
+    await flush();
+    expect(state(r, a.id)).toBe("waiting_for_gpu"); // the other session's lease is still live and may use the microphone
+    r.db.prepare("DELETE FROM practice_leases WHERE session_id = ?").run(other);
+    expect((await r.sched.status()).practiceActive).toBe(false); // the released session's own lease is ignored
+    await drive(r, r.sched, () => state(r, a.id) === "completed");
+    expect(count(r, "SELECT COUNT(*) AS n FROM practice_leases")).toBe(1); // nothing was deleted: the lease is only ignored
+  });
+
   it("a running unit is aborted at a safe boundary, discarded, parked as preempted_by_practice and resumes when the lease expires (closed tab)", async () => {
     const r = await rig();
     r.runner.behaviour = "gate";

@@ -8,9 +8,9 @@ export interface BankCandidate extends Candidate {
 
 /**
  * Approved + released revisions of one bank role (`selectable_revisions`), with the target skill, family and the sentence
- * units they would reserve. Held-out candidates are never loaded for practice: the bank role is part of the query.
+ * units they would reserve. `levels` (TASK_021 target difficulty range) keeps only revisions of those CEFR labels; null = every level. Held-out candidates are never loaded for practice: the bank role is part of the query.
  */
-export function loadCandidates(db: Db, bankRole: "practice" | "diagnostic" | "heldout", skillPool: readonly string[] = []): BankCandidate[] {
+export function loadCandidates(db: Db, bankRole: "practice" | "diagnostic" | "heldout", skillPool: readonly string[] = [], levels: readonly string[] | null = null): BankCandidate[] {
   const rows = db
     .prepare(
       `SELECT er.id AS revisionId, er.exercise_id AS exerciseId, er.type AS format, er.dimension AS dimension, er.difficulty AS difficulty,
@@ -50,7 +50,7 @@ export function loadCandidates(db: Db, bankRole: "practice" | "diagnostic" | "he
   }
   const pool = new Set(skillPool);
   return rows
-    .filter((r) => pool.size === 0 || pool.has(r.skillId))
+    .filter((r) => (pool.size === 0 || pool.has(r.skillId)) && (levels === null || levels.includes(r.difficulty)))
     .map((r) => {
       const content = JSON.parse(r.content) as { payload: { no_mistake?: boolean; questions?: unknown[] } };
       return {

@@ -1,8 +1,9 @@
 import { useEffect, useState } from "react";
 import * as api from "../api";
 
-type Values = { taskCount: number; weakRatio: number; voiceTarget: 0 | 1 | 2; voiceShare?: number; vocabularyTaskCount?: number; vocabularyNewWordsPerSession?: number };
-type Draft = { taskCount: number; weakRatio: number; voiceShare: number; vocabularyTaskCount: number; vocabularyNewWordsPerSession: number };
+type Values = { taskCount: number; weakRatio: number; voiceTarget: 0 | 1 | 2; voiceShare?: number; vocabularyTaskCount?: number; vocabularyNewWordsPerSession?: number; difficultyMin?: api.Level; difficultyMax?: api.Level };
+type Draft = { taskCount: number; weakRatio: number; voiceShare: number; vocabularyTaskCount: number; vocabularyNewWordsPerSession: number; difficultyMin: api.Level; difficultyMax: api.Level };
+const LEVELS: api.Level[] = ["A2", "B1", "B2", "C1"];
 
 /** docs/04 §7: only the settings the allocator reads today. A change is a new settings revision and applies to the next session. */
 export function Settings() {
@@ -59,6 +60,19 @@ export function Settings() {
           <span className="muted small">1–10, default 4. Words you missed or are due for review come first; this is a target for words you have never practised. It is exceeded only if the session cannot otherwise be filled.</span>
         </label>
         <label>
+          Sentence difficulty (CEFR)
+          <span className="level-range">
+            <select value={draft.difficultyMin} aria-label="Lowest level" data-testid="set-level-min" onChange={(e) => { const min = e.target.value as api.Level; setDraft({ ...draft, difficultyMin: min, difficultyMax: LEVELS.indexOf(draft.difficultyMax) < LEVELS.indexOf(min) ? min : draft.difficultyMax }); }}>
+              {LEVELS.map((l) => <option key={l} value={l}>{l}</option>)}
+            </select>
+            {" to "}
+            <select value={draft.difficultyMax} aria-label="Highest level" data-testid="set-level-max" onChange={(e) => { const max = e.target.value as api.Level; setDraft({ ...draft, difficultyMax: max, difficultyMin: LEVELS.indexOf(draft.difficultyMin) > LEVELS.indexOf(max) ? max : draft.difficultyMin }); }}>
+              {LEVELS.map((l) => <option key={l} value={l}>{l}</option>)}
+            </select>
+          </span>
+          <span className="muted small">Default A2 to C1 = no restriction. Practice only draws approved exercises of these levels (if there are not enough, the lesson shows the usual shortage message instead of easier ones), and new AI-written exercises are requested at these levels. Applies to the next session or batch.</span>
+        </label>
+        <label>
           Weak skills share: {Math.round(draft.weakRatio * 100)}%
           <input type="range" min={0} max={100} step={5} value={Math.round(draft.weakRatio * 100)} onChange={(e) => setDraft({ ...draft, weakRatio: Number(e.target.value) / 100 })} data-testid="set-weak-ratio" />
           <span className="muted small">The rest explores new skills. Default {Math.round(saved.defaults.weakRatio * 100)}%.</span>
@@ -90,6 +104,6 @@ export function Settings() {
 }
 
 /** older settings revisions hold a fixed voice count; it is shown as the share of the task count it was */
-const pick = (v: Values): Draft => ({ taskCount: v.taskCount, weakRatio: v.weakRatio, voiceShare: v.voiceShare ?? Math.round((v.voiceTarget / v.taskCount) * 20) / 20, vocabularyTaskCount: v.vocabularyTaskCount ?? 8, vocabularyNewWordsPerSession: v.vocabularyNewWordsPerSession ?? 4 });
+const pick = (v: Values): Draft => ({ taskCount: v.taskCount, weakRatio: v.weakRatio, voiceShare: v.voiceShare ?? Math.round((v.voiceTarget / v.taskCount) * 20) / 20, vocabularyTaskCount: v.vocabularyTaskCount ?? 8, vocabularyNewWordsPerSession: v.vocabularyNewWordsPerSession ?? 4, difficultyMin: v.difficultyMin ?? "A2", difficultyMax: v.difficultyMax ?? "C1" });
 const voiceCount = (d: Draft): number => Math.round(d.voiceShare * d.taskCount);
 const clamp = (n: number, lo: number, hi: number) => Math.min(hi, Math.max(lo, n));

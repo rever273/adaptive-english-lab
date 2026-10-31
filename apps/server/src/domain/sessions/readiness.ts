@@ -1,5 +1,5 @@
 import { clampMultiplier, selectSession, scaleQuotas, discoveryProbeLimit, type Candidate } from "@english-lab/learning";
-import { voiceTaskCount, type ShortageDetails } from "@english-lab/contracts";
+import { difficultyLevels, voiceTaskCount, type ShortageDetails } from "@english-lab/contracts";
 import type { Db } from "../../db/open.js";
 import { loadBlockedFingerprints, loadCandidates } from "./bank.js";
 import { loadBlueprint, loadPlan, loadSettings, type SessionDeps } from "./policy.js";
@@ -22,7 +22,7 @@ export function computeReadiness(db: Db, deps: SessionDeps, blueprintRevisionId:
   const blueprint = loadBlueprint(db, blueprintRevisionId);
   const settings = loadSettings(db);
   const plan = loadPlan(db, deps);
-  const candidates = loadCandidates(db, "practice", blueprint.policy.skillPool);
+  const candidates = loadCandidates(db, "practice", blueprint.policy.skillPool, difficultyLevels(settings.values));
   const blocked = loadBlockedFingerprints(db);
   const n = settings.values.taskCount;
   const quotas = scaleQuotas(blueprint.policy.quotas, n);

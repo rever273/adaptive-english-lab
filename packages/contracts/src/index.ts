@@ -68,6 +68,10 @@ export const CapabilitiesSchema = z
   .strict();
 export type Capabilities = z.infer<typeof CapabilitiesSchema>;
 
+/** The exercise schema allows these difficulty labels (content/schemas/exercise.schema.json); C2 would need a schema change. */
+export const CEFR_RANGE = ["A2", "B1", "B2", "C1"] as const;
+export type CefrLevel = (typeof CEFR_RANGE)[number];
+
 /** settings_revisions.values_json (spec/01 "Параметры"; Advanced keys are added by later tasks). */
 export const SettingsV1Schema = z
   .object({
@@ -84,6 +88,9 @@ export const SettingsV1Schema = z
     vocabularyNewWordsPerSession: z.number().int().min(1).max(10).optional(),
     /** D64: share of the session's tasks offered for voice (0..1). When set it replaces voiceTarget; older revisions do not have it. */
     voiceShare: z.number().min(0).max(1).optional(),
+    /** TASK_021: target CEFR range of grammar sentences (selection for practice and the level requested for new content); absent = no restriction */
+    difficultyMin: z.enum(CEFR_RANGE).optional(),
+    difficultyMax: z.enum(CEFR_RANGE).optional(),
   })
   .strict();
 export type SettingsV1 = z.infer<typeof SettingsV1Schema>;
@@ -92,6 +99,19 @@ export type SettingsV1 = z.infer<typeof SettingsV1Schema>;
 export const vocabularyTaskCount = (v: Pick<SettingsV1, "vocabularyTaskCount">): number => v.vocabularyTaskCount ?? 8;
 
 export const vocabularyNewWordsPerSession = (v: Pick<SettingsV1, "vocabularyNewWordsPerSession">): number => v.vocabularyNewWordsPerSession ?? 4;
+
+/**
+ * The levels grammar practice may draw from and new content is requested at, or null for "no restriction" (unset, or the whole A2-C1 range).
+ * Older settings revisions have neither key, so they keep today's behaviour.
+ */
+export const difficultyLevels = (v: Pick<SettingsV1, "difficultyMin" | "difficultyMax">): CefrLevel[] | null => {
+  const lo = CEFR_RANGE.indexOf(v.difficultyMin ?? "A2");
+  const hi = CEFR_RANGE.indexOf(v.difficultyMax ?? "C1");
+  if (lo <= 0 && hi >= CEFR_RANGE.length - 1) return null;
+  const a = Math.min(lo, hi);
+  const b = Math.max(lo, hi);
+  return CEFR_RANGE.slice(a, b + 1);
+};
 
 /** How many tasks of a session are offered for voice: the share of the task count, rounded; otherwise the old fixed count. */
 export const voiceTaskCount = (v: Pick<SettingsV1, "taskCount" | "voiceTarget" | "voiceShare">): number => (v.voiceShare !== undefined ? Math.round(v.voiceShare * v.taskCount) : v.voiceTarget);

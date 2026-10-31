@@ -6,6 +6,7 @@ import { PromptView } from "../components/PromptView";
 import { useVoice } from "../voice";
 import { Kbd, isPressable, isTextField, useKeys } from "../components/hotkeys";
 import { AgentTasks } from "../components/AgentTasks";
+import { AUTO_ADVANCE_MS, diagnosticFinished, isShortFormat, noSpeechLeft, shouldAutoAdvance, shouldPreloadSpeech, unconfirmedLabel } from "../practiceFlow";
 
 /** One tab id per browser tab, kept across reloads, so a reload resumes the same practice lease instead of waiting 90 s. */
 function tabId(): string {
@@ -47,10 +48,10 @@ export function Practice({ category = "grammar", onExit, onNavigate }: { categor
   const [slotUi, setSlotUi] = useState<SlotUi>(emptySlot);
   const [readOnly, setReadOnly] = useState<string | null>(null);
   const [retry, setRetry] = useState(0);
-  const [stt, setStt] = useState<{ ready: boolean }>({ ready: false });
+  const [stt, setStt] = useState<{ ready: boolean; known: boolean }>({ ready: false, known: false });
   const [recent, setRecent] = useState<SessionSummary | null>(null);
   useEffect(() => {
-    void api.fetchCapabilities().then((c) => setStt({ ready: c.stt.status === "ready" })).catch(() => undefined);
+    void api.fetchCapabilities().then((c) => setStt({ ready: c.stt.status === "ready", known: true })).catch(() => setStt({ ready: false, known: true }));
   }, []);
   const tab = useRef(tabId());
 
@@ -122,8 +123,6 @@ export function Practice({ category = "grammar", onExit, onNavigate }: { categor
         let feedback: FeedbackResponse | null = null;
         if (reveal.state === "answered") feedback = await api.fetchFeedback(sessionId, openSlotId).catch(() => null);
         if (!cancelled) setSlotUi({ ...emptySlot, reveal, feedback });
-        // a voice task is on screen: get speech recognition ready now, so the microphone starts at once when pressed
-        if (!cancelled && reveal.inputPreference === "voice" && isShort(reveal.format) && reveal.state !== "answered") voice.prepare();
       } catch (e) {
         if (cancelled) return;
         if (e instanceof ApiRequestError && (e.code === "LEASE_REQUIRED" || e.code === "LEASE_HELD")) setReadOnly("This session is open in another tab, or a closed tab still holds it for up to 90 seconds. This tab continues by itself as soon as the session is free.");
@@ -135,6 +134,29 @@ export function Practice({ category = "grammar", onExit, onNavigate }: { categor
       cancelled = true;
     };
   }, [sessionId, openSlotId, readOnly]);
+
+  // Voice is for the lesson practice only (a diagnostic or delayed check is typed, so its baseline is honest). TASK_021 T1: the speech model is loaded
+  // while the exercise BEFORE a voice one is on screen (or at the start, if the first one is), so the microphone is ready the moment it is pressed.
+  const voiceUsable = category === "grammar" && view.kind === "session" && view.session.purpose === "practice" && stt.ready;
+  const slotList = view.kind === "session" ? view.session.slots : null;
+  useEffect(() => {
+    if (!voiceUsable || readOnly || !slotList) return;
+    if (shouldPreloadSpeech(slotList, slotList.findIndex((s) => s.slotId === openSlotId))) voice.prepare();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [voiceUsable, readOnly, openSlotId, sessionId]);
+
+  // T3a: once no exercise is left where the microphone could be used (or voice is not available at all) and an answer exists, the speech model is
+  // freed and the local AI checks of the written answers start - not only at "Session complete". Sent once per session; the server call is idempotent.
+  const voiceReleased = useRef<string | null>(null);
+  useEffect(() => {
+    if (!slotList || !sessionId || category !== "grammar" || !stt.known || voiceReleased.current === sessionId) return;
+    if (!slotList.some((s) => s.attempts > 0)) return;
+    if (voiceUsable && !noSpeechLeft(slotList)) return;
+    voiceReleased.current = sessionId;
+    void api.voiceDone(sessionId).catch(() => {
+      voiceReleased.current = null; // try again on the next change
+    });
+  }, [slotList, sessionId, voiceUsable, stt.known]);
 
   const refresh = useCallback(async () => {
     if (!sessionId) return;
@@ -240,7 +262,18 @@ export function Practice({ category = "grammar", onExit, onNavigate }: { categor
     setRetry((r) => r + 1);
     setSlotUi((u) => ({ ...u, feedback: null }));
   };
+  // T2: a plainly correct answer moves on by itself after a short, visible confirmation; Esc or "Stay here" keeps the screen. Everything else keeps Continue.
+  const [stay, setStay] = useState<string | null>(null);
+  const autoPending = slotUi.feedback !== null && !slotUi.busy && !slotUi.error && stay !== slotUi.feedback.slotId && shouldAutoAdvance(slotUi.feedback, { hintUsed: slotUi.hint !== null, vocabulary: category === "vocabulary" });
+  const autoSlotId = autoPending ? slotUi.feedback!.slotId : null;
+  useEffect(() => {
+    if (!autoSlotId) return;
+    const timer = window.setTimeout(() => void act("continue"), AUTO_ADVANCE_MS);
+    return () => window.clearTimeout(timer);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [autoSlotId]);
   useKeys((e) => {
+    if (e.key === "Escape" && autoSlotId) setStay(autoSlotId);
     if (view.kind !== "session" || !slotUi.feedback || slotUi.busy || e.repeat || e.ctrlKey || e.metaKey || e.altKey || isTextField(e.target)) return;
     if (e.key === "Enter") {
       if (isPressable(e.target)) return;
@@ -307,7 +340,7 @@ export function Practice({ category = "grammar", onExit, onNavigate }: { categor
         </div>
       ) : slotUi.reveal ? (
         <div className={`card task ${category === "vocabulary" ? `vfmt-${slotUi.reveal.format}` : `fmt-${slotUi.reveal.format}`}`} data-testid="slot" data-format={slotUi.reveal.format} data-slot-id={slotUi.reveal.slotId}>
-          {slotUi.reveal.inputPreference === "voice" && isShort(slotUi.reveal.format) && (
+          {slotUi.reveal.inputPreference === "voice" && isShortFormat(slotUi.reveal.format) && (
             <p className="badge badge-info" data-testid="voice-note">
               <i className={`pi ${stt.ready ? "pi-microphone" : "pi-ban"}`} aria-hidden="true" /> {stt.ready ? "You can speak this one: press “Speak instead”." : "Voice is not available on this computer right now. Please type your answer."}
             </p>
@@ -325,14 +358,14 @@ export function Practice({ category = "grammar", onExit, onNavigate }: { categor
             busy={slotUi.busy || readOnly !== null}
             locked={answered && !slotUi.pendingSubmission}
             hint={slotUi.hint}
-            voice={isShort(slotUi.reveal.format) && stt.ready && category !== "vocabulary" ? voice : undefined}
+            voice={isShortFormat(slotUi.reveal.format) && voiceUsable ? voice : undefined}
             onSubmit={(a, d) => void submit(a, false, d)}
             onIdk={() => void submit(undefined, true)}
             onSkip={() => void act("skip")}
             onHint={() => void act("hint")}
             onShowAnswer={() => void showAnswerAndContinue()}
           />
-          {slotUi.feedback && <FeedbackPanel feedback={slotUi.feedback} busy={slotUi.busy} onTryAgain={tryAgain} onContinue={goOn} />}
+          {slotUi.feedback && <FeedbackPanel feedback={slotUi.feedback} busy={slotUi.busy} onTryAgain={tryAgain} onContinue={goOn} autoAdvance={autoPending} onStay={() => setStay(slotUi.feedback!.slotId)} />}
           {slotUi.error && (
             <div className="notice notice-error" role="alert" data-testid="error">
               {slotUi.error}
@@ -442,7 +475,7 @@ function DetailDiff({ d }: { d: NonNullable<FeedbackResponse["detail"]> }) {
   );
 }
 
-function FeedbackPanel({ feedback, busy, onTryAgain, onContinue }: { feedback: FeedbackResponse; busy: boolean; onTryAgain: () => void; onContinue: () => void }) {
+function FeedbackPanel({ feedback, busy, onTryAgain, onContinue, autoAdvance = false, onStay }: { feedback: FeedbackResponse; busy: boolean; onTryAgain: () => void; onContinue: () => void; autoAdvance?: boolean; onStay?: () => void }) {
   const incorrect = feedback.verdict === "incorrect" || feedback.verdict === "idk";
   const kind = feedback.state === "pending" ? "pending" : feedback.detail ? "detail" : feedback.verdict === "correct" ? "ok" : incorrect ? "again" : "info";
   return (
@@ -468,6 +501,7 @@ function FeedbackPanel({ feedback, busy, onTryAgain, onContinue }: { feedback: F
       {feedback.explanation_ru && <p lang="ru" className="ru">{feedback.explanation_ru}</p>}
       {feedback.vocabulary && <VocabSentence v={feedback.vocabulary} />}
       {feedback.vocabulary && <VocabWhy v={feedback.vocabulary} />}
+      {autoAdvance && <p className="muted small" data-testid="auto-advance">Next exercise in a moment. <button type="button" className="link" onClick={onStay} data-testid="stay">Stay here</button> (Esc)</p>}
       <div className="actions">
         {incorrect && (
           <button className="btn has-kbd" disabled={busy} onClick={onTryAgain}>
@@ -502,7 +536,7 @@ function DashboardScreen({ dashboard, message, onStart, onStartCheck }: { dashbo
           {message}
         </div>
       )}
-      {dashboard.diagnostic.blocksUsed === 0 && dashboard.diagnostic.ready && (
+      {!diagnosticFinished(dashboard.diagnostic) && dashboard.diagnostic.blocksUsed === 0 && dashboard.diagnostic.ready && (
         <div className="notice notice-info" data-testid="diagnostic-first">
           <p>
             <strong>New here?</strong> Start with the short diagnostic: 3 blocks of 8 tasks, about 10 minutes each. It shows which skills to practise first, and the lessons then give those skills more room. It is optional, and you can do one block now and the rest later.
@@ -581,19 +615,17 @@ function ChecksCard({ dashboard, onStartCheck }: { dashboard: Dashboard; onStart
     <div className="card" data-testid="checks">
       <h3><i className="pi pi-compass" aria-hidden="true" /> Optional checks</h3>
       <p className="muted small">You never have to do these. They show where you really are, without hints, and the answers appear after each block.</p>
-      <div className="check-row" data-testid="diagnostic-card">
+      {!diagnosticFinished(d) && <div className="check-row" data-testid="diagnostic-card">
         <strong>Starting diagnostic</strong>{" "}
         <span className="muted">— {d.blocksUsed} of {d.blocksTotal} blocks done · 8 mixed tasks per block, about 10 minutes</span>
-        {d.nextBlock === null ? (
-          <p className="muted small">All three blocks are done. Keep practising; delayed checks come later.</p>
-        ) : d.ready ? (
+        {d.ready ? (
           <div className="actions">
             <button className="btn" onClick={() => onStartCheck("diagnostic")} data-testid="start-diagnostic"><i className="pi pi-play" aria-hidden="true" /> Start block {d.nextBlock}</button>
           </div>
         ) : (
           <p className="notice notice-warn small" role="status" data-testid="diagnostic-shortage">There are not enough approved diagnostic tasks for the next block yet.</p>
         )}
-      </div>
+      </div>}
       <div className="check-row" data-testid="heldout-card">
         <strong>Delayed check</strong> <span className="muted">— skills you practised at least {h.minDelayDays} days ago, new sentences only</span>
         {h.ready ? (
@@ -612,9 +644,7 @@ function ChecksCard({ dashboard, onStartCheck }: { dashboard: Dashboard; onStart
 function outcome(f: FeedbackResponse): { cls: string; icon: string; label: string } {
   if (f.state === "skipped") return { cls: "skip", icon: "pi-forward", label: "Skipped" };
   if (f.state === "pending" || f.confirmation !== "confirmed") {
-    if (f.aiReview?.judgement === "acceptable" || f.verdict === "correct") return { cls: "wait", icon: "pi-hourglass", label: "Not an approved sentence — the AI thinks it is fine (not counted yet)" };
-    if (f.aiReview?.judgement === "incorrect_candidate" || f.verdict === "incorrect") return { cls: "wait", icon: "pi-hourglass", label: "Not an approved sentence — the AI suspects a mistake (not counted yet)" };
-    return { cls: "wait", icon: "pi-hourglass", label: "Not an approved sentence — waiting for a check" };
+    return { cls: "wait", icon: "pi-hourglass", label: unconfirmedLabel(f) };
   }
   if (f.verdict === "correct" && f.detail) return { cls: "detail", icon: "pi-exclamation-circle", label: "Right construction — a detail differs" };
   if (f.verdict === "correct") return { cls: "ok", icon: "pi-check-circle", label: "Correct" };
@@ -678,7 +708,16 @@ function BlockReview({ sessionId }: { sessionId: string }) {
   );
 }
 
-function SummaryScreen({ summary, onDone, onNavigate }: { summary: SessionSummary; onDone: () => void; onNavigate?: (page: "vocabulary" | "analytics") => void }) {
+function SummaryScreen({ summary: first, onDone, onNavigate }: { summary: SessionSummary; onDone: () => void; onNavigate?: (page: "vocabulary" | "analytics") => void }) {
+  // T3c: the numbers were fixed at the moment the session ended; while local AI checks of its answers are still running they are re-read, so the counter counts down
+  const [summary, setSummary] = useState(first);
+  useEffect(() => setSummary(first), [first]);
+  const waitingForAi = summary.aiWaiting ?? 0;
+  useEffect(() => {
+    if (waitingForAi <= 0) return;
+    const timer = window.setInterval(() => void api.fetchSummary(summary.sessionId).then(setSummary).catch(() => undefined), 3000);
+    return () => window.clearInterval(timer);
+  }, [waitingForAi, summary.sessionId]);
   const c = summary.counts;
   const vocab = summary.category === "vocabulary";
   return (
@@ -697,7 +736,8 @@ function SummaryScreen({ summary, onDone, onNavigate }: { summary: SessionSummar
         <Stat cls="bad" icon="pi-times-circle" label="Not this time" value={c.incorrect} id="count-incorrect" />
         <Stat cls="idk" icon="pi-question-circle" label="“I don’t know”" value={c.idk} id="count-idk" />
         <Stat cls="info" icon="pi-lightbulb" label="With a hint or answer shown" value={c.assisted} id="count-assisted" />
-        <Stat cls="wait" icon="pi-hourglass" label="Waiting for a check" value={c.pending} id="count-pending" />
+        {waitingForAi > 0 && <Stat cls="wait" icon="pi-spin pi-spinner" label="AI check in progress" value={waitingForAi} id="count-ai-waiting" />}
+        <Stat cls="wait" icon="pi-hourglass" label="Not counted yet" value={c.pending} id="count-pending" />
         <Stat cls="skip" icon="pi-forward" label="Skipped" value={c.skipped} id="count-skipped" />
         {c.unanswered > 0 && <Stat cls="skip" icon="pi-minus-circle" label="Not reached" value={c.unanswered} id="count-unanswered" />}
       </div>
@@ -706,7 +746,7 @@ function SummaryScreen({ summary, onDone, onNavigate }: { summary: SessionSummar
       ))}
       {c.pending > 0 && (
         <p className="notice notice-warn small">
-          <i className="pi pi-hourglass" aria-hidden="true" /> <strong>Waiting for a check</strong> means you wrote a sentence that is worded differently from the approved ones. It is not counted as right or wrong yet. The local AI gives its opinion below, but only a confirmed check — for example by your coding agent — counts it. (A different name or number alone is recognised automatically.)
+          <i className="pi pi-hourglass" aria-hidden="true" /> <strong>Not counted yet</strong> means you wrote a sentence that is worded differently from the approved ones. The local AI checks it and gives its opinion below (&ldquo;Looks correct&rdquo; or &ldquo;Looks wrong&rdquo;), but that opinion is a draft: only a confirmed check — for example by your coding agent — counts it in your stats. (A different name or number alone is recognised automatically.)
         </p>
       )}
       {vocab && (summary.practiseAgain ?? []).length > 0 && (
@@ -738,8 +778,6 @@ function Stat({ cls, icon, label, value, id }: { cls: string; icon: string; labe
     </div>
   );
 }
-
-const isShort = (format: string): boolean => format === "guided_short_answer" || format === "russian_to_english_short";
 
 function errorText(e: unknown): string {
   if (e instanceof ApiRequestError) return e.message;

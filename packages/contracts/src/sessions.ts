@@ -174,6 +174,8 @@ export const SessionSummarySchema = z
       })
       .strict(),
     pendingAnalysis: z.number().int(),
+    /** TASK_021: written answers whose local AI check has not produced its draft yet (a live counter; the draft itself never counts as confirmed) */
+    aiWaiting: z.number().int().optional(),
     /** D64: first attempts counted as correct whose name/number differs from the approved sentence (a subset of counts.correct) */
     detailDiffers: z.number().int().optional(),
     /** vocabulary sessions: the session category, the activity XP it earned and the words whose first try was wrong or "I don't know" */

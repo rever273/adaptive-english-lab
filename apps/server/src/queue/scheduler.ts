@@ -126,9 +126,18 @@ export class GpuScheduler {
 
   // ---------------------------------------------------------------- practice gate
 
+  /** sessions whose microphone can no longer be used (TASK_021): their lease no longer holds back the local AI checks of their own answers */
+  private readonly voiceDone = new Set<string>();
+
+  /** The last voice-capable exercise of `sessionId` is closed: the lease stays for the session itself, but queued checks may run now. Idempotent. */
+  releaseVoiceHold(sessionId: string): void {
+    this.voiceDone.add(sessionId);
+    this.kick();
+  }
+
   private practiceLeaseLive(): boolean {
-    const r = this.db.prepare("SELECT 1 FROM practice_leases WHERE expires_at > ? LIMIT 1").get(iso(this.clock.now()));
-    return r !== undefined;
+    const live = this.db.prepare("SELECT session_id AS id FROM practice_leases WHERE expires_at > ?").all(iso(this.clock.now())) as Array<{ id: string }>;
+    return live.some((l) => !this.voiceDone.has(l.id));
   }
   practiceActive(): boolean {
     return this.practiceGrant || this.practiceLeaseLive();

@@ -89,7 +89,7 @@ export async function buildApp(deps: AppDeps): Promise<FastifyInstance> {
   registerSettingsRoutes(app, db, { now: deps.attempts?.now ?? (() => new Date()), newId: deps.attempts?.newId });
   registerReportRoutes(app, db, { now: deps.attempts?.now ?? (() => new Date()), exportsRoot: path.join(config.dataRoot, "exports") });
   const base = { now: deps.attempts?.now ?? (() => new Date()), newId: deps.attempts?.newId ?? randomUUID };
-  registerSessionRoutes(app, db, base, { ...(deps.sessions ?? {}), onLease: () => deps.scheduler?.kick(), onSessionEnd: (id) => void deps.stt?.stopForSession(id) });
+  registerSessionRoutes(app, db, base, { ...(deps.sessions ?? {}), onLease: () => deps.scheduler?.kick(), onSessionEnd: (id) => void deps.stt?.stopForSession(id), onVoiceDone: async (id) => { deps.scheduler?.releaseVoiceHold(id); await deps.stt?.stopForSession(id); deps.scheduler?.kick(); } });
   registerVocabularyPracticeRoutes(app, db, base);
   registerUiRoutes(app);
   registerQueueRoutes(app, db, base, deps.scheduler ?? null);

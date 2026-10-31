@@ -1,5 +1,5 @@
 import { createHash } from "node:crypto";
-import { voiceTaskCount, type CreateSessionRequest, type CreateSessionResponse } from "@english-lab/contracts";
+import { difficultyLevels, voiceTaskCount, type CreateSessionRequest, type CreateSessionResponse } from "@english-lab/contracts";
 import {
   DEFAULT_QUOTAS,
   DISCOVERY_V1,
@@ -100,7 +100,7 @@ export function createPracticeSession(db: Db, deps: SessionDeps, req: CreateSess
       const taxonomyId = (db.prepare("SELECT id FROM taxonomy_versions ORDER BY created_at DESC, rowid DESC LIMIT 1").get() as { id: string }).id;
       const nowIso = deps.now().toISOString();
 
-      const candidates = loadCandidates(db, "practice", blueprint.policy.skillPool);
+      const candidates = loadCandidates(db, "practice", blueprint.policy.skillPool, difficultyLevels(settings.values));
       const blocked = loadBlockedFingerprints(db);
       const priorities = loadPriorities(db, candidates, nowIso, taxonomyId);
       const discovery = runDiscovery(db, { asOf: nowIso, taxonomyId, config: discoveryCfg });

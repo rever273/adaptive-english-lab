@@ -1,5 +1,5 @@
 import { createHash } from "node:crypto";
-import type { Prompt, RevealResponse, SlotState } from "@english-lab/contracts";
+import { difficultyLevels, type Prompt, type RevealResponse, type SlotState } from "@english-lab/contracts";
 import { clampMultiplier, familyCap, type DiscoveryConfig } from "@english-lab/learning";
 import type { Db } from "../../db/open.js";
 import { ApiError } from "../../errors.js";
@@ -10,7 +10,7 @@ import { loadBlockedFingerprints, loadCandidates } from "./bank.js";
 import { recordDisplayedEncounters } from "../vocabulary/repository.js";
 import { exposeUnits } from "./exposure.js";
 import { assertLease } from "./lease.js";
-import { loadBlueprint, loadPlan, type SessionDeps } from "./policy.js";
+import { loadBlueprint, loadPlan, loadSettings, type SessionDeps } from "./policy.js";
 import { loadPriorities } from "./priorities.js";
 
 interface SlotRow {
@@ -160,7 +160,8 @@ function recheckDiscovery(db: Db, deps: SessionDeps, sessionId: string, slot: Sl
   if (stillSuspected) return;
 
   const blueprint = loadBlueprint(db, parsed.blueprint.revisionId);
-  const candidates = loadCandidates(db, "practice", blueprint.policy.skillPool).filter((c) => c.format === choice.format && c.revisionId !== slot.revisionId);
+  const settingsId = (db.prepare("SELECT settings_revision_id AS id FROM sessions WHERE id = ?").get(sessionId) as { id: string }).id; // the replacement obeys the difficulty range the session was built with
+  const candidates = loadCandidates(db, "practice", blueprint.policy.skillPool, difficultyLevels(loadSettings(db, settingsId).values)).filter((c) => c.format === choice.format && c.revisionId !== slot.revisionId);
   const blocked = loadBlockedFingerprints(db);
   const used = db
     .prepare(

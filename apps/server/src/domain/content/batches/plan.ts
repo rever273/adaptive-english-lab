@@ -11,6 +11,8 @@ export interface ItemPlan {
   context_id: string;
   /** detect_error only: this item must be a fully correct sentence (the "No mistake" quota) */
   noMistake?: boolean;
+  /** TASK_021: CEFR level requested from the settings range when the batch was created; absent = the historical B2 */
+  level?: "A2" | "B1" | "B2" | "C1";
   vocabulary?: { lemma: string; translationRu: string | null; family: "recognition" | "guided_recall" | "collocation" };
 }
 
