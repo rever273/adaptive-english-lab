@@ -20,6 +20,7 @@ import { registerAnalyticsRoutes } from "./routes/analytics.js";
 import { registerReportRoutes } from "./routes/reports.js";
 import { registerBackupRoutes } from "./routes/backups.js";
 import { registerVocabularyRoutes } from "./routes/vocabulary.js";
+import { registerVocabularyImageRoutes } from "./routes/vocabularyImages.js";
 import { registerVocabularyPracticeRoutes } from "./routes/vocabularyPractice.js";
 import { registerUiRoutes } from "./routes/ui.js";
 import { registerTutorRoutes } from "./routes/tutor.js";
@@ -91,6 +92,7 @@ export async function buildApp(deps: AppDeps): Promise<FastifyInstance> {
   const base = { now: deps.attempts?.now ?? (() => new Date()), newId: deps.attempts?.newId ?? randomUUID };
   registerSessionRoutes(app, db, base, { ...(deps.sessions ?? {}), onLease: () => deps.scheduler?.kick(), onSessionEnd: (id) => void deps.stt?.stopForSession(id), onVoiceDone: async (id) => { deps.scheduler?.releaseVoiceHold(id); await deps.stt?.stopForSession(id); deps.scheduler?.kick(); } });
   registerVocabularyPracticeRoutes(app, db, base);
+  registerVocabularyImageRoutes(app, config.vocabularyImagesDir);
   registerUiRoutes(app);
   registerQueueRoutes(app, db, base, deps.scheduler ?? null);
   registerTutorRoutes(app, db, base, { onQueued: () => deps.scheduler?.kick() });

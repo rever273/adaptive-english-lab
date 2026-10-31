@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import { ApiRequestError, addVocabulary, createVocabSession, fetchVocabPractice, fetchVocabulary, patchVocabulary, removeVocabulary, type VocabEntry, type VocabPracticeStatus } from "../api";
+import { WordImage } from "../components/WordImage";
 import { Practice } from "./Practice";
 import { Kbd, isTextField, useKeys } from "../components/hotkeys";
 
@@ -81,6 +82,7 @@ function Row({ w, onChanged }: { w: VocabEntry; onChanged: () => void }) {
     <>
       <tr data-testid="vocab-row" className={w.learned ? "row-learned" : undefined}>
         <td className="c"><input type="checkbox" checked={w.learned} onChange={(e) => void toggle(e.target.checked)} aria-label={`${w.lemma} learned`} /></td>
+        <td className="c"><WordImage word={w.lemma} /></td>
         <td className="c">
           <Word w={w} />
           {w.surfaceForms.length > 0 && <div className="muted small">{w.surfaceForms.join(", ")}</div>}
@@ -122,7 +124,7 @@ function Row({ w, onChanged }: { w: VocabEntry; onChanged: () => void }) {
       </tr>
       {open && (
         <tr className="edit-row">
-          <td colSpan={10}>
+          <td colSpan={11}>
             {msg && <p className="notice notice-warn small" role="alert">{msg}</p>}
             <div className="form-grid">
               <label>Translation (Russian)<input value={tr} onChange={(e) => setTr(e.target.value)} /></label>
@@ -314,6 +316,7 @@ export function Vocabulary({ onNavigate }: { onNavigate?: (page: "vocabulary" | 
             <thead>
               <tr>
                 <th title="Learned"><i className="pi pi-check-square" aria-hidden="true" /><span className="visually-hidden">Learned</span></th>
+                <th>Image</th>
                 <th>Word</th>
                 <th>Translation</th>
                 <th>Part of speech</th>
