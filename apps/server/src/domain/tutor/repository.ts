@@ -2,10 +2,11 @@ import { z } from "zod";
 import type { Db } from "../../db/open.js";
 import { ApiError } from "../../errors.js";
 import { enqueue } from "../../queue/jobs.js";
+import { exposeUnits } from "../sessions/exposure.js";
 import { getFeedback } from "../sessions/feedback.js";
 import type { SessionDeps } from "../sessions/policy.js";
 
-export const TUTOR_PROMPT = "tutor-v1";
+export const TUTOR_PROMPT = "tutor-v2";
 export const MAX_QUESTION = 2000;
 
 export const AskSchema = z
@@ -65,8 +66,11 @@ export function askTutor(db: Db, deps: SessionDeps, raw: unknown): { threadId: s
   if (!parsed.success) throw new ApiError(400, "VALIDATION_ERROR", "Request is invalid", parsed.error.issues.map((i) => ({ path: i.path.join("."), message: i.message })));
   const b = parsed.data;
   const feedback = getFeedback(db, deps, b.sessionId, b.slotId); // 404/409 for a slot that does not belong here or has not been answered yet
-  if (!feedback.explanation_ru) throw new ApiError(409, "TUTOR_NOT_AVAILABLE", "The explanation for this task opens after the answer is confirmed (and after the block for diagnostic checks).");
+  if (feedback.state === "closed" || feedback.state === "skipped" || feedback.verdict === "disputed") throw new ApiError(409, "TUTOR_NOT_AVAILABLE", "The explanation opens after the diagnostic block is finished and an answer is available.");
   const ctx = slotContext(db, b.slotId);
+  const exercise = db.prepare("SELECT content_json AS c FROM exercise_revisions WHERE id = ?").get(ctx.revisionId) as { c: string };
+  const rule = feedback.explanation_ru ?? (JSON.parse(exercise.c) as { explanation_ru: string }).explanation_ru;
+  if (!rule) throw new ApiError(409, "TUTOR_NOT_AVAILABLE", "No explanation is available for this task.");
   // D64: "Why?" is the approved rule (instant); "Explain in Russian" is a longer step-by-step explanation written by the local AI
   const needsModel = b.kind === "more_examples" || b.kind === "question" || b.kind === "explain_ru";
   // the same request is not queued twice: a second press while the first is waiting returns the thread as it is
@@ -79,12 +83,13 @@ export function askTutor(db: Db, deps: SessionDeps, raw: unknown): { threadId: s
   const insert = db.prepare("INSERT INTO tutor_messages(id, thread_id, role, kind, source, text, context_json, job_id, status, created_at) VALUES (?,?,?,?,?,?,?,?,?,?)");
   return db
     .transaction(() => {
+      exposeUnits(db, deps, b.slotId, ctx.revisionId, "answer");
       const userId = deps.newId();
       const label = { why: "Why?", explain_ru: "Explain in Russian", more_examples: "More examples", question: (b.question ?? "").trim() }[b.kind];
       insert.run(userId, b.slotId, "user", b.kind, "user", label, JSON.stringify(context), null, "validated", now);
       // the approved rule is shown once per thread for model-bound questions (it is already on screen); "Why?" always repeats it
       const ruleShown = needsModel && db.prepare("SELECT 1 FROM tutor_messages WHERE thread_id = ? AND source = 'approved_exercise' LIMIT 1").get(b.slotId) !== undefined;
-      if (!ruleShown) insert.run(deps.newId(), b.slotId, "assistant", b.kind, "approved_exercise", feedback.explanation_ru, JSON.stringify({ ...context, note: "the approved rule of this exercise revision" }), null, "approved", now);
+      if (!ruleShown) insert.run(deps.newId(), b.slotId, "assistant", b.kind, "approved_exercise", rule, JSON.stringify({ ...context, note: "the approved rule of this exercise revision" }), null, "approved", now);
       let jobId: string | null = null;
       if (needsModel) {
         const j = enqueue(db, { now: deps.now, newId: deps.newId }, { kind: "tutor", payload: { messageId: userId, slotId: b.slotId, kind: b.kind, question: b.kind === "question" ? (b.question ?? "").trim() : null }, idempotencyKey: `tutor:${b.slotId}:${userId}`, priority: 2 });

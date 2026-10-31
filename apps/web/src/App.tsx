@@ -8,6 +8,7 @@ import { Tutor } from "./pages/Tutor";
 import { Settings } from "./pages/Settings";
 import { Status } from "./pages/Status";
 import { AiActivity } from "./components/AiActivity";
+import { AiModelNotice } from "./components/AiModelNotice";
 import { XpTracks } from "./components/XpTracks";
 import { WordCatcher } from "./components/WordPopup";
 import { Kbd, useKeys } from "./components/hotkeys";
@@ -111,6 +112,7 @@ export function App() {
       <WordCatcher />
       {page !== "studio" && <ContentStockNotice onOpen={c => go("studio", c)} />}
       <AiActivity onOpenTasks={() => go("tasks")} />
+      <AiModelNotice />
     </div>
   );
 }

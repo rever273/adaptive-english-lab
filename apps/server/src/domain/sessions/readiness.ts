@@ -2,6 +2,7 @@ import { clampMultiplier, selectSession, scaleQuotas, discoveryProbeLimit, type 
 import { difficultyLevels, voiceTaskCount, type ShortageDetails } from "@english-lab/contracts";
 import type { Db } from "../../db/open.js";
 import { loadBlockedFingerprints, loadCandidates } from "./bank.js";
+import { withRepeats } from "./repeats.js";
 import { loadBlueprint, loadPlan, loadSettings, type SessionDeps } from "./policy.js";
 
 export interface Readiness {
@@ -22,7 +23,8 @@ export function computeReadiness(db: Db, deps: SessionDeps, blueprintRevisionId:
   const blueprint = loadBlueprint(db, blueprintRevisionId);
   const settings = loadSettings(db);
   const plan = loadPlan(db, deps);
-  const candidates = loadCandidates(db, "practice", blueprint.policy.skillPool, difficultyLevels(settings.values));
+  // D68: fresh exercises plus the repeats that are due now (the same set createPracticeSession would use)
+  let candidates = withRepeats(db, loadCandidates(db, "practice", blueprint.policy.skillPool, difficultyLevels(settings.values)), deps.now()).candidates;
   const blocked = loadBlockedFingerprints(db);
   const n = settings.values.taskCount;
   const quotas = scaleQuotas(blueprint.policy.quotas, n);
@@ -48,6 +50,9 @@ export function computeReadiness(db: Db, deps: SessionDeps, blueprintRevisionId:
       return { readySessions: ready, shortage: { deficits: r.deficits, largestFeasibleN: r.largestFeasibleN, requestedN: n } };
     }
     for (const s of r.slots) for (const f of byId.get(s.revisionId)!.unitFingerprints) blocked.add(f);
+    // a repeat keeps no fingerprint to block (its units are already shown), so a simulated exercise is consumed explicitly
+    const taken = new Set(r.slots.map((s) => s.revisionId));
+    candidates = candidates.filter((c) => !taken.has(c.revisionId));
   }
   return { readySessions: ready, shortage: null };
 }

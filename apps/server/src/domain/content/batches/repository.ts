@@ -6,7 +6,8 @@ import { ApiError } from "../../../errors.js";
 import { enqueue } from "../../../queue/jobs.js";
 import { ensurePromptVersion } from "../../ai/prompts.js";
 import { draftFormatsText } from "./draftFormats.js";
-import { groupUnits, planBatch, type ItemPlan } from "./plan.js";
+import { lessonPlanView } from "./lessonNeeds.js";
+import { groupUnits, planBatch, planFromDeficits, type ItemPlan, type LessonDemand } from "./plan.js";
 import { taxonomyForNewRevisions } from "../repository.js";
 import { exportVocabulary } from "../../vocabulary/practice.js";
 import { loadBlockedFingerprints, loadCandidates } from "../../sessions/bank.js";
@@ -215,6 +216,19 @@ export function createBatch(db: Db, deps: BatchDeps, input: z.input<typeof Creat
           return { ordinal, type, dimension: family === "guided_recall" ? "production" : "recognition", target_skill: "collocations.natural_phrases", topic: "everyday", context_id: `vocab-${batchId.slice(0, 8)}-${ordinal}`, vocabulary: { lemma: word.lemma, translationRu: word.translationRu, family } };
         });
       } else {
+        // D68: an adaptive batch is planned from the DEFICITS of the next lesson (then the following lessons), not from the last played one
+        const view = request.mode === "adaptive" && !request.trial && !request.skills?.length ? lessonPlanView(db, deps.now()) : null;
+        if (view) {
+          const lessons: LessonDemand[] = view.lessons.slice(view.nextIndex).map((n) => ({
+            key: n.key,
+            formatDeficit: Object.fromEntries((n.formats.some((f) => f.deficit > 0) ? n.formats.filter((f) => f.deficit > 0).map((f) => [f.format, f.deficit]) : n.deficit > 0 ? n.formats.map((f) => [f.format, f.need]) : []) as Array<[string, number]>),
+            skills: n.skills.length > 0
+              ? [...n.skills].sort((a, b) => b.deficit - a.deficit || a.have - b.have || (a.skill < b.skill ? -1 : 1)).map((k) => k.skill)
+              : [...tax.skills].sort((a, b) => (coverage.get(a) ?? 0) - (coverage.get(b) ?? 0) || (a < b ? -1 : 1)), // no skill pool: the thinnest skills of the taxonomy
+            capacity: n.recommended,
+          }));
+          plans = planFromDeficits({ count: request.count, lessons, ...(request.types ? { types: request.types } : {}), tag: batchId.slice(0, 8) });
+        } else {
         // Replenish the current lesson's skill pool without changing session selection or its weakness algorithm.
         const last = db.prepare("SELECT blueprint_revision_id AS id FROM sessions WHERE purpose = 'practice' AND blueprint_revision_id IS NOT NULL ORDER BY created_at DESC, rowid DESC LIMIT 1").get() as { id: string } | undefined;
         const policy = !request.skills?.length && !request.trial && last ? loadBlueprint(db, last.id).policy : null;
@@ -222,6 +236,7 @@ export function createBatch(db: Db, deps: BatchDeps, input: z.input<typeof Creat
         const lessonTypes = policy ? EXERCISE_TYPES.filter(t => t === "context_reading" ? policy.readingBlocks > 0 && (!pool.length || pool.some(s => /^linking\./.test(s))) : policy.quotas[t] > 0 && (t !== "choose_missing_fragment" || !pool.length || pool.some(s => /^(prepositions|articles|countability|linking|verb_patterns)\./.test(s)))) : undefined;
         const scoped = { ...request, ...(pool.length ? { skills: pool } : {}), ...(!request.types && lessonTypes?.length ? { types: lessonTypes } : {}) };
         plans = planBatch({ request: scoped, taxonomySkills: [...tax.skills], coverage, tag: batchId.slice(0, 8) });
+        }
         // the learners target difficulty range (Settings): new content is requested at those levels in turn; unset keeps the historical B2
         const levels = difficultyLevels(loadSettings(db).values);
         if (levels) plans = plans.map((p) => ({ ...p, level: levels[p.ordinal % levels.length]! }));

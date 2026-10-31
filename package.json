@@ -22,6 +22,7 @@
     "backup": "node scripts/backup.mjs",
     "restore": "node scripts/restore.mjs",
     "lab:export": "node scripts/lab-export.mjs",
+    "lab:verdicts": "node scripts/attempt-verdicts.mjs",
     "content:agent": "node scripts/content-agent.mjs",
     "content:validate": "node scripts/content-validate.mjs",
     "trial:generate": "node scripts/generation-trial.mjs",

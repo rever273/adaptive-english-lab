@@ -482,9 +482,10 @@ function FeedbackPanel({ feedback, busy, onTryAgain, onContinue, autoAdvance = f
     <div className={`feedback feedback-${kind}`} data-testid="feedback" data-state={feedback.state} data-verdict={feedback.verdict ?? ""} aria-live="polite">
       <p className="feedback-title">
         <i className={`pi ${feedback.state === "closed" ? "pi-save" : feedback.state === "pending" ? "pi-hourglass" : feedback.verdict === "correct" ? "pi-check-circle" : feedback.verdict === "idk" ? "pi-info-circle" : feedback.verdict === "incorrect" ? "pi-times-circle" : "pi-info-circle"}`} aria-hidden="true" />{" "}
-        {feedback.state === "closed" ? "Saved" : feedback.state === "pending" ? "Saved — AI review later" : feedback.detail ? "Right construction — check the detail" : feedback.verdict === "correct" ? "Correct" : feedback.verdict === "idk" ? "No problem" : feedback.verdict === "incorrect" ? "Not this time" : feedback.state === "skipped" ? "Skipped" : "Answer"}
+        {feedback.state === "closed" ? "Saved" : feedback.aiChecked ? `${feedback.verdict === "correct" ? "Correct" : "Incorrect"} (checked by AI)` : feedback.unresolved ? "Could not be checked automatically" : feedback.state === "pending" ? "Saved — AI review later" : feedback.detail ? "Right construction — check the detail" : feedback.verdict === "correct" ? "Correct" : feedback.verdict === "idk" ? "No problem" : feedback.verdict === "incorrect" ? "Not this time" : feedback.state === "skipped" ? "Skipped" : "Answer"}
       </p>
-      {feedback.detail ? <DetailDiff d={feedback.detail} /> : <p>{feedback.message}</p>}
+      {feedback.detail ? <DetailDiff d={feedback.detail} /> : feedback.aiChecked && feedback.aiReview ? <p lang="ru" className="ru" data-testid="ai-reason">{feedback.aiReview.explanation_ru}</p> : <p>{feedback.message}</p>}
+      {feedback.aiChecked && <p className="muted small">The local AI made this call, so it counts in your progress with a lower weight until it is confirmed.</p>}
       {feedback.correct && (
         <div data-testid="correct-answer">
           {feedback.correct.noMistake && <p>This sentence is correct: <strong>No mistake</strong>.</p>}
@@ -518,6 +519,46 @@ function FeedbackPanel({ feedback, busy, onTryAgain, onContinue, autoAdvance = f
   );
 }
 
+/** D65: ONE non-blocking notice once enough answers could not be checked automatically; one button copies the single agent task for them. */
+function ReviewNotice({ unresolved }: { unresolved: number }) {
+  const [state, setState] = useState<{ text: string; copied: boolean } | null>(null);
+  const [error, setError] = useState<string | null>(null);
+  const copy = async () => {
+    setError(null);
+    try {
+      const { text } = await api.fetchAgentTask("review");
+      let copied = true;
+      try {
+        await navigator.clipboard.writeText(text);
+      } catch {
+        copied = false;
+      }
+      setState({ text, copied });
+    } catch (e) {
+      setError(e instanceof Error ? e.message : String(e));
+    }
+  };
+  return (
+    <div className="notice notice-info" data-testid="review-notice">
+      <p>
+        <i className="pi pi-hourglass" aria-hidden="true" /> <strong>{unresolved} answers are waiting for a review.</strong> Some could not be checked automatically (not marked wrong); some the local AI called incorrect (shown as Incorrect, but they count in your progress only after review). Copy one task for your coding agent: it confirms or overturns each answer and adds the ones that are fine as approved variants, so they are recognised next time.
+      </p>
+      <div className="actions">
+        <button className="btn" onClick={() => void copy()} data-testid="copy-review-task">
+          <i className="pi pi-copy" aria-hidden="true" /> Copy task for my agent
+        </button>
+      </div>
+      {error && <p className="notice notice-error small" role="alert">{error}</p>}
+      {state && (
+        <div>
+          <p className="small" role="status">{state.copied ? "Copied. Paste it into your agent's chat." : "Could not use the clipboard. Select and copy the text below."}</p>
+          <textarea readOnly rows={5} value={state.text} aria-label="Agent task text" style={{ width: "100%" }} />
+        </div>
+      )}
+    </div>
+  );
+}
+
 function DashboardScreen({ dashboard, message, onStart, onStartCheck }: { dashboard: Dashboard; message: string | null; onStart: (blueprintRevisionId: string) => void; onStartCheck: (purpose: "diagnostic" | "heldout") => void }) {
   // lessons in course order: the first one that can still build a session is offered; the others stay one click away
   const [chosen, setChosen] = useState<string | null>(null);
@@ -536,6 +577,7 @@ function DashboardScreen({ dashboard, message, onStart, onStartCheck }: { dashbo
           {message}
         </div>
       )}
+      {dashboard.review?.notice && <ReviewNotice unresolved={dashboard.review.unresolved} />}
       {!diagnosticFinished(dashboard.diagnostic) && dashboard.diagnostic.blocksUsed === 0 && dashboard.diagnostic.ready && (
         <div className="notice notice-info" data-testid="diagnostic-first">
           <p>
@@ -644,6 +686,7 @@ function ChecksCard({ dashboard, onStartCheck }: { dashboard: Dashboard; onStart
 function outcome(f: FeedbackResponse): { cls: string; icon: string; label: string } {
   if (f.state === "skipped") return { cls: "skip", icon: "pi-forward", label: "Skipped" };
   if (f.state === "pending" || f.confirmation !== "confirmed") {
+    if (f.aiChecked) return { cls: f.verdict === "correct" ? "ok" : "bad", icon: f.verdict === "correct" ? "pi-check-circle" : "pi-times-circle", label: unconfirmedLabel(f) };
     return { cls: "wait", icon: "pi-hourglass", label: unconfirmedLabel(f) };
   }
   if (f.verdict === "correct" && f.detail) return { cls: "detail", icon: "pi-exclamation-circle", label: "Right construction — a detail differs" };
@@ -696,7 +739,7 @@ function BlockReview({ sessionId }: { sessionId: string }) {
             {f.explanation_ru && <p lang="ru" className="ru small">{f.explanation_ru}</p>}
             {f.vocabulary && <VocabWhy v={f.vocabulary} compact />}
             {f.aiReview && <div className="notice notice-info" data-testid="ai-review">
-              <strong>AI draft — not a confirmed assessment</strong>
+              <strong>{f.aiChecked ? "Checked by AI — counts with a lower weight until confirmed" : "AI draft — not a confirmed assessment"}</strong>
               <p lang="ru" className="ru small">{f.aiReview.explanation_ru}</p>
               {f.aiReview.findings.map((finding, index) => <p className="small" key={index}><strong>{finding.original}</strong> → <strong>{finding.suggestion}</strong> <span lang="ru">{finding.explanation_ru}</span></p>)}
             </div>}
@@ -720,6 +763,7 @@ function SummaryScreen({ summary: first, onDone, onNavigate }: { summary: Sessio
   }, [waitingForAi, summary.sessionId]);
   const c = summary.counts;
   const vocab = summary.category === "vocabulary";
+  const ai = (summary.aiChecked?.correct ?? 0) + (summary.aiChecked?.incorrect ?? 0);
   return (
     <section aria-labelledby="sum-h" data-testid="summary">
       <h2 id="sum-h">{vocab ? "Vocabulary session " : "Session "}{summary.status === "completed" ? "complete" : "ended early"}</h2>
@@ -737,16 +781,19 @@ function SummaryScreen({ summary: first, onDone, onNavigate }: { summary: Sessio
         <Stat cls="idk" icon="pi-question-circle" label="“I don’t know”" value={c.idk} id="count-idk" />
         <Stat cls="info" icon="pi-lightbulb" label="With a hint or answer shown" value={c.assisted} id="count-assisted" />
         {waitingForAi > 0 && <Stat cls="wait" icon="pi-spin pi-spinner" label="AI check in progress" value={waitingForAi} id="count-ai-waiting" />}
+        {ai > 0 && <Stat cls="info" icon="pi-sparkles" label="Counted, checked by AI (lower weight)" value={ai} id="count-ai-checked" />}
+        {(summary.unresolved ?? 0) > 0 && <Stat cls="wait" icon="pi-hourglass" label="Waiting for review (not checked automatically, or AI-incorrect)" value={summary.unresolved ?? 0} id="count-unresolved" />}
         <Stat cls="wait" icon="pi-hourglass" label="Not counted yet" value={c.pending} id="count-pending" />
         <Stat cls="skip" icon="pi-forward" label="Skipped" value={c.skipped} id="count-skipped" />
         {c.unanswered > 0 && <Stat cls="skip" icon="pi-minus-circle" label="Not reached" value={c.unanswered} id="count-unanswered" />}
+        {(summary.repeats ?? 0) > 0 && <Stat cls="info" icon="pi-replay" label="Of these, repeats (practice only, no change to skill levels)" value={summary.repeats ?? 0} id="count-repeats" />}
       </div>
       {summary.notes.map((n, i) => (
         <p key={i} className="muted">{n}</p>
       ))}
       {c.pending > 0 && (
         <p className="notice notice-warn small">
-          <i className="pi pi-hourglass" aria-hidden="true" /> <strong>Not counted yet</strong> means you wrote a sentence that is worded differently from the approved ones. The local AI checks it and gives its opinion below (&ldquo;Looks correct&rdquo; or &ldquo;Looks wrong&rdquo;), but that opinion is a draft: only a confirmed check — for example by your coding agent — counts it in your stats. (A different name or number alone is recognised automatically.)
+          <i className="pi pi-hourglass" aria-hidden="true" /> <strong>Not counted yet</strong> means the local AI is still checking a sentence that is worded differently from the approved ones, or it could not decide (&ldquo;Could not be checked automatically&rdquo;). Those wait for a review and are never marked wrong. When the AI does decide, you see &ldquo;Correct&rdquo; or &ldquo;Incorrect (checked by AI)&rdquo; with its reason, and the answer counts with a lower weight until it is confirmed. (A different name or number alone is recognised automatically.)
         </p>
       )}
       {vocab && (summary.practiseAgain ?? []).length > 0 && (

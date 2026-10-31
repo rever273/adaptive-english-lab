@@ -1,6 +1,8 @@
 import { describe, expect, it } from "vitest";
 import {
+  AI_CHECKED_WEIGHT,
   MASTERY_V1,
+  MASTERY_V2,
   canonicalJson,
   computeComponents,
   displayScore,
@@ -250,5 +252,33 @@ describe("Wilson interval and display", () => {
   });
   it("canonical JSON sorts keys and drops undefined", () => {
     expect(canonicalJson({ b: 1, a: [2, { d: 1, c: undefined }] })).toBe('{"a":[2,{"d":1}],"b":1}');
+  });
+});
+
+describe("D65 provisional AI-checked evidence (mastery-v2)", () => {
+  it("the AI-checked weight is a config constant, default 0.5, on a new algorithm id; v1 is untouched", () => {
+    expect(AI_CHECKED_WEIGHT).toBe(0.5);
+    expect(MASTERY_V2).toMatchObject({ version: "mastery-v2", aiCheckedWeight: 0.5 });
+    expect(MASTERY_V1.version).toBe("mastery-v1");
+    expect("aiCheckedWeight" in MASTERY_V1).toBe(false);
+    expect(canonicalJson(MASTERY_V1)).not.toContain("aiCheckedWeight");
+  });
+
+  it("confirmed-only evidence gives byte-identical components with or without the v2 config", () => {
+    const list = many(14, (i) => ({ ageDays: i, day: at(i).slice(0, 10), success: i % 3 !== 0, heldout: i % 5 === 0 }));
+    expect(canonicalJson(computeComponents(list, AS_OF, MASTERY_V2))).toBe(canonicalJson(computeComponents(list, AS_OF, MASTERY_V1)));
+  });
+
+  it("an AI-checked opportunity moves the score by its (lower) weight and is counted in aiCheckedN", () => {
+    const base = many(4, () => ({ success: true }));
+    const full = computeComponents([...base, opp({ success: false })], AS_OF);
+    const half = computeComponents([...base, { ...opp({ success: false }), weight: AI_CHECKED_WEIGHT }], AS_OF);
+    // posterior a = (1 + sum w*y) / (2 + sum w)
+    expect(full.a).toBeCloseTo((1 + 4) / (2 + 5), 12);
+    expect(half.a).toBeCloseTo((1 + 4) / (2 + 4.5), 12);
+    expect(half.a as number).toBeGreaterThan(full.a as number);
+    expect(half.n).toBe(5);
+    expect(half.aiCheckedN).toBe(1);
+    expect("aiCheckedN" in full).toBe(false);
   });
 });

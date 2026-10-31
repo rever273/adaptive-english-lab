@@ -114,6 +114,10 @@ export const FeedbackResponseSchema = z
       explanation_ru: z.string(),
       findings: z.array(z.object({ original: z.string(), suggestion: z.string(), explanation_ru: z.string() })),
     }).strict().optional(),
+    /** D65: a decided local-AI verdict (correct / incorrect): shown at once as "checked by AI", counted provisionally, never confirmed */
+    aiChecked: z.boolean().optional(),
+    /** D65: the AI check ended without a verdict (abstain, ambiguous, invalid, failed): the answer waits in the review queue */
+    unresolved: z.boolean().optional(),
     correct: z
       .object({
         options: z.array(z.string()).optional(),
@@ -174,10 +178,15 @@ export const SessionSummarySchema = z
       })
       .strict(),
     pendingAnalysis: z.number().int(),
+    /** D65: first attempts decided by the local AI (provisional, "AI-checked"), and answers that could not be checked automatically (unresolved) */
+    aiChecked: z.object({ correct: z.number().int(), incorrect: z.number().int() }).strict().optional(),
+    unresolved: z.number().int().optional(),
     /** TASK_021: written answers whose local AI check has not produced its draft yet (a live counter; the draft itself never counts as confirmed) */
     aiWaiting: z.number().int().optional(),
     /** D64: first attempts counted as correct whose name/number differs from the approved sentence (a subset of counts.correct) */
     detailDiffers: z.number().int().optional(),
+    /** D68: slots that were labelled repeats (practice only; they never count as independent evidence for skill levels) */
+    repeats: z.number().int().optional(),
     /** vocabulary sessions: the session category, the activity XP it earned and the words whose first try was wrong or "I don't know" */
     category: z.enum(["grammar", "vocabulary"]).optional(),
     xpEarned: z.number().int().optional(),
@@ -215,6 +224,8 @@ export const DashboardSchema = z
     diagnostic: z
       .object({ protocol: z.string(), blocksTotal: z.number().int(), blocksUsed: z.number().int(), nextBlock: z.number().int().nullable(), ready: z.boolean(), shortage: z.object({ deficits: z.unknown() }).nullable() })
       .strict(),
+    /** D65: answers the local AI could not settle; `notice` once their number reaches the setting reviewNoticeThreshold */
+    review: z.object({ unresolved: z.number().int(), threshold: z.number().int(), notice: z.boolean() }).strict().optional(),
     heldout: z
       .object({ protocol: z.string(), availableTasks: z.number().int(), eligibleSkills: z.number().int(), minDelayDays: z.number().int(), ready: z.boolean(), reason: z.string().nullable() })
       .strict(),

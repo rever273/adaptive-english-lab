@@ -6,8 +6,14 @@
 
 export const MASTERY_VERSION = "mastery-v1";
 
+/** D65: provisional counting of decided local-AI verdicts at a lower weight (a new algorithm id; mastery-v1 is unchanged) */
+export const MASTERY_V2_VERSION = "mastery-v2";
+export const AI_CHECKED_WEIGHT = 0.5;
+
 export interface MasteryConfig {
-  version: typeof MASTERY_VERSION;
+  version: string;
+  /** D65 (mastery-v2 only): weight of an AI-checked (model-decided, never confirmed) opportunity relative to a code-confirmed one (1) */
+  aiCheckedWeight?: number;
   /** last N eligible opportunities per skill x dimension x cohort */
   window: number;
   halfLifeDays: number;
@@ -44,6 +50,9 @@ export const MASTERY_V1: MasteryConfig = {
   wilsonZ: 1.96,
 };
 
+/** mastery-v2 (D65): the same arithmetic; opportunities decided by the local AI count with `aiCheckedWeight`. Confirmed-only data gives the same numbers as v1. */
+export const MASTERY_V2: MasteryConfig = { ...MASTERY_V1, version: MASTERY_V2_VERSION, aiCheckedWeight: AI_CHECKED_WEIGHT };
+
 export type Dimension = "recognition" | "correction" | "production";
 export type EvidenceStatus = "unknown" | "insufficient" | "developing" | "stale" | "stable";
 export type EvidenceLabel = EvidenceStatus | "weak" | "improving" | "maintenance";
@@ -60,6 +69,8 @@ export interface EvidenceOpportunity {
   heldout: boolean;
   /** new prompt >= delayedProbeMinDays after the last practice of this skill (see markDelayedProbes) */
   delayedProbe: boolean;
+  /** D65: relative weight of this opportunity (absent = 1); set only by mastery-v2 for AI-checked evidence */
+  weight?: number;
 }
 
 export interface MasteryComponents {
@@ -86,6 +97,8 @@ export interface MasteryComponents {
   status: EvidenceStatus;
   label: EvidenceLabel;
   selectedIds: string[];
+  /** D65: how many of the selected opportunities are AI-checked (provisional); present only when there are some */
+  aiCheckedN?: number;
 }
 
 const MS_PER_DAY = 86_400_000;
@@ -155,12 +168,14 @@ export function computeComponents(all: readonly EvidenceOpportunity[], asOf: str
   let indWy = 0;
   let successes = 0;
   let heldoutN = 0;
+  let aiCheckedN = 0;
   const days = new Set<string>();
   const heldoutDays = new Set<string>();
   const delayedSuccessDays = new Set<string>();
   for (const o of sel) {
     const age = Math.max(0, (tE - t(o.at)) / MS_PER_DAY);
-    const w = Math.pow(2, -age / cfg.halfLifeDays);
+    const w = o.weight === undefined ? Math.pow(2, -age / cfg.halfLifeDays) : Math.pow(2, -age / cfg.halfLifeDays) * o.weight;
+    if (o.weight !== undefined && o.weight < 1) aiCheckedN += 1;
     const y = o.success ? 1 : 0;
     sumW += w;
     sumW2 += w * w;
@@ -221,6 +236,7 @@ export function computeComponents(all: readonly EvidenceOpportunity[], asOf: str
     status,
     label,
     selectedIds: sel.map((o) => o.id),
+    ...(aiCheckedN > 0 ? { aiCheckedN } : {}),
   };
 }
 

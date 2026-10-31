@@ -58,7 +58,7 @@ describe("generation through the dispatcher produces DRAFTS only", () => {
     expect(one<{ n: number }>(r.env.db, "SELECT COUNT(*) AS n FROM content_reviews").n).toBe(0);
     // provenance is written by the server from the pinned model, and the exercise belongs to the batch
     const content = JSON.parse(one<{ c: string }>(r.env.db, "SELECT content_json AS c FROM exercise_revisions WHERE id = ?", rev).c) as { provenance: { origin: string; model_tag: string; model_digest: string; prompt_version: string }; status: string; bank_role: string };
-    expect(content).toMatchObject({ status: "draft", bank_role: "practice", provenance: { origin: "qwen", model_tag: "qwen3:8b", prompt_version: "generation-v5" } });
+    expect(content).toMatchObject({ status: "draft", bank_role: "practice", provenance: { origin: "qwen", model_tag: "gemma4:12b", prompt_version: "generation-v5" } });
     expect(content.provenance.model_digest).toMatch(/^[0-9a-f]{64}$/);
     expect(one<{ n: number }>(r.env.db, "SELECT COUNT(*) AS n FROM exercises WHERE source_batch_id = ?", batchId).n).toBe(24);
     expect(r.model.calls).toBe(14);

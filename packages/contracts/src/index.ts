@@ -51,6 +51,25 @@ export type Health = z.infer<typeof HealthSchema>;
 
 export const ComponentStatusSchema = z.enum(["not_implemented", "unavailable", "ready"]);
 
+/** D67: residency of the one local model */
+export const ModelResidencyStateSchema = z.enum(["unloaded", "loading", "ready", "unloading", "error"]);
+export type ModelResidencyState = z.infer<typeof ModelResidencyStateSchema>;
+
+/** GET /api/v1/ai/model */
+export const AiModelStatusSchema = z
+  .object({
+    state: ModelResidencyStateSchema,
+    model: z.string(),
+    loadedSince: z.string().nullable(),
+    lastLoadMs: z.number().nullable(),
+    vramBytes: z.number().nullable(),
+    error: z.string().nullable(),
+    busy: z.enum(["job_running", "practice_active", "loading", "unloading"]).nullable(),
+    preloadOnStart: z.boolean(),
+  })
+  .strict();
+export type AiModelStatus = z.infer<typeof AiModelStatusSchema>;
+
 /** GET /api/v1/capabilities - no secrets, no paths. */
 export const CapabilitiesSchema = z
   .object({
@@ -60,7 +79,13 @@ export const CapabilitiesSchema = z
     db: z.object({ status: z.enum(["ready", "unavailable"]) }).strict(),
     ui: z.object({ built: z.boolean() }).strict(),
     ai: z
-      .object({ ollama: ComponentStatusSchema, nimble: ComponentStatusSchema, qwen: ComponentStatusSchema })
+      .object({
+        ollama: ComponentStatusSchema,
+        /** the ONE local model (D67): which tag the app uses and whether it is in memory right now */
+        model: ComponentStatusSchema,
+        modelTag: z.string(),
+        modelState: ModelResidencyStateSchema,
+      })
       .strict(),
     stt: z.object({ status: ComponentStatusSchema }).strict(),
     degradedReasons: z.array(z.string()),
@@ -86,6 +111,10 @@ export const SettingsV1Schema = z
     vocabularyTaskCount: z.number().int().min(5).max(10).optional(),
     /** D64/TASK_020: at most this many words never practised before enter one vocabulary session (default 4) */
     vocabularyNewWordsPerSession: z.number().int().min(1).max(10).optional(),
+    /** D67: warm the local model at start and when the learner arrives (default true) */
+    preloadModelOnStart: z.boolean().optional(),
+    /** D65: how many unresolved answers (the local AI could not settle them) collect before ONE non-blocking notice offers an agent task (default 5) */
+    reviewNoticeThreshold: z.number().int().min(1).max(50).optional(),
     /** D64: share of the session's tasks offered for voice (0..1). When set it replaces voiceTarget; older revisions do not have it. */
     voiceShare: z.number().min(0).max(1).optional(),
     /** TASK_021: target CEFR range of grammar sentences (selection for practice and the level requested for new content); absent = no restriction */
@@ -97,6 +126,10 @@ export type SettingsV1 = z.infer<typeof SettingsV1Schema>;
 
 /** Older settings revisions predate vocabulary sessions. */
 export const vocabularyTaskCount = (v: Pick<SettingsV1, "vocabularyTaskCount">): number => v.vocabularyTaskCount ?? 8;
+
+export const preloadModelOnStart = (v: Pick<SettingsV1, "preloadModelOnStart">): boolean => v.preloadModelOnStart ?? true;
+
+export const reviewNoticeThreshold = (v: Pick<SettingsV1, "reviewNoticeThreshold">): number => v.reviewNoticeThreshold ?? 5;
 
 export const vocabularyNewWordsPerSession = (v: Pick<SettingsV1, "vocabularyNewWordsPerSession">): number => v.vocabularyNewWordsPerSession ?? 4;
 

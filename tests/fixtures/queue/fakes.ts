@@ -135,3 +135,60 @@ export class FakeRunner implements JobRunner {
     }
   }
 }
+
+/** The model server as the residency service sees it (D67): resident model + scriptable load/unload. */
+export class FakeModelHost {
+  resident = new Set<string>();
+  loads = 0;
+  unloads = 0;
+  loadGate: Deferred | null = null;
+  failLoad: string | null = null;
+  /** the model stays in /api/ps after an unload request */
+  stickyUnload = false;
+  reachable = true;
+  async loadedInfo() {
+    return this.reachable ? [...this.resident].map((name) => ({ name, sizeVramBytes: 10 * 1024 ** 3, contextLength: 8192 })) : null;
+  }
+  async load(model: string, o?: { signal?: AbortSignal }): Promise<void> {
+    this.loads++;
+    if (o?.signal?.aborted) throw new Error("aborted");
+    if (this.loadGate) {
+      const aborted = new Promise<never>((_, rej) => o?.signal?.addEventListener("abort", () => rej(new Error("aborted")), { once: true }));
+      await Promise.race([this.loadGate.promise, aborted]);
+    }
+    if (this.failLoad) throw new Error(this.failLoad);
+    this.resident.add(model);
+  }
+  async unload(model: string): Promise<void> {
+    this.unloads++;
+    if (!this.stickyUnload) this.resident.delete(model);
+  }
+}
+
+/** The dispatcher's side of the hand-shake, scriptable. */
+export class FakeDispatcher {
+  practice = false;
+  job: { kind: string } | null = null;
+  shortfall: string | null = null;
+  loadedNotes = 0;
+  releasedNotes = 0;
+  kicks = 0;
+  practiceActive() {
+    return this.practice;
+  }
+  activeJob() {
+    return this.job;
+  }
+  async vramShortfall() {
+    return this.shortfall;
+  }
+  noteModelLoaded() {
+    this.loadedNotes++;
+  }
+  noteModelReleased() {
+    this.releasedNotes++;
+  }
+  kick() {
+    this.kicks++;
+  }
+}

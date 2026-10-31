@@ -2,7 +2,7 @@
 import type { FastifyInstance } from "fastify";
 import { randomUUID } from "node:crypto";
 import { afterEach, describe, expect, it } from "vitest";
-import { SessionBootstrapSchema, difficultyLevels, vocabularyNewWordsPerSession, vocabularyTaskCount } from "../../../packages/contracts/src/index.js";
+import { SessionBootstrapSchema, difficultyLevels, reviewNoticeThreshold, vocabularyNewWordsPerSession, vocabularyTaskCount } from "../../../packages/contracts/src/index.js";
 import { buildApp } from "../../../apps/server/src/app.js";
 import { freePort, testConfig } from "../helpers.js";
 import { makeEnv, rows, type Env } from "../attempts/fixtures.js";
@@ -60,6 +60,13 @@ describe("settings over HTTP", () => {
     expect(newWords.statusCode).toBe(200);
     expect(newWords.json().values.vocabularyNewWordsPerSession).toBe(2);
     expect(vocabularyNewWordsPerSession((await call("GET")).json().values)).toBe(2);
+
+    // TASK_022: review notice threshold, optional, 1..50, default 5
+    expect(reviewNoticeThreshold(first.values)).toBe(5);
+    expect(JSON.parse(revs[0]!.v).reviewNoticeThreshold).toBeUndefined();
+    expect((await call("POST", { reviewNoticeThreshold: 0 })).statusCode).toBe(400);
+    expect((await call("POST", { reviewNoticeThreshold: 51 })).statusCode).toBe(400);
+    expect(reviewNoticeThreshold((await call("POST", { reviewNoticeThreshold: 3 })).json().values)).toBe(3);
 
     // TASK_021: optional target difficulty range; absent (older revisions) means no restriction
     expect(difficultyLevels(first.values)).toBeNull();

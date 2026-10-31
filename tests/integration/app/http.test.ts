@@ -42,7 +42,7 @@ describe("GET /api/v1/health and /capabilities", () => {
 
   it("states honestly that AI and STT are not implemented", async () => {
     const c = CapabilitiesSchema.parse((await get("/api/v1/capabilities")).json());
-    expect(c.ai).toEqual({ ollama: "not_implemented", nimble: "not_implemented", qwen: "not_implemented" });
+    expect(c.ai).toEqual({ ollama: "not_implemented", model: "not_implemented", modelTag: "gemma4:12b", modelState: "unloaded" });
     expect(c.stt.status).toBe("not_implemented");
     expect(c.versions.schema).toBe(19);
     expect(JSON.stringify(c)).not.toMatch(/token|secret|[A-Z]:\\/i); // no secrets, no paths

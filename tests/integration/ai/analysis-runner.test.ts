@@ -5,7 +5,7 @@ import { recordAttempt } from "../../../apps/server/src/domain/attempts/attempts
 import { readRun, runMastery } from "../../../apps/server/src/domain/analytics/runs.js";
 import { ClosedFormAssessor } from "../../../apps/server/src/domain/content/grader.js";
 import { TransportError, type CallStats, type ChatClient, type ChatResult } from "../../../apps/server/src/domain/ai/clients.js";
-import { AI_CONFIG_V1 } from "../../../apps/server/src/domain/ai/config.js";
+import { AI_CONFIG_V3 } from "../../../apps/server/src/domain/ai/config.js";
 import { AnalysisJobRunner } from "../../../apps/server/src/domain/ai/analysisRunner.js";
 import { getFeedback } from "../../../apps/server/src/domain/sessions/feedback.js";
 import { applyAction, getJob, resultOf } from "../../../apps/server/src/queue/jobs.js";
@@ -69,7 +69,7 @@ async function rig(steps: Step[], answer = ANSWER): Promise<Rig> {
   const r = recordAttempt(env.db, deps, { slotId, submissionId: "s1", answer, inputMode: "text" });
   const chat = new ScriptedChat(steps);
   chat.attemptId = r.body.attemptId;
-  const digest = { current: AI_CONFIG_V1.analysis.digest as string | null };
+  const digest = { current: AI_CONFIG_V3.analysis.digest as string | null };
   const runner = new AnalysisJobRunner({ db: env.db, chat, installedDigest: async () => digest.current, runtimeVersion: async () => "test", deps: env.deps, sleep: async () => {} });
   const clock = new FakeClock();
   const gpu = new FakeGpu(clock);
@@ -107,7 +107,7 @@ describe("free-text analysis runs through the dispatcher and produces a TENTATIV
     expect(ann[0]!.status).toBe("validated"); // never approved
     expect(revs[1]!.ai_annotation_id).toBe(ann[0]!.id);
     expect(revs[1]!.model_version_id).not.toBeNull();
-    expect(JSON.parse(ann[0]!.findings_json).provenance).toMatchObject({ model: AI_CONFIG_V1.analysis.tag, digest: AI_CONFIG_V1.analysis.digest, prompt: "analysis-v3", offsets: "unicode_code_points" });
+    expect(JSON.parse(ann[0]!.findings_json).provenance).toMatchObject({ model: AI_CONFIG_V3.analysis.tag, digest: AI_CONFIG_V3.analysis.digest, prompt: "analysis-v3", offsets: "unicode_code_points" });
 
     const f = rows<{ verdict: string; fragment_start: number; fragment_end: number; finding_type: string }>(r.env.db, "SELECT verdict, fragment_start, fragment_end, finding_type FROM error_events");
     expect(f).toHaveLength(1);
@@ -223,7 +223,7 @@ describe("model identity is pinned", () => {
     r.digest.current = "other";
     expect(await r.runner.prepare()).toEqual({ ok: false, reason: "digest_drift" });
     expect(r.runner.profileKey()).toBeNull();
-    r.digest.current = AI_CONFIG_V1.analysis.digest;
+    r.digest.current = AI_CONFIG_V3.analysis.digest;
     expect((await r.runner.prepare()).ok).toBe(true);
     expect(r.runner.profileKey()).not.toBeNull();
     expect((await r.runner.prepare()).ok).toBe(true); // idempotent

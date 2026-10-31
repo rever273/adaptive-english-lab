@@ -147,10 +147,10 @@ export function Tutor() {
   return (
     <section className="card" aria-labelledby="tu-h">
       <h2 id="tu-h"><i className="pi pi-comments" aria-hidden="true" /> Tutor</h2>
-      <p className="lede">Ask about a task you have already answered. <strong>Why?</strong> shows the approved rule at once. <strong>Explain in Russian</strong>, <strong>More examples</strong> and your own questions are written by the local AI when the computer is free. Nothing here changes your score.</p>
+      <p className="lede">Ask about a task you have already answered. Unconfirmed AI assessments and explanations can be wrong. <strong>Why?</strong> shows the approved rule at once. <strong>Explain in Russian</strong>, <strong>More examples</strong> and your own questions are written by the local AI when the computer is free. Nothing here changes your score.</p>
       {error && <p className="notice notice-error" role="alert">{error}</p>}
       <div className="segmented" role="radiogroup" aria-label="Which tasks">
-        <label className={filter === "mistakes" ? "on" : ""}><input type="radio" name="tutor-filter" checked={filter === "mistakes"} onChange={() => setFilter("mistakes")} /> <i className="pi pi-times-circle" aria-hidden="true" /> Only my mistakes</label>
+        <label className={filter === "mistakes" ? "on" : ""}><input type="radio" name="tutor-filter" checked={filter === "mistakes"} onChange={() => setFilter("mistakes")} /> <i className="pi pi-times-circle" aria-hidden="true" /> Mistakes and answers to check</label>
         <label className={filter === "all" ? "on" : ""}><input type="radio" name="tutor-filter" checked={filter === "all"} onChange={() => setFilter("all")} data-testid="tutor-filter-all" /> <i className="pi pi-list" aria-hidden="true" /> All recent tasks</label>
       </div>
       {slots === null ? (

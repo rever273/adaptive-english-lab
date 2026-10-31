@@ -9,6 +9,8 @@ export const SkillAnalyticsQuerySchema = z
     difficulty: z.enum(["A2", "B1", "B2", "C1"]),
     asOf: z.string().datetime().optional(),
     watermark: z.coerce.number().int().min(0).optional(),
+    /** D65: "1" = mastery-v2, which also counts AI-checked (never confirmed) verdicts at a lower weight; absent = mastery-v1 (confirmed only) */
+    provisional: z.enum(["0", "1"]).optional(),
   })
   .strict();
 export type SkillAnalyticsQuery = z.infer<typeof SkillAnalyticsQuerySchema>;

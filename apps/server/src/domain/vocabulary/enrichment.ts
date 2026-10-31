@@ -4,7 +4,7 @@ import type { Db } from "../../db/open.js";
 import { RunnerError, type JobRunner, type RunnerContext, type RunnerOutput } from "../../queue/types.js";
 import { upsertModelVersion } from "../attempts/transcripts.js";
 import type { ChatClient } from "../ai/clients.js";
-import { AI_CONFIG_V2, MEASURED_ADDITIONAL_PEAK_MIB, configHashOf } from "../ai/config.js";
+import { AI_CONFIG_V3, RESIDENT_NUM_CTX, MEASURED_ADDITIONAL_PEAK_MIB, configHashOf } from "../ai/config.js";
 import { VOCABULARY_SYSTEM_V3, ensurePromptVersion } from "../ai/prompts.js";
 import { runStructured } from "../ai/structured.js";
 import { MAX_OUTPUT_BYTES, schemaVariant, type Validated, type ValidationIssue } from "../ai/validate.js";
@@ -28,7 +28,7 @@ export interface VocabularyDraft {
   collocations: string[];
 }
 
-export const VOCAB_PARAMS = { numCtx: 4096, temperature: 0.2, seed: 42, numPredict: 512 } as const;
+export const VOCAB_PARAMS = { numCtx: RESIDENT_NUM_CTX, temperature: 0.2, seed: 42, numPredict: 512 } as const;
 const CYRILLIC = /[Ѐ-ӿ]/;
 
 let compiled: ValidateFunction | null = null;
@@ -76,7 +76,7 @@ export class VocabularyJobRunner implements JobRunner<VocabularyPayload> {
   constructor(private readonly o: VocabularyRunnerOptions) {}
 
   private get pinned() {
-    return AI_CONFIG_V2.analysis;
+    return AI_CONFIG_V3.analysis;
   }
 
   async prepare(): Promise<{ ok: boolean; reason?: string }> {
@@ -89,7 +89,7 @@ export class VocabularyJobRunner implements JobRunner<VocabularyPayload> {
     if (peak !== undefined) {
       this.o.db
         .prepare("INSERT OR IGNORE INTO gpu_profiles(id, model_version_id, config_hash, measured_peak_mib, timings_json, validated_at) VALUES (?,?,?,?,?,?)")
-        .run((this.o.deps.newId ?? randomUUID)(), id, configHashOf(VOCAB_PARAMS), peak, JSON.stringify({ source: "TASK_002/TASK_008 real measurements (ctx 4096)", note: "additional peak above the desktop baseline" }), this.o.deps.now().toISOString());
+        .run((this.o.deps.newId ?? randomUUID)(), id, configHashOf(VOCAB_PARAMS), peak, JSON.stringify({ source: "TASK_023 nvidia-smi measurement of gemma4:12b at num_ctx 8192 (gemma4:12b entry in MEASURED_ADDITIONAL_PEAK_MIB) (ctx 8192)", note: "additional peak above the desktop baseline" }), this.o.deps.now().toISOString());
     }
     ensurePromptVersion(this.o.db, VOCAB_PROMPT, JSON.stringify(schemaVariant("vocabulary-v2")));
     this.modelVersionId = id;

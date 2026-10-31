@@ -45,6 +45,7 @@ export function loadFindingSignals(db: Db, q: { asOf: string; taxonomyId: string
          JOIN skill_revisions sr ON sr.id = e.skill_revision_id AND sr.taxonomy_id = @tax
          LEFT JOIN model_versions mv ON mv.id = e.model_version_id
         WHERE t.submitted_at <= @asOf
+          AND COALESCE(json_extract(ss.cohort_json, '$.repeat'), 0) <> 1 -- D68: a labelled repeat is practice, never a hypothesis source
         ORDER BY e.id`,
     )
     .all({ w: q.watermark, rw: q.reviewWatermark, tax: q.taxonomyId, asOf: q.asOf }) as Array<{
@@ -97,7 +98,7 @@ export function lastConfirmedProbeBySkill(db: Db, q: { asOf: string; taxonomyId:
          JOIN attempts t ON t.id = la.attempt_id
          JOIN skill_revisions sr ON sr.id = o.skill_revision_id AND sr.taxonomy_id = @tax
         WHERE la.confirmation = 'confirmed' AND la.verdict IN ('correct','incorrect','idk')
-          AND o.target = 1 AND o.dimension IN ('recognition','correction') AND o.reliability = 'confirmed'
+          AND o.target = 1 AND o.independent = 1 AND o.dimension IN ('recognition','correction') AND o.reliability = 'confirmed'
           AND t.first_attempt = 1 AND t.hints_before = 0 AND t.answer_seen_before = 0 AND t.submitted_at <= @asOf
         GROUP BY sr.skill_id`,
     )

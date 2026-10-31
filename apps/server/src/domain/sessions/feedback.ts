@@ -7,6 +7,7 @@ import type { AnalysisV2 } from "../ai/validate.js";
 import { NO_MISTAKE_ID, answerKey, nearMatch } from "../content/grader.js";
 import { VocabularyPracticeMetadataSchema } from "@english-lab/contracts";
 import { buildPrompt } from "./reveal.js";
+import { isUnresolved } from "./reviewQueue.js";
 import { lookupWord } from "../vocabulary/repository.js";
 
 type Payload = Record<string, any>;
@@ -118,7 +119,7 @@ function feedbackCore(db: Db, deps: SessionDeps, sessionId: string, slotId: stri
         return { slotId, state: "skipped", verdict: null, confirmation: null, explanation_ru: null, correct: null, message: "Skipped. It stays in your history and is not counted as a mistake." };
       }
       const a = attempt
-        ? (db.prepare("SELECT verdict, confirmation FROM assessment_revisions WHERE attempt_id = ? ORDER BY sequence DESC LIMIT 1").get(attempt.id) as { verdict: string; confirmation: string })
+        ? (db.prepare("SELECT verdict, confirmation, source, rationale FROM assessment_revisions WHERE attempt_id = ? ORDER BY sequence DESC LIMIT 1").get(attempt.id) as { verdict: string; confirmation: string; source: string; rationale: string })
         : null;
 
       // This is a model draft, never a confirmed grade or evidence of task meaning.
@@ -133,6 +134,8 @@ function feedbackCore(db: Db, deps: SessionDeps, sessionId: string, slotId: stri
 
       if (a && (a.verdict === "pending" || a.verdict === "ambiguous")) {
         exposeUnits(db, deps, slotId, slot.revisionId, "answer");
+        // D65: the AI check is over (abstained, ambiguous, invalid output or failed) -> unresolved: it waits for the agent review queue
+        const unresolved = attempt !== undefined && isUnresolved(a.verdict, (db.prepare("SELECT state FROM jobs WHERE idempotency_key = ?").get(`free_text_analysis:${attempt.id}`) as { state: string } | undefined)?.state);
         return {
           slotId,
           state: "pending",
@@ -141,13 +144,20 @@ function feedbackCore(db: Db, deps: SessionDeps, sessionId: string, slotId: stri
           explanation_ru: null,
           ...(aiReview ? { aiReview } : {}),
           correct: correctAnswer(slot.format, content, slot.questionId),
-          message: "Saved — AI review after this session. This is not marked wrong. Approved examples are shown for comparison.",
+          ...(unresolved ? { unresolved: true } : {}),
+          message: unresolved ? "Could not be checked automatically — it will be reviewed later. This is not marked wrong. Approved examples are shown for comparison." : "Saved — AI review after this session. This is not marked wrong. Approved examples are shown for comparison.",
         };
       }
       if (a && a.verdict === "disputed") {
         return { slotId, state: "pending", verdict: a.verdict, confirmation: a.confirmation, explanation_ru: null, correct: null, message: "This assessment is disputed and is being reviewed." };
       }
       if (a && a.confirmation !== "confirmed") {
+        // D65: a decided local-AI verdict is shown at once, labelled as such; it counts provisionally and is never "confirmed"
+        if (a.source === "model" && (a.verdict === "correct" || a.verdict === "incorrect")) {
+          exposeUnits(db, deps, slotId, slot.revisionId, "answer");
+          const reason = aiReview?.explanation_ru ?? a.rationale.replace(/^AI draft \([^)]*\):\s*/, "");
+          return { slotId, state: "pending", verdict: a.verdict, confirmation: a.confirmation, explanation_ru: null, correct: correctAnswer(slot.format, content, slot.questionId), aiChecked: true, ...(aiReview ? { aiReview } : {}), message: `${a.verdict === "correct" ? "Correct" : "Incorrect"} (checked by AI) — ${reason}` };
+        }
         return { slotId, state: "pending", verdict: a.verdict, confirmation: a.confirmation, explanation_ru: null, correct: null, ...(aiReview ? { aiReview } : {}), message: "AI suggestion — needs review. It is not confirmed." };
       }
 

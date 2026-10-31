@@ -79,6 +79,7 @@ async function startCapture(onTick: (seconds: number, level: number) => void): P
 
 export interface VoiceController {
   state: VoiceState;
+  provider: "groq" | "local" | null;
   /** the open server-side voice session, once started */
   readonly streamId: string | null;
   record: () => Promise<void>;
@@ -105,6 +106,7 @@ const friendly = (e: unknown): string => {
 
 export function useVoice(sessionId: string | null, tabId: string, enabled: boolean): VoiceController {
   const [state, setState] = useState<VoiceState>({ phase: "idle" });
+  const [provider, setProvider] = useState<"groq" | "local" | null>(null);
   const stream = useRef<string | null>(null);
   const capture = useRef<Capture | null>(null);
   const generation = useRef(0);
@@ -164,12 +166,14 @@ export function useVoice(sessionId: string | null, tabId: string, enabled: boole
       const deadline = Date.now() + WAIT_LIMIT_MS;
       for (;;) {
         try {
-          const id = (await sttStart(sessionRef.current!, tabId)).streamId;
+          const started = await sttStart(sessionRef.current!, tabId);
+          const id = started.streamId;
           if (current !== generation.current) {
             void sttStop(id).catch(() => undefined);
             return;
           }
           stream.current = id;
+          setProvider(started.ready.device === "groq" ? "groq" : "local");
           return;
         } catch (e) {
           if (!(e instanceof ApiRequestError && WAIT_CODES.has(e.code)) || Date.now() > deadline || current !== generation.current) throw e;
@@ -217,6 +221,7 @@ export function useVoice(sessionId: string | null, tabId: string, enabled: boole
 
   return {
     state,
+    provider,
     get streamId() {
       return stream.current;
     },

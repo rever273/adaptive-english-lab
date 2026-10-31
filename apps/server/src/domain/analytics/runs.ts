@@ -70,7 +70,7 @@ export function computeGroups(evidence: readonly RawEvidenceRow[], activity: Rea
     const rows = bySkillDim.get(key)!;
     const marked = markDelayedProbes(rows.map((r) => ({ ...r })), activity.get(key) ?? [], cfg);
     const components = computeComponents(
-      marked.map((r) => ({ id: r.id, at: r.at, localDate: r.localDate, success: r.success, heldout: r.heldout, delayedProbe: r.delayedProbe })),
+      marked.map((r) => ({ id: r.id, at: r.at, localDate: r.localDate, success: r.success, heldout: r.heldout, delayedProbe: r.delayedProbe, ...(r.aiChecked ? { weight: cfg.aiCheckedWeight ?? 1 } : {}) })),
       asOf,
       cfg,
     );
@@ -80,7 +80,7 @@ export function computeGroups(evidence: readonly RawEvidenceRow[], activity: Rea
 }
 
 /**
- * Computes (or replays) a mastery-v1 run. Identical inputs -> identical input_hash and identical snapshots, and an
+ * Computes (or replays) a mastery run (v1: confirmed evidence; v2, D65: plus AI-checked evidence at a lower weight). Identical inputs -> identical input_hash and identical snapshots, and an
  * identical earlier run is returned instead of writing a duplicate. Past runs are never modified.
  */
 export function runMastery(db: Db, req: RunRequest): MasteryRun {
@@ -94,7 +94,7 @@ export function runMastery(db: Db, req: RunRequest): MasteryRun {
     .transaction((): MasteryRun => {
       const taxonomyId = req.taxonomyId ?? (db.prepare("SELECT id FROM taxonomy_versions ORDER BY created_at DESC, rowid DESC LIMIT 1").get() as { id: string }).id;
       const watermark = req.watermark ?? currentWatermark(db);
-      const evidence = loadEvidence(db, { watermark, asOf, taxonomyId, cohort: req.cohort });
+      const evidence = loadEvidence(db, { watermark, asOf, taxonomyId, cohort: req.cohort, provisional: cfg.aiCheckedWeight !== undefined });
       const activity = loadActivity(db, { watermark, asOf, taxonomyId });
       const groups = computeGroups(evidence, activity, asOf, cfg);
       const algorithmId = ensureAlgorithmVersion(db, cfg, now);
@@ -107,7 +107,7 @@ export function runMastery(db: Db, req: RunRequest): MasteryRun {
           watermark,
           taxonomyId,
           cohort: req.cohort,
-          evidence: evidence.map((e) => [e.id, e.skillId, e.dimension, e.at, e.localDate, e.success, e.heldout]),
+          evidence: evidence.map((e) => (e.aiChecked ? [e.id, e.skillId, e.dimension, e.at, e.localDate, e.success, e.heldout, "ai"] : [e.id, e.skillId, e.dimension, e.at, e.localDate, e.success, e.heldout])),
           activity: [...activity.entries()].sort(([a], [b]) => (a < b ? -1 : 1)),
         }),
       );

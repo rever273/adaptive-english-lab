@@ -4,8 +4,8 @@ import type { Db } from "../../db/open.js";
 import { RunnerError, type JobRunner, type RunnerContext, type RunnerOutput } from "../../queue/types.js";
 import { upsertModelVersion } from "../attempts/transcripts.js";
 import type { ChatClient } from "../ai/clients.js";
-import { AI_CONFIG_V2, MEASURED_ADDITIONAL_PEAK_MIB, configHashOf } from "../ai/config.js";
-import { TUTOR_SYSTEM_V1, ensurePromptVersion } from "../ai/prompts.js";
+import { AI_CONFIG_V3, RESIDENT_NUM_CTX, MEASURED_ADDITIONAL_PEAK_MIB, configHashOf } from "../ai/config.js";
+import { TUTOR_SYSTEM_V2, ensurePromptVersion } from "../ai/prompts.js";
 import { runStructured } from "../ai/structured.js";
 import { MAX_OUTPUT_BYTES, schemaVariant, type Validated, type ValidationIssue } from "../ai/validate.js";
 import { bankTexts } from "../vocabulary/forms.js";
@@ -24,7 +24,7 @@ export interface TutorDraft {
   uncertainty_note: string;
 }
 
-export const TUTOR_PARAMS = { numCtx: 4096, temperature: 0.3, seed: 42, numPredict: 900 } as const;
+export const TUTOR_PARAMS = { numCtx: RESIDENT_NUM_CTX, temperature: 0.3, seed: 42, numPredict: 900 } as const;
 const CYRILLIC = /[Ѐ-ӿ]/;
 const norm = (s: string) => s.toLowerCase().replace(/[^\p{L}\p{N} ]/gu, "").replace(/\s+/g, " ").trim();
 
@@ -70,7 +70,7 @@ export class TutorJobRunner implements JobRunner<TutorPayload> {
   constructor(private readonly o: TutorRunnerOptions) {}
 
   private get pinned() {
-    return AI_CONFIG_V2.analysis;
+    return AI_CONFIG_V3.analysis;
   }
 
   async prepare(): Promise<{ ok: boolean; reason?: string }> {
@@ -83,7 +83,7 @@ export class TutorJobRunner implements JobRunner<TutorPayload> {
     if (peak !== undefined) {
       this.o.db
         .prepare("INSERT OR IGNORE INTO gpu_profiles(id, model_version_id, config_hash, measured_peak_mib, timings_json, validated_at) VALUES (?,?,?,?,?,?)")
-        .run((this.o.deps.newId ?? randomUUID)(), id, configHashOf(TUTOR_PARAMS), peak, JSON.stringify({ source: "TASK_002/TASK_008 real measurements (ctx 4096)", note: "additional peak above the desktop baseline" }), this.o.deps.now().toISOString());
+        .run((this.o.deps.newId ?? randomUUID)(), id, configHashOf(TUTOR_PARAMS), peak, JSON.stringify({ source: "TASK_023 nvidia-smi measurement of gemma4:12b at num_ctx 8192 (gemma4:12b entry in MEASURED_ADDITIONAL_PEAK_MIB) (ctx 8192)", note: "additional peak above the desktop baseline" }), this.o.deps.now().toISOString());
     }
     ensurePromptVersion(this.o.db, TUTOR_PROMPT, JSON.stringify(schemaVariant("tutor-v1")));
     this.modelVersionId = id;
@@ -108,6 +108,7 @@ export class TutorJobRunner implements JobRunner<TutorPayload> {
     if (!row) throw new RunnerError("slot_missing", "unknown slot", false);
     const content = JSON.parse(row.c) as { prompt_en: string; explanation_ru: string; target_skill: string; additional_skills?: string[]; payload: Record<string, any> };
     const own = [content.prompt_en, ...bankTexts(content, row.type)];
+    const attempt = this.o.db.prepare("SELECT raw_answer_json AS answer FROM attempts WHERE slot_id = ? ORDER BY attempt_no DESC LIMIT 1").get(slotId) as { answer: string } | undefined;
     const user = JSON.stringify({
       message_id: messageId,
       request:
@@ -117,15 +118,17 @@ export class TutorJobRunner implements JobRunner<TutorPayload> {
             ? "Explain this rule again in Russian, in more detail than verified_rule_ru: step by step, when to use it and when not, and the most common mistake. Do not just repeat verified_rule_ru."
             : "Answer the learner's question about this rule.",
       learner_question: question,
+      learner_answer: attempt ? JSON.parse(attempt.answer) : null,
       verified_rule_ru: content.explanation_ru,
       exercise_prompt_en: content.prompt_en,
+      exercise_cue: content.payload.cue_ru ?? content.payload.sentence ?? null,
       skills: [content.target_skill, ...(content.additional_skills ?? [])],
     });
     const result = await runStructured<TutorDraft>({
       client: this.o.chat,
       model: m.tag,
       messages: [
-        { role: "system", content: TUTOR_SYSTEM_V1 },
+        { role: "system", content: TUTOR_SYSTEM_V2 },
         { role: "user", content: user },
       ],
       format: schemaVariant("tutor-v1"),

@@ -14,7 +14,7 @@ export interface PinnedModel {
 }
 
 export interface AiConfig {
-  version: "ai-config-v1" | "ai-config-v2";
+  version: "ai-config-v1" | "ai-config-v2" | "ai-config-v3";
   /** full-text analysis; always tentative output */
   analysis: PinnedModel & { numPredict: number };
   /** Nimble triage routing: disabled until the benchmark gate passes (spec/06: "Nimble disabled до probe") */
@@ -53,7 +53,7 @@ export const configHashOf = (m: Pick<PinnedModel, "numCtx"> & { numPredict?: num
 /**
  * Measured ADDITIONAL peak VRAM (whole-card peak minus the desktop baseline) from real runs on this machine (RTX 5060 Ti 16 GiB):
  * qwen3:8b ctx 4096 = 8215 - 2000 = 6215 MiB (TASK_008 verify:gpu 2026-10-28); qwen3:14b = 12271 - 1936 = 10335 MiB (TASK_002).
- * nimble-v3 = 11756 - ~2000 = 9750 MiB (TASK_009 benchmark, D49): it was recorded in the decision log but missing here, so the advisory
+ * gemma4:12b = see its entry below (num_ctx 8192). nimble-v3 = 11756 - ~2000 = 9750 MiB (TASK_009 benchmark, D49): it was recorded in the decision log but missing here, so the advisory
  * draft screens queued by every generation batch waited forever as profile_unknown (D64).
  * Admission = free >= measured peak + reserve. A model without an entry here never starts in profiled mode.
  */
@@ -61,4 +61,26 @@ export const MEASURED_ADDITIONAL_PEAK_MIB: Record<string, number> = {
   "qwen3:8b": 6215,
   "qwen3:14b": 10335,
   "nimble-v3:latest": 9750,
+  // TASK_023, nvidia-smi above the ~1.5 GB desktop baseline at num_ctx 8192, think:false: +10014 MiB loaded and idle, +10027 during real analyses,
+  // +10136 with a 4185-token prompt. 10250 leaves a small margin for the largest prompt the analysis guard allows (~5200 tokens, not measured).
+  "gemma4:12b": 10250,
+};
+
+/** D67: the ONE local model of the application (answer checking, vocabulary, drafts, tutor). Qwen and Nimble are not used by the app. */
+export const LOCAL_MODEL_TAG = "gemma4:12b";
+export const LOCAL_MODEL_DIGEST = "6114515d63c17436a7c0417d82820ac65ad643e2806c5a3c89cb62846436ed0b";
+/** how long Ollama keeps the model after the last call; every job and every warm-up refreshes it */
+export const MODEL_KEEP_ALIVE = "30m";
+/**
+ * ONE context for the warm-up and for every job kind. Measured (TASK_023): a different num_ctx makes Ollama reload the model (~8.6 s each time), so
+ * per-kind values would reload it on every switch between analysis, words, drafts and tutor. 8192 covers the largest analysis prompt the
+ * 12000-character guard allows (5157 tokens measured) + numPredict 768 with ~25% margin; the other kinds need far less (see the table in TASK_023).
+ * Cost over 4096: ~180 MiB of VRAM.
+ */
+export const RESIDENT_NUM_CTX = 8192;
+
+export const AI_CONFIG_V3: AiConfig = {
+  version: "ai-config-v3",
+  analysis: { tag: LOCAL_MODEL_TAG, digest: LOCAL_MODEL_DIGEST, numCtx: RESIDENT_NUM_CTX, temperature: 0, seed: 42, numPredict: 768 },
+  triage: { enabled: false, tag: LOCAL_MODEL_TAG, digest: LOCAL_MODEL_DIGEST, disabledReason: "Nimble is not used by the application (D67); advisory screening is off." },
 };

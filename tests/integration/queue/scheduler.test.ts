@@ -1,4 +1,4 @@
-import { randomUUID } from "node:crypto";
+﻿import { randomUUID } from "node:crypto";
 import path from "node:path";
 import { afterEach, describe, expect, it } from "vitest";
 import { openDatabase, type Db } from "../../../apps/server/src/db/open.js";
@@ -83,6 +83,66 @@ const startPractice = (r: Rig, sessionId = randomUUID()) => {
   return sessionId;
 };
 const endPractice = (r: Rig) => r.db.prepare("DELETE FROM practice_leases").run();
+
+describe("cloud speech scheduling", () => {
+  it("allows GPU work during grammar practice without weakening the local speech gate", async () => {
+    const r = await rig();
+    startPractice(r);
+    const cloud = new GpuScheduler({ db: r.db, newId: randomUUID, clock: r.clock, telemetry: r.gpu, control: r.gpu, runners: [r.runner], instanceId: "cloud", cloudSpeech: true, config: { admission: "spike" } });
+    expect(r.sched.practiceActive()).toBe(true);
+    expect(cloud.practiceActive()).toBe(false);
+    const j = job(r, "cloud-practice");
+    await drive(r, cloud, () => state(r, j.id) === "completed");
+    await cloud.stop();
+  });
+
+  // TASK_023 (D66/D67): the one predicate. Cloud speech: practice never holds back local AI work. Local speech: STT has priority, the LLM yields.
+  const mkVocabularySession = (r: Rig, sessionId: string) => r.db.prepare("INSERT INTO vocabulary_sessions(session_id, created_at) VALUES (?,?)").run(sessionId, r.clock.now().toISOString());
+
+  it("cloud speech: analysis / enrichment / generation start at once even in an open practice session (grammar or vocabulary)", async () => {
+    const r = await rig();
+    const cloud = new GpuScheduler({ db: r.db, newId: randomUUID, clock: r.clock, telemetry: r.gpu, control: r.gpu, runners: [r.runner], instanceId: "cloud", cloudSpeech: true, config: { admission: "spike" } });
+    const grammar = startPractice(r);
+    const vocab = startPractice(r);
+    mkVocabularySession(r, vocab);
+    expect(cloud.practiceActive()).toBe(false);
+    const a = job(r, "cloud-open-1");
+    await drive(r, cloud, () => state(r, a.id) === "completed");
+    // a lease that starts while a unit runs does not preempt it either
+    r.runner.behaviour = "gate";
+    const b = job(r, "cloud-open-2");
+    await drive(r, cloud, () => state(r, b.id) === "running");
+    startPractice(r);
+    await cloud.tick();
+    await flush();
+    expect(state(r, b.id)).toBe("running");
+    r.runner.gate(b.id).resolve();
+    await drive(r, cloud, () => state(r, b.id) === "completed");
+    expect(r.runner.aborted).toEqual([]);
+    expect([grammar, vocab]).toHaveLength(2);
+    await cloud.stop();
+  });
+
+  it("local speech fallback: the lease (grammar with a microphone task, or vocabulary) and a grant keep the AI queued; STT priority is unchanged", async () => {
+    const r = await rig();
+    const local = new GpuScheduler({ db: r.db, newId: randomUUID, clock: r.clock, telemetry: r.gpu, control: r.gpu, runners: [r.runner], instanceId: "local", config: { admission: "spike" } });
+    const vocab = startPractice(r);
+    mkVocabularySession(r, vocab);
+    expect(local.practiceActive()).toBe(true);
+    const a = job(r, "local-held");
+    await local.tick();
+    await flush();
+    expect(state(r, a.id)).toBe("waiting_for_gpu");
+    expect(reasonOfLastEvent(r.db, a.id)).toBe("practice_active");
+    endPractice(r);
+    await drive(r, local, () => state(r, a.id) === "completed");
+    expect((await local.beginPractice()).ready).toBe(true);
+    expect(local.practiceActive()).toBe(true);
+    local.endPractice();
+    expect(local.practiceActive()).toBe(false);
+    await local.stop();
+  });
+});
 
 describe("running jobs through the single dispatcher", () => {
   it("does not start a job when practice begins during GPU admission", async () => {
@@ -688,3 +748,4 @@ describe("shutdown", () => {
     expect(count(r, "SELECT COUNT(*) AS n FROM job_results")).toBe(0);
   });
 });
+

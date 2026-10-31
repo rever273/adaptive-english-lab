@@ -1,5 +1,6 @@
 import type { Db } from "../../db/open.js";
 import { ApiError } from "../../errors.js";
+import { unresolvedAttempts } from "../sessions/reviewQueue.js";
 
 /**
  * Read-only, bounded exports of ONE session or ONE exercise revision for an external reviewer (spec/06, spec/11), plus the short "Copy Agent Task" text.
@@ -9,7 +10,7 @@ import { ApiError } from "../../errors.js";
 export const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 export const EXPORT_LIMITS = { slots: 100, text: 2000, attemptsPerSlot: 5, findingsPerAttempt: 20 } as const;
 
-export type AgentTaskKind = "session" | "exercise" | "batch" | "findings" | "coverage" | "progress" | "lessons" | "vocabulary";
+export type AgentTaskKind = "session" | "exercise" | "batch" | "findings" | "coverage" | "progress" | "lessons" | "vocabulary" | "review";
 
 const cut = (s: string | null | undefined, n: number = EXPORT_LIMITS.text): string => ((s ?? "").length > n ? `${(s ?? "").slice(0, n)}…[cut]` : (s ?? ""));
 /** values written into Markdown: no raw HTML, no line structure of their own */
@@ -93,6 +94,7 @@ export function exportExercise(db: Db, revisionId: string): { json: object; mark
 export function agentTask(db: Db, kind: AgentTaskKind, id?: string): string {
   if (kind === "progress" || kind === "lessons") return workflowTask(db, kind);
   if (kind === "vocabulary") return vocabularyTask();
+  if (kind === "review") return reviewTask(db);
   if (kind === "coverage") return "Check the content coverage. Run: npm run lab:export -- coverage. Use content/review-guidelines.md. Report gaps; do not modify raw attempts.";
   if (kind === "findings") return "Review the tentative AI findings. Run: npm run lab:export -- findings --status tentative --limit 100. Use content/review-guidelines.md. Return a finding-review-v1 manifest; preserve raw attempts.";
   mustBeId(id ?? "", `${kind} id`);
@@ -120,6 +122,23 @@ const COMMON = [
   "Read content/review-guidelines.md and follow any local project instructions. Work on your own and run every command yourself; do not ask me to run anything. Never edit the SQLite database or raw attempts directly; use only the commands below. Do not commit or push.",
   "If you change code, run npm run typecheck and the tests of the area you changed before you finish.",
 ].join("\n");
+
+/** D65: ONE self-contained task for the answers the local AI could not settle. IDs and commands only, never the learner's answers. */
+function reviewTask(db: Db): string {
+  const queue = unresolvedAttempts(db);
+  const sessions = [...new Set(queue.map((q) => q.sessionId))].slice(0, 20);
+  return [
+    "English Lab: settle the written answers that wait for a decision (the review queue): answers the local AI could not check (pending / ambiguous) and answers it called incorrect (shown to me at once, but they count in my progress only after you confirm them).",
+    COMMON,
+    `Answers waiting for a decision: ${queue.length}. Sessions that contain them (oldest first): ${sessions.length ? sessions.join(" ") : "(none)"}`,
+    "1. Run: npm run lab:export -- verdicts (read-only; it prints where the files are). It lists exactly the attempts waiting for a decision (pending, ambiguous and model-incorrect) with the task, the approved alternatives, my answer and the values a manifest must echo back. For more context on a session run: npm run lab:export -- session <id>.",
+    "2. Judge EACH answer yourself against its task, the approved alternatives and the rubric in the exercise: is it correct English that fits the task (natural Australian English), or is it wrong? Say why in one line.",
+    "3. Where the learner's answer is actually fine, do not leave it as a one-off: add it as a NEW approved variant (a new immutable exercise revision: the same exercise id with revision + 1, in a content pack named fix-<yyyymmdd>) or, if a general rule is missing, fix the grading rule in apps/server/src/domain/content/grader.ts with a unit test. The goal: the same answer is decided by code next time and never needs this review again.",
+    PACK_STEPS,
+    "4. Record your decisions: write an attempt-verdict-review-v1 manifest (the template is in the verdicts export): reviewer, review_version, and per answer attempt_id + expected_sequence (echoed unchanged), verdict correct|incorrect, a one-line rationale and optionally proposed_variant. Apply it with: npm run lab:verdicts -- apply <manifest.json>. To also re-judge answers the AI called correct (they count at half weight), export with: npm run lab:export -- verdicts --include-ai-correct. It appends a new confirmed assessment (the AI verdict stays in the history), is safe to run twice and refuses a stale manifest as a whole.",
+    "5. Reply in Russian, briefly: for each answer a verdict (correct / incorrect) with the reason, which variants or rule fixes you made, and how many answers still need a human decision. Never modify raw attempts or assessments directly (only through the command above).",
+  ].join("\n");
+}
 
 /** Vocabulary exercises (vocabulary TZ, stage E): the coding agent drafts them, a different reviewer checks every item, pack publishes. */
 function vocabularyTask(): string {
@@ -157,8 +176,9 @@ function workflowTask(db: Db, kind: "progress" | "lessons"): string {
     COMMON,
     `Published lessons now: ${lessons}. Recent sessions, newest first: ${list}`,
     "1. Find what I need: npm run lab:export -- coverage, npm run lab:export -- findings --status tentative --limit 100, and npm run lab:export -- session <id> for the recent sessions. Prefer my weak and recurring skills; keep about 35% new skills.",
-    "2. Write a pack content/packs/lessons-<yyyymmdd>/ with 3-5 lessons. Per lesson: 5 skills from the taxonomy (content/taxonomy/taxonomy-v1.json), at least 24 exercises (6 choose_form, 6 choose_missing_fragment, 6 detect_error of which at least 2 are No mistake, 3 guided_short_answer, 3 russian_to_english_short; optionally 2 reading passages with readingBlocks 1), only skills from the lesson pool. Adult, abstract everyday/work/public topics, about 15% AI/IT, Australian English, A2-B2 grammar in B2 context, Russian hints and explanations. New sentences only. Blueprint key pack-<name>-lNN, policy blueprint-policy-v1 like content/first10/index.mjs, title continuing the numbering.",
+    "2. Write a pack content/packs/lessons-<yyyymmdd>/ with the number of lessons specified at the end of this task. Per lesson: 5 skills from the taxonomy (content/taxonomy/taxonomy-v1.json), at least 24 exercises (6 choose_form, 6 choose_missing_fragment, 6 detect_error of which at least 2 are No mistake, 3 guided_short_answer, 3 russian_to_english_short; optionally 2 reading passages with readingBlocks 1), only skills from the lesson pool. Adult, abstract everyday/work/public topics, about 15% AI/IT, Australian English, A2-B2 grammar in B2 context, Russian hints and explanations. New sentences only. Blueprint key pack-<name>-lNN, policy blueprint-policy-v1 like content/first10/index.mjs, title continuing the numbering.",
     PACK_STEPS,
     "3. Reply in Russian, briefly: which skills the new lessons target and why, how many exercises were approved / flagged / rejected, and how many ready sessions each new lesson has.",
+    "Number of new lessons: 5",
   ].join("\n");
 }

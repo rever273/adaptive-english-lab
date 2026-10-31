@@ -40,13 +40,19 @@ export function shouldAutoAdvance(feedback: Pick<FeedbackResponse, "state" | "ve
 /** how long the "Correct" confirmation stays visible before the next exercise opens */
 export const AUTO_ADVANCE_MS = 600;
 
-/** T3b: what the review says about an answer the code could not judge; always "not counted yet", and the AI's own opinion only as an opinion */
-export function unconfirmedLabel(f: Pick<FeedbackResponse, "verdict" | "aiReview">): string {
+/**
+ * T3b / D65: what the review says about an answer the code could not judge. A decided AI verdict is stated plainly ("Correct / Incorrect (checked by AI)")
+ * with the AI's reason; it counts provisionally, never as confirmed. No verdict (abstain, ambiguous, invalid, failed) is "could not be checked" and waits for review.
+ */
+export function unconfirmedLabel(f: Pick<FeedbackResponse, "verdict" | "aiReview"> & { aiChecked?: boolean; unresolved?: boolean }): string {
   const j = f.aiReview?.judgement;
-  if (j === "acceptable" || (j === undefined && f.verdict === "correct")) return "Looks correct (AI check) — not counted in your stats yet";
-  if (j === "incorrect_candidate" || (j === undefined && f.verdict === "incorrect")) return "Looks wrong (AI check) — not counted in your stats yet";
-  if (j === "ambiguous" || j === "abstain" || f.verdict === "ambiguous") return "The AI check could not decide — not counted in your stats yet";
-  return "Waiting for the AI check — not counted in your stats yet";
+  const decided = f.aiChecked ?? (j === "acceptable" || j === "incorrect_candidate");
+  if (decided && (f.verdict === "correct" || f.verdict === "incorrect")) {
+    const reason = f.aiReview?.explanation_ru?.trim();
+    return `${f.verdict === "correct" ? "Correct" : "Incorrect"} (checked by AI)${reason ? ` — ${reason}` : ""}${f.verdict === "incorrect" ? " · counts in your stats after review" : ""}`;
+  }
+  if (f.unresolved || j === "ambiguous" || j === "abstain" || f.verdict === "ambiguous") return "Could not be checked automatically — it will be reviewed later";
+  return "Waiting for the AI check";
 }
 
 /** T5: the starting diagnostic is finished (all its blocks used), so the block and its card are hidden; regular practice stays */

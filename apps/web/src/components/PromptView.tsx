@@ -315,7 +315,8 @@ function VoiceBar({ voice, busy, hasDraft }: { voice: VoiceController; busy: boo
           <i className="pi pi-spin pi-spinner" aria-hidden="true" /> Writing down what you said…
         </span>
       )}
-      {s.phase === "draft" && <p className="muted small" data-testid="voice-draft-note">This is what I heard. Read it and fix anything that is wrong before you submit. No recording is kept.</p>}
+      {voice.provider === "groq" && <p className="muted small">Speech is sent to Groq for transcription.</p>}
+      {s.phase === "draft" && <p className="muted small" data-testid="voice-draft-note">This is what I heard. Read it and fix anything that is wrong before you submit. The app does not save recordings.</p>}
       {s.phase === "unavailable" && <p className="notice notice-warn" role="status" data-testid="voice-unavailable">{s.message}</p>}
     </div>
   );

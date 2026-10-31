@@ -273,19 +273,21 @@ describe("early UX checkpoint (non-release vertical slice) - real browser, real 
       assisted: Number(await page.getByTestId("count-assisted").innerText()),
       pending: Number(await page.getByTestId("count-pending").innerText()),
       skipped: Number(await page.getByTestId("count-skipped").innerText()),
+      // D65: a written answer the local AI decided is counted provisionally and shown on its own line (absent when there is none)
+      aiChecked: (await page.getByTestId("count-ai-checked").isVisible().catch(() => false)) ? Number(await page.getByTestId("count-ai-checked").innerText()) : 0,
     };
     expect(ui.idk).toBeGreaterThanOrEqual(1);
-    expect(ui.pending).toBeGreaterThanOrEqual(1);
+    expect(ui.pending + ui.aiChecked).toBeGreaterThanOrEqual(1); // the free-text answer: not counted yet, or provisionally AI-checked (D65)
     expect(ui.skipped).toBe(2); // one Skip and one "Show answer & continue" (an answer seen without answering is a skip, never a mistake)
     expect(ui.assisted).toBeGreaterThanOrEqual(1); // the hint slot
-    expect(ui.correct + ui.incorrect + ui.idk + ui.assisted + ui.pending + ui.skipped).toBe(18);
+    expect(ui.correct + ui.incorrect + ui.idk + ui.assisted + ui.pending + ui.aiChecked + ui.skipped).toBe(18);
     // the database agrees
     const st = q1<{ status: string }>("SELECT status FROM sessions").status;
     expect(st).toBe("completed");
     expect(q1<{ n: number }>("SELECT COUNT(*) AS n FROM session_events WHERE event_type = 'skip'").n).toBe(2);
     expect(q1<{ n: number }>("SELECT COUNT(*) AS n FROM attempts WHERE first_attempt = 1 AND idk = 1").n).toBe(ui.idk);
     expect(q1<{ n: number }>("SELECT COUNT(*) AS n FROM assessment_revisions WHERE verdict = 'pending'").n).toBeGreaterThanOrEqual(ui.pending);
-    await visible(page.getByText(/written answer\(s\) remain unconfirmed/));
+    if (ui.pending > 0) await visible(page.getByText(/written answer\(s\) remain unconfirmed/));
     step("summary", ui);
   });
 

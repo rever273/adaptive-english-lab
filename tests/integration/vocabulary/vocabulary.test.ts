@@ -6,7 +6,7 @@ import { buildApp } from "../../../apps/server/src/app.js";
 import { runMastery } from "../../../apps/server/src/domain/analytics/runs.js";
 import { createDiagnosticBlock } from "../../../apps/server/src/domain/diagnostics/session.js";
 import type { ChatClient, ChatResult, CallStats } from "../../../apps/server/src/domain/ai/clients.js";
-import { AI_CONFIG_V2 } from "../../../apps/server/src/domain/ai/config.js";
+import { AI_CONFIG_V3 } from "../../../apps/server/src/domain/ai/config.js";
 import { getReport } from "../../../apps/server/src/domain/reports/report.js";
 import { VocabularyJobRunner } from "../../../apps/server/src/domain/vocabulary/enrichment.js";
 import { addWord, getEntry, listWords, lookupWord, patchWord, queueMissingLevels, recoverLegacyVocabularyFailures, removeWord, revisionHistory, vocabularyTotals } from "../../../apps/server/src/domain/vocabulary/repository.js";
@@ -167,7 +167,7 @@ async function aiRig(respond: (call: number, entryId: string) => string) {
   const clock = new FakeClock();
   const gpu = new FakeGpu(clock);
   const chat = new ScriptedChat(respond);
-  const runner = new VocabularyJobRunner({ db: env.db, chat, installedDigest: async () => AI_CONFIG_V2.analysis.digest, runtimeVersion: async () => "test", deps: deps(), sleep: async () => {} });
+  const runner = new VocabularyJobRunner({ db: env.db, chat, installedDigest: async () => AI_CONFIG_V3.analysis.digest, runtimeVersion: async () => "test", deps: deps(), sleep: async () => {} });
   await runner.prepare();
   const sched = new GpuScheduler({ db: env.db, newId: randomUUID, clock, telemetry: gpu, control: gpu, runners: [runner], instanceId: "A", config: { admission: "spike", idleUnloadMs: 600_000 } });
   const settle = async (entryId: string) => {
@@ -184,7 +184,7 @@ async function aiRig(respond: (call: number, entryId: string) => string) {
   return { chat, settle };
 }
 
-describe("the AI draft (Qwen through the dispatcher)", () => {
+describe("the AI draft (the local model through the dispatcher)", () => {
   it("fills a draft translation, POS, example and collocations - labelled as a draft, never touching the entry or a flag", async () => {
     const r = await aiRig((_c, id) => goodDraft(id));
     const w = addWord(env!.db, deps(), { word: "meeting" }).entry;

@@ -25,6 +25,25 @@ export function normalizeAnswerText(text: string): string {
 export const answerKey = (text: string): string => normalizeAnswerText(text).toLocaleLowerCase("en");
 
 /**
+ * D65: a fixed table of UNAMBIGUOUS contractions (I'm = I am, don't = do not, can't = cannot ...). 's and 'd are left out on purpose
+ * (is/has/us, would/had). Negation stays significant: "don't" never equals "do". Applied to the answer and to every approved variant.
+ */
+const CONTRACTIONS: Record<string, string> = {
+  "i'm": "i am", "you're": "you are", "we're": "we are", "they're": "they are",
+  "i've": "i have", "you've": "you have", "we've": "we have", "they've": "they have",
+  "i'll": "i will", "you'll": "you will", "he'll": "he will", "she'll": "she will", "it'll": "it will", "we'll": "we will", "they'll": "they will",
+  "don't": "do not", "doesn't": "does not", "didn't": "did not",
+  "isn't": "is not", "aren't": "are not", "wasn't": "was not", "weren't": "were not",
+  "hasn't": "has not", "haven't": "have not", "hadn't": "had not",
+  "won't": "will not", "wouldn't": "would not", "shouldn't": "should not", "couldn't": "could not",
+  "can't": "can not", "cannot": "can not", "mustn't": "must not", "needn't": "need not",
+};
+const CONTRACTION_RE = new RegExp(`(?<![\\p{L}\\p{N}'])(${Object.keys(CONTRACTIONS).join("|")})(?![\\p{L}\\p{N}'])`, "gu");
+
+/** answerKey with the contraction table applied: the form two answers are compared in */
+export const comparisonKey = (text: string): string => answerKey(text).replace(CONTRACTION_RE, (m) => CONTRACTIONS[m]!);
+
+/**
  * D64 "near match": the answer is word for word an approved alternative except for one or two NAMES or NUMBERS (a city, a person, a
  * year), e.g. "...moving to Brisbane" for "...moving to Melbourne". The construction the task tests is then shown to be right, and the
  * different detail is a content slip, not a grammar error. Deliberately narrow: the same number of words, every other word identical
@@ -109,9 +128,13 @@ export const ClosedFormAssessor: Assessor = {
       case "guided_short_answer":
       case "russian_to_english_short": {
         if (raw.kind !== "text" || typeof raw.text !== "string") throw new ApiError(422, "ANSWER_SHAPE_INVALID", "This format needs a written answer");
-        const given = answerKey(raw.text);
-        const accepted = (content.payload.accepted_answers as string[]).map(answerKey);
-        if (given.length > 0 && accepted.includes(given)) return confirmed("correct", "Exact match with an approved alternative.");
+        const given = comparisonKey(raw.text);
+        const accepted = (content.payload.accepted_answers as string[]).map(comparisonKey);
+        if (given.length > 0 && accepted.includes(given)) {
+          const plain = answerKey(raw.text);
+          const exact = (content.payload.accepted_answers as string[]).some((a) => answerKey(a) === plain);
+          return confirmed("correct", exact ? "Exact match with an approved alternative." : "Match with an approved alternative (contractions treated as equal).");
+        }
         // vocabulary guided recall (one word or a short expression): the reviewed alternatives are the complete list, so anything else is a
         // confirmed miss - no model is asked and a wrong inflection is never accepted (vocabulary TZ, stage A)
         if ((content as { vocabulary?: { family?: string } }).vocabulary?.family === "guided_recall") return confirmed("incorrect", "Not one of the reviewed answers for this gap.");

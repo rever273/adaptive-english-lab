@@ -65,6 +65,9 @@ function playAll(sessionId: string, mode: "answer" | "skip") {
     }
   }
 }
+/** D68: sentences of the slots that are NOT labelled repeats - these must always be new */
+const freshFingerprints = (sessionId: string): string[] =>
+  rows<{ f: string }>("SELECT DISTINCT u.fingerprint AS f FROM prompt_units u JOIN revision_prompt_units rpu ON rpu.unit_id = u.id JOIN session_slots ss ON ss.exercise_revision_id = rpu.revision_id WHERE ss.session_id = ? AND COALESCE(json_extract(ss.cohort_json, '$.repeat'), 0) <> 1", sessionId).map((r) => r.f);
 const sessionFingerprints = (sessionId: string): string[] =>
   rows<{ f: string }>("SELECT DISTINCT u.fingerprint AS f FROM prompt_units u JOIN revision_prompt_units rpu ON rpu.unit_id = u.id JOIN session_slots ss ON ss.exercise_revision_id = rpu.revision_id WHERE ss.session_id = ?", sessionId).map((r) => r.f);
 
@@ -98,12 +101,12 @@ describe("a default snapshot (N=18, 5/5/5/1/2)", () => {
 
     // pinned versions and the audit decision
     const s = one<{ settings_revision_id: string; plan_id: string; selection_version: string; random_seed: string; blueprint_revision_id: string }>("SELECT * FROM sessions WHERE id = ?", sessionId);
-    expect(s).toMatchObject({ selection_version: "selection-v1", random_seed: "seed-1", blueprint_revision_id: env.blueprintRevisionId });
+    expect(s).toMatchObject({ selection_version: "grammar-selection-v2", random_seed: "seed-1", blueprint_revision_id: env.blueprintRevisionId });
     expect(one<{ revision: number }>("SELECT revision FROM settings_revisions WHERE id = ?", s.settings_revision_id).revision).toBe(1);
     expect(one<{ reviewer: string }>("SELECT reviewer FROM learning_plans WHERE id = ?", s.plan_id).reviewer).toBe("system:baseline");
     const d = one<{ choices_json: string; deficits_json: string; algorithm_id: string; candidate_hash: string }>("SELECT * FROM scheduling_decisions WHERE session_id = ?", sessionId);
     const choices = JSON.parse(d.choices_json) as { seed: string; stats: { weakTarget: number; weakActual: number }; slots: unknown[]; discovery: { version: string; qualificationIds: string[] } };
-    expect(d.algorithm_id).toBe("selection-v1");
+    expect(d.algorithm_id).toBe("grammar-selection-v2");
     expect(d.candidate_hash).toMatch(/^[0-9a-f]{64}$/);
     expect(choices).toMatchObject({ seed: "seed-1", stats: { weakTarget: 12, weakActual: 12 }, discovery: { version: "discovery-v1", qualificationIds: [] } });
     expect(choices.slots).toHaveLength(18);
@@ -241,7 +244,7 @@ describe("reveal: exposure before delivery", () => {
     expect([count("exposures"), count("session_events")]).toEqual([0, 0]);
   });
 
-  it("the shown sentences are blocked from every later snapshot", () => {
+  it("the shown sentences never come back as new: only as labelled repeats (D68)", () => {
     env = openSliceCopy();
     const a = begin(env, "a");
     lease(a.sessionId);
@@ -250,7 +253,7 @@ describe("reveal: exposure before delivery", () => {
     expect(shown.length).toBeGreaterThan(2); // written-answer formats show nothing until feedback
     finishSession(env.db, env.deps, a.sessionId, "ended_early");
     const b = begin(env, "b");
-    const fb = new Set(sessionFingerprints(b.sessionId));
+    const fb = new Set(freshFingerprints(b.sessionId));
     expect(shown.some((f) => fb.has(f))).toBe(false);
   });
 });
@@ -339,7 +342,7 @@ describe("skip consumes the sentence (seen)", () => {
     finishSession(env.db, env.deps, a.sessionId, "ended_early");
     for (let i = 0; i < 2; i++) {
       const b = begin(env, `again-${i}`);
-      expect(sessionFingerprints(b.sessionId).some((f) => skippedFps.includes(f))).toBe(false);
+      expect(freshFingerprints(b.sessionId).some((f) => skippedFps.includes(f))).toBe(false); // D68: a skipped sentence can return, but only as a labelled repeat
       finishSession(env.db, env.deps, b.sessionId, "ended_early");
     }
   });
@@ -419,14 +422,15 @@ describe("no-repeat across sessions, readiness and shortage (the 45-exercise sli
     finishSession(env.db, env.deps, first.sessionId, "completed");
     const second = begin(env, "two");
     const f1 = new Set(sessionFingerprints(first.sessionId));
-    expect(sessionFingerprints(second.sessionId).some((f) => f1.has(f))).toBe(false); // nothing from session 1 comes back as new
+    expect(freshFingerprints(second.sessionId).some((f) => f1.has(f))).toBe(false); // nothing from session 1 comes back as new (a correct answer is not due for 14 days)
+    expect(sessionFingerprints(second.sessionId).some((f) => f1.has(f))).toBe(false);
     playAll(second.sessionId, "skip");
     finishSession(env.db, env.deps, second.sessionId, "completed");
 
     const e = failsWith(() => begin(env, "three"), 409, "CONTENT_SHORTAGE");
     const d = e.details as { deficits: Array<{ kind: string; format: string; needed: number; available: number }>; largestFeasibleN: number | null; requestedN: number };
     expect(d.requestedN).toBe(18);
-    expect(d.deficits.some((x) => x.kind === "format" && x.available < x.needed)).toBe(true);
+    expect(d.deficits.length).toBeGreaterThan(0); // session 2 was skipped, so its exercises are due repeats - capped at 30% of the slots, so still not enough for 18
     // the suggestion is only a suggestion: nothing was created, and it really is feasible when asked for explicitly
     expect(count("sessions")).toBe(2);
     if (d.largestFeasibleN !== null) {

@@ -1,4 +1,5 @@
 import { OllamaClient, OllamaError } from "../gpu/ollamaClient.js";
+import { MODEL_KEEP_ALIVE } from "../../domain/ai/config.js";
 import { TransportError, type CallStats, type ChatClient, type ChatMessage, type ChatOptions, type ChatResult, type DecisionClient, type DecisionResult } from "../../domain/ai/clients.js";
 
 const ms = (ns: unknown): number | null => (typeof ns === "number" ? ns / 1e6 : null);
@@ -25,7 +26,7 @@ export class OllamaChatClient implements ChatClient {
       const r = await this.client.json<{ message?: { content?: string }; load_duration?: number; prompt_eval_count?: number; eval_count?: number; eval_duration?: number }>("/api/chat", {
         timeoutMs: this.timeoutMs,
         signal: req.signal,
-        body: { model: req.model, stream: false, think: false, keep_alive: "5m", format: req.format, messages: req.messages, options: req.options },
+        body: { model: req.model, stream: false, think: false, keep_alive: MODEL_KEEP_ALIVE, format: req.format, messages: req.messages, options: req.options },
       });
       const stats: CallStats = { totalMs: Date.now() - started, loadMs: ms(r.load_duration), promptTokens: r.prompt_eval_count ?? null, evalTokens: r.eval_count ?? null, evalMs: ms(r.eval_duration) };
       return { text: r.message?.content ?? "", stats };

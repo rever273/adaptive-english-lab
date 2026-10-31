@@ -1,4 +1,5 @@
 import type { ModelControl } from "../../queue/types.js";
+import type { ModelHost, LoadedModelInfo } from "../../queue/modelResidency.js";
 
 /** Only loopback model servers are ever called (spec/11): no remote models, no redirects, no arbitrary URLs. */
 export function assertLoopbackBaseUrl(raw: string): URL {
@@ -71,7 +72,7 @@ export class OllamaClient {
 }
 
 /** The dispatcher's view of Ollama: list resident models (/api/ps) and unload one OWNED model (keep_alive=0). */
-export class OllamaModelControl implements ModelControl {
+export class OllamaModelControl implements ModelControl, ModelHost {
   constructor(private readonly client: OllamaClient) {}
 
   async listLoaded(): Promise<string[] | null> {
@@ -85,5 +86,20 @@ export class OllamaModelControl implements ModelControl {
 
   async unload(model: string): Promise<void> {
     await this.client.json("/api/generate", { body: { model, keep_alive: 0, stream: false }, timeoutMs: 30000 });
+  }
+
+  /** resident models with their size in VRAM (null = the server cannot be asked) */
+  async loadedInfo(): Promise<LoadedModelInfo[] | null> {
+    try {
+      const ps = await this.client.json<{ models?: Array<{ name?: string; model?: string; size_vram?: number; size?: number; context_length?: number }> }>("/api/ps", { method: "GET", timeoutMs: 5000 });
+      return (ps.models ?? []).map((m) => ({ name: String(m.name ?? m.model ?? ""), sizeVramBytes: typeof m.size_vram === "number" ? m.size_vram : null, contextLength: typeof m.context_length === "number" ? m.context_length : null }));
+    } catch {
+      return null;
+    }
+  }
+
+  /** Loads a model without generating (empty prompt). The options must equal those of the jobs, or Ollama reloads the model for the first job. */
+  async load(model: string, o: { keepAlive: string; numCtx: number; signal?: AbortSignal }): Promise<void> {
+    await this.client.json("/api/generate", { body: { model, prompt: "", stream: false, think: false, keep_alive: o.keepAlive, options: { num_ctx: o.numCtx } }, timeoutMs: 180_000, signal: o.signal });
   }
 }

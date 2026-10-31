@@ -46,7 +46,7 @@ interface Rig {
   postAudio: (id: string, body: Buffer, type?: string) => ReturnType<FastifyInstance["inject"]>;
 }
 
-async function rig(o: { idleMs?: number; model?: boolean; beginReady?: boolean } = {}): Promise<Rig> {
+async function rig(o: { idleMs?: number; model?: boolean; beginReady?: boolean; cloud?: boolean } = {}): Promise<Rig> {
   env = await makeEnv();
   const calls: string[] = [];
   const spawned: SttWorker[] = [];
@@ -63,6 +63,7 @@ async function rig(o: { idleMs?: number; model?: boolean; beginReady?: boolean }
     db: env.db,
     deps: { now: () => new Date(), newId: randomUUID },
     scheduler,
+    cloud: o.cloud,
     available: () => o.model !== false,
     idleMs: o.idleMs,
     createWorker: () => {
@@ -101,6 +102,19 @@ async function rig(o: { idleMs?: number; model?: boolean; beginReady?: boolean }
     postAudio: (id, body, type = "application/octet-stream") => app!.inject({ method: "POST", url: `/api/v1/stt/${id}/audio`, payload: body, headers: { host, origin: `http://${host}`, cookie, "x-csrf-token": csrf, "content-type": type } }),
   };
 }
+describe("cloud speech service", () => {
+  it("does not acquire the GPU and records provider provenance after text confirmation", async () => {
+    const r = await rig({ cloud: true });
+    const started = await r.stt.start(r.sessionId, r.tabId);
+    const draft = await r.stt.transcribe(started.streamId, pcm());
+    const confirmed = r.stt.confirm(started.streamId, draft.draftId, r.slotId, draft.text);
+    expect(confirmed.transcriptId).toBeTruthy();
+    expect(r.scheduler.calls).not.toContain("begin");
+    expect(one<{ tag: string; runtime: string }>(env!.db, "SELECT tag, runtime FROM model_versions WHERE tag = ?", "whisper-large-v3")).toMatchObject({ runtime: "groq" });
+    await r.stt.stop(started.streamId);
+    expect(r.scheduler.calls).not.toContain("end");
+  });
+});
 const alive = (pid: number | null): boolean => {
   if (pid === null) return false;
   try {

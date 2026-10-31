@@ -2,6 +2,7 @@ import type { Db } from "../../db/open.js";
 import { ApiError } from "../../errors.js";
 import { isIndependent } from "./canonical.js";
 import { loadSlotContext, resolveTargetSkillKey, skillRevisionId, type SlotContext } from "./context.js";
+import { isRepeatSlot } from "../sessions/repeats.js";
 import type { AssessmentDecision, AttemptDeps, Confirmation, FindingInput } from "./ports.js";
 
 export interface AttemptRow {
@@ -143,11 +144,13 @@ export function writeAssessmentRevision(
   for (const f of decision.findings ?? []) insertFinding(db, deps, ctx, id, f);
 
   if (DETERMINATE.has(decision.verdict)) {
-    const independent = isIndependent({
-      firstAttempt: attempt.first_attempt === 1,
-      hintsBefore: attempt.hints_before,
-      answerSeenBefore: attempt.answer_seen_before === 1,
-    });
+    // D68: a labelled repeat is practice, not evidence: remembering a sentence must not move Mastery either way
+    const independent =
+      isIndependent({
+        firstAttempt: attempt.first_attempt === 1,
+        hintsBefore: attempt.hints_before,
+        answerSeenBefore: attempt.answer_seen_before === 1,
+      }) && !isRepeatSlot(db, ctx.slotId);
     const evidenceGroup = ctx.questionId ? `${ctx.slotId}:${ctx.questionId}` : ctx.slotId;
     const targetKey = resolveTargetSkillKey(ctx);
     const reliability = reliabilityOf(decision.confirmation) ?? "uncertain";

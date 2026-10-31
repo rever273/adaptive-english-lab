@@ -10,7 +10,7 @@ import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import { REVIEW_CHECKLIST_KEYS } from "@english-lab/contracts";
 import { AdvisoryJobRunner } from "../../../apps/server/src/domain/content/batches/advisoryRunner.js";
 import { GenerationJobRunner } from "../../../apps/server/src/domain/content/batches/generationRunner.js";
-import { AI_CONFIG_V2 } from "../../../apps/server/src/domain/ai/config.js";
+import { AI_CONFIG_V2, AI_CONFIG_V3 } from "../../../apps/server/src/domain/ai/config.js";
 import { GpuScheduler } from "../../../apps/server/src/queue/scheduler.js";
 import { FakeClock, FakeGpu, flush } from "../../fixtures/queue/fakes.js";
 import { FakeModel, FakeNimble } from "../../integration/batches/fixtures.js";
@@ -89,7 +89,7 @@ describe("Content Studio and AI Tasks in a real browser", () => {
     const deps = { now: () => clock.now(), newId: randomUUID };
     const model = new FakeModel();
     const nimble = new FakeNimble();
-    const gen = new GenerationJobRunner({ db, chat: model, installedDigest: async () => AI_CONFIG_V2.analysis.digest, runtimeVersion: async () => "e2e", deps, sleep: async () => {} });
+    const gen = new GenerationJobRunner({ db, chat: model, installedDigest: async () => AI_CONFIG_V3.analysis.digest, runtimeVersion: async () => "e2e", deps, sleep: async () => {} });
     const adv = new AdvisoryJobRunner({ db, decision: nimble, installedDigest: async () => AI_CONFIG_V2.triage.digest, runtimeVersion: async () => "e2e", deps });
     await gen.prepare();
     await adv.prepare();

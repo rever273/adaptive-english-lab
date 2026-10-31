@@ -3,7 +3,7 @@ import path from "node:path";
 import type { Db } from "../../db/open.js";
 import { ApiError } from "../../errors.js";
 import type { GpuScheduler } from "../../queue/scheduler.js";
-import { SttError, MAX_PCM_BYTES, type SttReady, type SttWorker } from "../../adapters/stt/sttWorker.js";
+import { SttError, MAX_PCM_BYTES, type SttReady, type Transcription } from "../../adapters/stt/sttWorker.js";
 import { assertLease } from "../sessions/lease.js";
 import type { SessionDeps } from "../sessions/policy.js";
 import { createTranscript, upsertModelVersion } from "../attempts/transcripts.js";
@@ -13,11 +13,13 @@ export const SAMPLE_RATE = 16000;
 const DRAFT_TTL_MS = 10 * 60_000;
 export const STT_MODEL = { tag: "faster-whisper-small", runtime: "ctranslate2", runtimeVersion: "faster-whisper 1.2.1", parameters: { language: "en", compute_type: "int8_float16", vad_filter: true, beam_size: 1 } } as const;
 
+interface SpeechWorker { readonly alive: boolean; start(): Promise<SttReady>; transcribe(pcm: Buffer): Promise<Transcription>; stop(): Promise<number | null>; }
+
 interface Stream {
   id: string;
   sessionId: string;
   tabId: string;
-  worker: SttWorker;
+  worker: SpeechWorker;
   ready: SttReady;
   lastUsed: number;
   modelDir: string;
@@ -35,9 +37,10 @@ export interface SttServiceOptions {
   /** the single GPU dispatcher: a voice session takes the card before anything is loaded */
   scheduler: Pick<GpuScheduler, "beginPractice" | "endPractice">;
   /** creates a worker, or null when no local STT model exists on this machine */
-  createWorker: () => { worker: SttWorker; modelPath: string } | null;
+  createWorker: () => { worker: SpeechWorker; modelPath: string } | null;
   available: () => boolean;
   idleMs?: number;
+  cloud?: boolean;
 }
 
 /**
@@ -49,7 +52,7 @@ export class SttService {
   private stream: Stream | null = null;
   private starting: Promise<unknown> | null = null;
   private startingSession: string | null = null;
-  private startingWorker: SttWorker | null = null;
+  private startingWorker: SpeechWorker | null = null;
   private generation = 0;
   private stopped = false;
   private readonly drafts = new Map<string, Draft>();
@@ -80,19 +83,19 @@ export class SttService {
     this.startingSession = sessionId;
     const run = (async (): Promise<Stream> => {
       // 1. the card: stop and unload any background model, and PROVE it before loading anything (single dispatcher)
-      const grant = await this.o.scheduler.beginPractice();
+      const grant = this.o.cloud ? { ready: true, reason: null } : await this.o.scheduler.beginPractice();
       if (cancelled()) {
-        this.o.scheduler.endPractice();
+        if (!this.o.cloud) this.o.scheduler.endPractice();
         throw new ApiError(409, "STT_START_CANCELLED", "Speech preparation was cancelled.");
       }
       if (!grant.ready) {
-        this.o.scheduler.endPractice();
+        if (!this.o.cloud) this.o.scheduler.endPractice();
         throw new ApiError(503, "STT_PREPARING", "The graphics card is not free yet. Type your answer or try again in a moment.", { reason: grant.reason });
       }
       // 2. the worker is created only now that the card is proven free; ready only after a REAL warm-up
       const made = this.o.createWorker();
       if (!made) {
-        this.o.scheduler.endPractice();
+        if (!this.o.cloud) this.o.scheduler.endPractice();
         throw new ApiError(503, "STT_UNAVAILABLE", "No local speech model is installed. Type your answer instead.");
       }
       this.startingWorker = made.worker;
@@ -101,7 +104,7 @@ export class SttService {
         ready = await made.worker.start();
       } catch (e) {
         await made.worker.stop().catch(() => undefined);
-        this.o.scheduler.endPractice();
+        if (!this.o.cloud) this.o.scheduler.endPractice();
         throw new ApiError(503, "STT_START_FAILED", "Speech recognition could not start. Type your answer instead.", { reason: e instanceof SttError ? e.code : "unknown" });
       }
       try {
@@ -111,7 +114,7 @@ export class SttService {
         if (session?.status !== "active") throw new Error("session ended");
       } catch {
         await made.worker.stop().catch(() => undefined);
-        this.o.scheduler.endPractice();
+        if (!this.o.cloud) this.o.scheduler.endPractice();
         throw new ApiError(409, "STT_START_CANCELLED", "Speech preparation was cancelled.");
       }
       return { id: randomUUID(), sessionId, tabId, worker: made.worker, ready, lastUsed: Date.now(), modelDir: made.modelPath };
@@ -148,6 +151,8 @@ export class SttService {
     s.lastUsed = Date.now();
     try {
       const r = await s.worker.transcribe(pcm);
+      if (this.stream !== s) throw new ApiError(409, "STT_STREAM_CLOSED", "Speech session ended before transcription completed.");
+      assertLease(this.o.db, this.o.deps, s.sessionId, s.tabId);
       this.gc();
       const draftId = randomUUID();
       this.drafts.set(draftId, { sessionId: s.sessionId, text: r.text, at: Date.now(), used: false });
@@ -169,7 +174,8 @@ export class SttService {
     if (!d || d.sessionId !== s.sessionId || d.used) throw new ApiError(404, "DRAFT_NOT_FOUND", "That voice draft is gone. Record again or type your answer.");
     const text = submittedText.trim();
     if (text.length === 0) throw new ApiError(422, "TEXT_EMPTY", "The text is empty");
-    const sttModelId = upsertModelVersion(this.o.db, this.o.deps.newId, { ...STT_MODEL, digest: path.basename(s.modelDir), parameters: { ...STT_MODEL.parameters } });
+    const model = this.o.cloud ? { tag: "whisper-large-v3", runtime: "groq", runtimeVersion: "api", digest: "provider-managed", parameters: { language: "en", temperature: 0 } } : { ...STT_MODEL, digest: path.basename(s.modelDir), parameters: { ...STT_MODEL.parameters } };
+    const sttModelId = upsertModelVersion(this.o.db, this.o.deps.newId, model);
     const transcriptId = createTranscript(this.o.db, { sessionId: s.sessionId, slotId, asrText: d.text, submittedText: text, sttModelId, newId: this.o.deps.newId, now: this.o.deps.now });
     d.used = true;
     return { transcriptId, edited: d.text !== text };
@@ -202,7 +208,7 @@ export class SttService {
     if (this.stream?.id === s.id) this.stream = null;
     for (const [id, d] of this.drafts) if (d.sessionId === s.sessionId && !d.used && _why !== "stopped") this.drafts.delete(id);
     await s.worker.stop().catch(() => undefined);
-    this.o.scheduler.endPractice();
+    if (!this.o.cloud) this.o.scheduler.endPractice();
   }
 
   private gc(): void {

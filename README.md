@@ -17,7 +17,7 @@ The design principles are:
 - **No repeated sentences.** The same sentence is not shown again as if it were a new exercise; weak constructions are reinforced with new sentences.
 - **Honest numbers.** Statistics are computed by deterministic code from raw, immutable attempt records. A language model is never the source of truth for progress.
 - **AI output is a draft.** Generated content and AI feedback carry explicit statuses (`draft`, `pending_review`, `approved`, …) and are never auto-approved.
-- **Personal and local.** One user, one machine, no account, no cloud, no telemetry.
+- **Personal and local.** One user, one machine, no app account or telemetry; optional Groq speech recognition sends audio to Groq.
 
 The app interface is in English; harder explanations and translations are intended to be in Russian, because the project was built for a Russian-speaking learner. Learning material follows Australian English norms.
 
@@ -43,7 +43,7 @@ Legend: **Working** = implemented and covered by automated tests · **Partial** 
 | Settings | Working | Exercises per session (5–30), weak-skill share, voice tasks per session. Each change is a new revision; past sessions are unaffected. |
 | First ten lessons | Working | 306 exercises: 10 lessons (three with reading passages), a diagnostic and held-out checks. Written by one AI model and reviewed item by item by another. Loaded with `npm run first10:seed`. |
 | Diagnostics and delayed checks | Working | Optional three-block starting diagnostic without hints; skills you miss there get more room in the lessons. Held-out checks on new sentences at least 7 days after practice. |
-| Local speech-to-text | Working | `faster-whisper` on the GPU; audio stays in memory, the transcript is editable before sending. Tested with synthetic speech only. |
+| Speech-to-text | Working | Local `faster-whisper` or optional Groq transcription; the app keeps audio in memory and the transcript is editable before submission. Tested with synthetic speech only. |
 | Analytics and export | Working | Reports computed by code from raw attempts (first-attempt accuracy, Wilson intervals, series kept apart), CSV/JSON export, external assessment import. A separate Vocabulary view shows recognition, recall and collocation accuracy with sample sizes, XP by day and words that need another look. |
 | Vocabulary | Working | Save a word from any exercise; the local model drafts a translation and a CEFR level, your own edits are never overwritten. No flashcards. |
 | Vocabulary Practice | Working | Optional short sessions (5–10 tasks, default 8) with your saved words in new sentences: word in context, recall from a clue, collocations. Graded by code; kept apart from grammar Mastery. |
@@ -73,7 +73,7 @@ Legend: **Working** = implemented and covered by automated tests · **Partial** 
 | Database | SQLite via `better-sqlite3` | Raw attempts, exercise revisions, analytics versions, AI annotations, jobs. |
 | Frontend | React 19, Vite | Single-page UI served by the backend. |
 | Local LLMs | [Ollama](https://ollama.com) with `qwen3:8b` and `nimble-v3` | Qwen: tentative analysis, drafts, vocabulary cards, tutor drafts. Nimble: advisory hints for the content reviewer only. |
-| Speech recognition | `faster-whisper` (Python 3.11, CUDA) | Local speech input in a worker process; audio is kept in memory only. |
+| Speech recognition | `faster-whisper` (Python 3.11, CUDA), or Groq Whisper | Local worker by default; setting `GROQ_API_KEY` in the environment or ignored `.env` sends audio to Groq instead. |
 | Tests | Vitest, Playwright (core) | Unit, integration and end-to-end tests. |
 
 The repository is an npm workspace: `apps/server`, `apps/web`, `packages/contracts` (shared types), `packages/learning` (Mastery, priorities, selection), plus `migrations/`, `content/`, `scripts/` and `tests/`.
@@ -163,9 +163,9 @@ Run results are kept in the project's evidence notes, which are not part of this
 
 - The backend accepts connections from the local machine only, and the data directory is restricted to the project or the user's local application-data folder.
 - Attempts, answers, exercise history and statistics are stored in a local SQLite database under `var/`, which is excluded from version control.
-- There is no login, no cloud account, no payment flow and no telemetry.
+- The app has no login, payment flow or telemetry. Optional Groq speech recognition requires a Groq account and sends audio to that service.
 - The AI components are local (Ollama). No request is sent to an external AI service.
-- Speech recognition runs locally; you see and can edit the transcript before anything is sent, and **audio is never written to disk**.
+- Speech recognition runs locally by default. If a Groq API key is configured, audio is sent to Groq for transcription. The app does not write audio to disk; you can edit the transcript before submitting your answer. Groq retention is governed by its data controls.
 - The database, backups and logs are git-ignored. Please keep it that way if you fork the project.
 
 This repository contains **no personal learning data**. If you run the app, create your own learning profile through your own practice and assessments; do not rely on any assessment of the original author. All examples in the repository and screenshots use fictional or hand-written sample sentences.

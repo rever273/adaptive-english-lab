@@ -4,7 +4,7 @@ import { afterEach, describe, expect, it } from "vitest";
 import { SessionBootstrapSchema } from "../../../packages/contracts/src/index.js";
 import { buildApp } from "../../../apps/server/src/app.js";
 import type { CallStats, ChatClient, ChatResult } from "../../../apps/server/src/domain/ai/clients.js";
-import { AI_CONFIG_V2 } from "../../../apps/server/src/domain/ai/config.js";
+import { AI_CONFIG_V3 } from "../../../apps/server/src/domain/ai/config.js";
 import { takeLease } from "../../../apps/server/src/domain/sessions/lease.js";
 import { createDiagnosticBlock } from "../../../apps/server/src/domain/diagnostics/session.js";
 import { finishSession } from "../../../apps/server/src/domain/sessions/finish.js";
@@ -104,6 +104,16 @@ describe("asking the tutor", () => {
     askTutor(env!.db, sessionDeps(env!), { sessionId, slotId: slots[0]!.id, kind: "why" }); // opens once the block is over
   });
 
+  it("allows discussion of a tentative answer after a diagnostic block without changing its assessment", async () => {
+    const { sessionId, slots } = await practised(1);
+    const attempt = one<{ id: string }>(env!.db, "SELECT id FROM attempts WHERE slot_id = ?", slots[0]!.id);
+    const latest = one<{ id: string; sequence: number }>(env!.db, "SELECT id, sequence FROM assessment_revisions WHERE attempt_id = ? ORDER BY sequence DESC LIMIT 1", attempt.id);
+    env!.db.prepare("INSERT INTO assessment_revisions(id, attempt_id, sequence, source, verdict, confirmation, criterion_version, supersedes_id, rationale, created_at) VALUES (?,?,?,?,?,?,?,?,?,?)").run(randomUUID(), attempt.id, latest.sequence + 1, "model", "correct", "tentative", "test", latest.id, "draft", "2026-10-31T00:00:00Z");
+    const before = one<{ n: number }>(env!.db, "SELECT COUNT(*) AS n FROM assessment_revisions").n;
+    expect(askTutor(env!.db, sessionDeps(env!), { sessionId, slotId: slots[0]!.id, kind: "question", question: "Is my answer correct?" }).jobId).toBeTruthy();
+    expect(one<{ n: number }>(env!.db, "SELECT COUNT(*) AS n FROM assessment_revisions").n).toBe(before);
+  });
+
   it("the history of tutor messages cannot be edited or deleted, and a message cannot claim approval for model text", async () => {
     const { sessionId, slots } = await practised(1);
     askTutor(env!.db, sessionDeps(env!), { sessionId, slotId: slots[0]!.id, kind: "why" });
@@ -133,7 +143,7 @@ async function rig(respond: (messageId: string) => string) {
   const clock = new FakeClock();
   const gpu = new FakeGpu(clock);
   const chat = new ScriptedChat(respond);
-  const runner = new TutorJobRunner({ db: env!.db, chat, installedDigest: async () => AI_CONFIG_V2.analysis.digest, runtimeVersion: async () => "test", deps: { now: () => new Date(env!.clock.current), newId: randomUUID }, sleep: async () => {} });
+  const runner = new TutorJobRunner({ db: env!.db, chat, installedDigest: async () => AI_CONFIG_V3.analysis.digest, runtimeVersion: async () => "test", deps: { now: () => new Date(env!.clock.current), newId: randomUUID }, sleep: async () => {} });
   await runner.prepare();
   const sched = new GpuScheduler({ db: env!.db, newId: randomUUID, clock, telemetry: gpu, control: gpu, runners: [runner], instanceId: "A", config: { admission: "spike", idleUnloadMs: 600_000 } });
   const settle = async (jobId: string, ticks = 60) => {
@@ -150,7 +160,7 @@ async function rig(respond: (messageId: string) => string) {
   return { ...p, chat, settle };
 }
 
-describe("the model's part (Qwen through the dispatcher)", () => {
+describe("the model's part (the local model through the dispatcher)", () => {
   it("more examples: queued at priority 2, answered as a labelled DRAFT; the approved rule stays separate and no score or attempt changes", async () => {
     const r = await rig((id) => good(id));
     const attemptsBefore = one<{ n: number }>(env!.db, "SELECT COUNT(*) AS n FROM attempts").n;
@@ -291,6 +301,12 @@ describe("tutor over HTTP", () => {
     expect(thread.pendingJobs).toBe(1);
     expect(thread.messages).toHaveLength(2);
     expect(((await call("GET", "/api/v1/tutor/slots")).json() as { slots: Array<{ slotId: string }> }).slots.map((s) => s.slotId)).toContain(slots[0]!.id);
+    const attempt = one<{ id: string }>(env!.db, "SELECT id FROM attempts WHERE slot_id = ?", slots[0]!.id);
+    const previous = one<{ id: string; sequence: number }>(env!.db, "SELECT id, sequence FROM assessment_revisions WHERE attempt_id = ? ORDER BY sequence DESC LIMIT 1", attempt.id);
+    env!.db.prepare("INSERT INTO assessment_revisions(id, attempt_id, sequence, source, verdict, confirmation, criterion_version, supersedes_id, rationale, created_at) VALUES (?,?,?,?,?,?,?,?,?,?)").run(randomUUID(), attempt.id, previous.sequence + 1, "model", "correct", "tentative", "test", previous.id, "draft", "2026-10-31T00:00:00Z");
+    const selected = ((await call("GET", "/api/v1/tutor/slots?filter=mistakes")).json() as { slots: Array<{ slotId: string }> }).slots;
+    expect(selected.map((s) => s.slotId)).not.toContain(slots[0]!.id);
+    expect(((await call("GET", "/api/v1/tutor/slots")).json() as { slots: Array<{ slotId: string; outcome: string }> }).slots.find((s) => s.slotId === slots[0]!.id)?.outcome).toBe("pending");
     expect((await call("GET", `/api/v1/tutor/agent-task?kind=session&id=${sessionId}`)).json()).toMatchObject({ text: expect.stringContaining(sessionId) });
     expect((await call("GET", "/api/v1/tutor/agent-task?kind=session&id=%3Bls")).statusCode).toBe(400);
     expect((await call("GET", "/api/v1/tutor/agent-task?kind=sql&id=1")).statusCode).toBe(400);

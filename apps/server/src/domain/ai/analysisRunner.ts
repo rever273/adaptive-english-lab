@@ -7,7 +7,7 @@ import { latestAssessment, writeAssessmentRevision, type AttemptRow } from "../a
 import { resolveTargetSkillKey, loadSlotContext } from "../attempts/context.js";
 import type { AttemptDeps, AssessmentDecision, Confirmation } from "../attempts/ports.js";
 import { upsertModelVersion } from "../attempts/transcripts.js";
-import { AI_CONFIG_V2, MEASURED_ADDITIONAL_PEAK_MIB, configHashOf, type AiConfig } from "./config.js";
+import { AI_CONFIG_V3, MEASURED_ADDITIONAL_PEAK_MIB, configHashOf, type AiConfig } from "./config.js";
 import type { ChatClient } from "./clients.js";
 import { TransportError } from "./clients.js";
 import { buildAnalysisUserMessageV2, ANALYSIS_SYSTEM_V3, ensurePromptVersion, type AnalysisContext } from "./prompts.js";
@@ -33,7 +33,7 @@ export interface AnalysisRunnerOptions {
 const sha = (s: string) => createHash("sha256").update(s).digest("hex");
 
 /**
- * Full-text analysis of a free written answer by Qwen (spec/06). Output is a validated DRAFT: it becomes a model-sourced,
+ * Full-text analysis of a free written answer by the local model (gemma4:12b, D67) (spec/06). Output is a validated DRAFT: it becomes a model-sourced,
  * tentative assessment revision plus tentative findings and an ai_annotation - never confirmed, never Mastery evidence. Everything
  * (job result, annotation, revision, findings) commits in ONE transaction under the fencing token or not at all. The model server
  * is called only here, only through the dispatcher, with no tools.
@@ -44,7 +44,7 @@ export class AnalysisJobRunner implements JobRunner<AnalysisPayload> {
   private modelVersionId: string | null = null;
 
   constructor(private readonly o: AnalysisRunnerOptions) {
-    this.cfg = o.config ?? AI_CONFIG_V2;
+    this.cfg = o.config ?? AI_CONFIG_V3;
   }
 
   /** Registers the model identity and its measured profile (idempotent). Called at startup; failure leaves admission at profile_unknown. */
@@ -58,7 +58,7 @@ export class AnalysisJobRunner implements JobRunner<AnalysisPayload> {
     if (peak !== undefined) {
       this.o.db
         .prepare("INSERT OR IGNORE INTO gpu_profiles(id, model_version_id, config_hash, measured_peak_mib, timings_json, validated_at) VALUES (?,?,?,?,?,?)")
-        .run(this.o.deps.newId(), id, configHashOf({ numCtx: m.numCtx, numPredict: m.numPredict }), peak, JSON.stringify({ source: "TASK_002/TASK_008 real measurements", note: "additional peak above the desktop baseline" }), this.o.deps.now().toISOString());
+        .run(this.o.deps.newId(), id, configHashOf({ numCtx: m.numCtx, numPredict: m.numPredict }), peak, JSON.stringify({ source: "TASK_023 nvidia-smi measurement of gemma4:12b at num_ctx 8192 (gemma4:12b entry in MEASURED_ADDITIONAL_PEAK_MIB)", note: "additional peak above the desktop baseline" }), this.o.deps.now().toISOString());
     }
     ensurePromptVersion(this.o.db, "analysis-v3", JSON.stringify(schemaVariant("analysis-v2")));
     this.modelVersionId = id;

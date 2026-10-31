@@ -15,6 +15,8 @@ const SettingsPatchSchema = z
     voiceShare: z.number().min(0).max(1).optional(),
     vocabularyTaskCount: z.number().int().min(5).max(10).optional(),
     vocabularyNewWordsPerSession: z.number().int().min(1).max(10).optional(),
+    reviewNoticeThreshold: z.number().int().min(1).max(50).optional(),
+    preloadModelOnStart: z.boolean().optional(),
     difficultyMin: z.enum(CEFR_RANGE).optional(),
     difficultyMax: z.enum(CEFR_RANGE).optional(),
   })

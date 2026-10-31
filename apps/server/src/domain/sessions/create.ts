@@ -3,6 +3,8 @@ import { difficultyLevels, voiceTaskCount, type CreateSessionRequest, type Creat
 import {
   DEFAULT_QUOTAS,
   DISCOVERY_V1,
+  GRAMMAR_REPEAT_CONFIG,
+  GRAMMAR_SELECTION_V2,
   SELECTION_VERSION,
   canonicalJson,
   clampMultiplier,
@@ -21,6 +23,7 @@ import { localDateIn } from "../attempts/canonical.js";
 import { loadBlockedFingerprints, loadCandidates, type BankCandidate } from "./bank.js";
 import { PLAYABLE_BLUEPRINT_STATUSES, loadBlueprint, loadPlan, loadSettings, type BlueprintPolicy, type SessionDeps } from "./policy.js";
 import { loadPriorities } from "./priorities.js";
+import { withRepeats } from "./repeats.js";
 import { getSnapshot } from "./snapshot.js";
 
 const sha256 = (s: string): string => createHash("sha256").update(s).digest("hex");
@@ -30,14 +33,15 @@ export interface CreateOptions {
   discovery?: DiscoveryConfig;
 }
 
+/** D68: sessions are recorded under grammar-selection-v2 (selection-v1 plus labelled repeats); the v1 row, where it exists, stays in history */
 export function ensureSelectionVersion(db: Db, deps: SessionDeps, discovery: DiscoveryConfig): string {
-  const cfg = { version: SELECTION_VERSION, defaultQuotas: DEFAULT_QUOTAS, familyCap: 0.35, formatCap: 0.4, discovery: discovery.version };
+  const cfg = { version: GRAMMAR_SELECTION_V2, base: SELECTION_VERSION, defaultQuotas: DEFAULT_QUOTAS, familyCap: 0.35, formatCap: 0.4, discovery: discovery.version, repeats: GRAMMAR_REPEAT_CONFIG };
   const json = canonicalJson(cfg);
   const hash = sha256(json);
-  const row = db.prepare("SELECT config_hash AS h FROM algorithm_versions WHERE id = ?").get(SELECTION_VERSION) as { h: string } | undefined;
-  if (row) return SELECTION_VERSION; // the shape of the config is fixed per version id; a different shape needs a new id
-  db.prepare("INSERT INTO algorithm_versions(id, config_json, config_hash, source_version, created_at) VALUES (?,?,?,?,?)").run(SELECTION_VERSION, json, hash, "packages/learning@0.1.0", deps.now().toISOString());
-  return SELECTION_VERSION;
+  const row = db.prepare("SELECT config_hash AS h FROM algorithm_versions WHERE id = ?").get(GRAMMAR_SELECTION_V2) as { h: string } | undefined;
+  if (row) return GRAMMAR_SELECTION_V2; // the shape of the config is fixed per version id; a different shape needs a new id
+  db.prepare("INSERT INTO algorithm_versions(id, config_json, config_hash, source_version, created_at) VALUES (?,?,?,?,?)").run(GRAMMAR_SELECTION_V2, json, hash, "packages/learning@0.1.0", deps.now().toISOString());
+  return GRAMMAR_SELECTION_V2;
 }
 
 /** What the allocator needs from the bank, reused by readiness simulation. */
@@ -100,7 +104,8 @@ export function createPracticeSession(db: Db, deps: SessionDeps, req: CreateSess
       const taxonomyId = (db.prepare("SELECT id FROM taxonomy_versions ORDER BY created_at DESC, rowid DESC LIMIT 1").get() as { id: string }).id;
       const nowIso = deps.now().toISOString();
 
-      const candidates = loadCandidates(db, "practice", blueprint.policy.skillPool, difficultyLevels(settings.values));
+      // D68: exercises shown in an earlier ended session come back as labelled repeats when due; everything else is fresh
+      const candidates = withRepeats(db, loadCandidates(db, "practice", blueprint.policy.skillPool, difficultyLevels(settings.values)), deps.now()).candidates;
       const blocked = loadBlockedFingerprints(db);
       const priorities = loadPriorities(db, candidates, nowIso, taxonomyId);
       const discovery = runDiscovery(db, { asOf: nowIso, taxonomyId, config: discoveryCfg });
@@ -140,10 +145,11 @@ export function createPracticeSession(db: Db, deps: SessionDeps, req: CreateSess
       db.prepare(
         `INSERT INTO sessions(id, blueprint_revision_id, purpose, settings_revision_id, plan_id, selection_version, random_seed, status, created_at, timezone)
          VALUES (?,?,?,?,?,?,?,?,?,?)`,
-      ).run(sessionId, blueprint.id, "practice", settings.id, plan.id, SELECTION_VERSION, seed, "active", nowIso, req.timezone);
+      ).run(sessionId, blueprint.id, "practice", settings.id, plan.id, algorithmId, seed, "active", nowIso, req.timezone);
 
       const insSlot = db.prepare("INSERT INTO session_slots(id, session_id, ordinal, exercise_revision_id, question_id, reading_group_id, input_preference, cohort_json) VALUES (?,?,?,?,?,?,?,?)");
-      const unitsOf = db.prepare("SELECT DISTINCT rpu.unit_id AS unitId FROM revision_prompt_units rpu WHERE rpu.revision_id = ?");
+      // a repeat reserves only the units never exposed (the ledger already holds the rest); the database refuses to reserve a shown unit
+      const unitsOf = db.prepare("SELECT DISTINCT rpu.unit_id AS unitId FROM revision_prompt_units rpu WHERE rpu.revision_id = ? AND (? = 0 OR rpu.unit_id NOT IN (SELECT unit_id FROM exposures))");
       const reserve = db.prepare("INSERT INTO prompt_reservations(unit_id, slot_id, created_at) VALUES (?,?,?)");
       const choices: unknown[] = [];
       const reserved = new Set<string>();
@@ -155,11 +161,12 @@ export function createPracticeSession(db: Db, deps: SessionDeps, req: CreateSess
           const content = JSON.parse((db.prepare("SELECT content_json AS c FROM exercise_revisions WHERE id = ?").get(s.revisionId) as { c: string }).c) as { payload: { questions: Array<{ id: string }> } };
           questionId = content.payload.questions[s.childIndex]!.id;
         }
-        insSlot.run(slotId, sessionId, s.ordinal, s.revisionId, questionId, s.readingGroupId, s.inputPreference, JSON.stringify({ criterionVersion: cand.rubricVersion, difficulty: cand.difficulty, role: s.role }));
+        const repeatMeta = s.repeat ? { repeat: true, reason: s.repeat.reason, repeatOfSlotId: s.repeat.ofSlotId } : {};
+        insSlot.run(slotId, sessionId, s.ordinal, s.revisionId, questionId, s.readingGroupId, s.inputPreference, JSON.stringify({ criterionVersion: cand.rubricVersion, difficulty: cand.difficulty, role: s.role, ...repeatMeta }));
         // all units of the revision are reserved up front, by the first slot of the revision (a reading passage's children share them)
         if (!reserved.has(s.revisionId)) {
           reserved.add(s.revisionId);
-          for (const u of unitsOf.all(s.revisionId) as Array<{ unitId: string }>) reserve.run(u.unitId, slotId, nowIso);
+          for (const u of unitsOf.all(s.revisionId, s.repeat ? 1 : 0) as Array<{ unitId: string }>) reserve.run(u.unitId, slotId, nowIso);
         }
         choices.push({
           slotId,
@@ -174,6 +181,7 @@ export function createPracticeSession(db: Db, deps: SessionDeps, req: CreateSess
           bonus: s.bonus,
           readingGroupId: s.readingGroupId,
           childIndex: s.childIndex,
+          repeat: s.repeat ? { reason: s.repeat.reason, ofSlotId: s.repeat.ofSlotId } : null,
         });
       }
 
@@ -184,7 +192,7 @@ export function createPracticeSession(db: Db, deps: SessionDeps, req: CreateSess
         algorithmId,
         candidateHash,
         JSON.stringify({
-          selectionVersion: SELECTION_VERSION,
+          selectionVersion: algorithmId,
           seed,
           asOf: nowIso,
           quotas,
@@ -210,6 +218,7 @@ export function createPracticeSession(db: Db, deps: SessionDeps, req: CreateSess
           soft: {
             weakRatio: { target: result.stats.weakTarget, actual: result.stats.weakActual },
             voice: { target: voiceTaskCount(settings.values), actual: result.stats.voiceActual },
+            repeats: { count: result.slots.filter((x) => x.repeat).length, caps: GRAMMAR_REPEAT_CONFIG, note: "labelled repeats are practice only: independent = 0, no new evidence for Mastery" },
             vocabularyShare: "not tracked: the exercise schema has no vocabulary flag yet",
             aiItShare: "not tracked: the exercise schema has no topic-domain flag yet",
             sameSessionRemediation: "not applied: the snapshot is fixed at creation; failures are picked up by the next session",

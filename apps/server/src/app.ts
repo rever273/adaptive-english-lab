@@ -30,6 +30,9 @@ import { registerSttRoutes } from "./routes/stt.js";
 import type { SttService } from "./domain/stt/sttService.js";
 import { registerSessionRoutes } from "./routes/sessions.js";
 import { registerSettingsRoutes } from "./routes/settings.js";
+import { registerAiModelRoutes } from "./routes/aiModel.js";
+import { LOCAL_MODEL_TAG } from "./domain/ai/config.js";
+import type { ModelResidency } from "./queue/modelResidency.js";
 import { registerSecurity } from "./security.js";
 
 export interface AppDeps {
@@ -50,8 +53,10 @@ export interface AppDeps {
   scheduler?: GpuScheduler | null;
   /** voice capture (TASK_011); absent = the endpoints are not registered and /capabilities says "not_implemented" */
   stt?: SttService | null;
+  /** residency of the one local model (D67); absent = no model endpoints (tests without a model server) */
+  residency?: ModelResidency | null;
   /** live AI component status; absent = nothing wired (tests, TASK_003 behaviour) */
-  aiStatus?: () => Capabilities["ai"];
+  aiStatus?: () => Capabilities["ai"] | Promise<Capabilities["ai"]>;
   /** HMAC key for the session cookie / CSRF token; random per start when omitted. */
   csrfSecret?: Buffer;
 }
@@ -77,6 +82,15 @@ export async function buildApp(deps: AppDeps): Promise<FastifyInstance> {
   registerErrorHandling(app);
   registerSecurity(app, config);
   registerCsrf(app, deps.csrfSecret);
+  // Learner activity warms the model (D67): only the pages and actions that lead to practice, never polling or the model endpoints themselves.
+  const WARM_PREFIXES = ["/api/v1/dashboard", "/api/v1/sessions", "/api/v1/vocabulary", "/api/v1/attempts", "/api/v1/tutor"];
+  if (deps.residency) {
+    const residency = deps.residency;
+    app.addHook("onRequest", async (req) => {
+      const url = req.url;
+      if (WARM_PREFIXES.some((p) => url.startsWith(p))) residency.noteActivity();
+    });
+  }
   registerAttemptRoutes(app, db, {
     assessor: ClosedFormAssessor,
     outbox: jobsOutbox({ now: deps.attempts?.now ?? (() => new Date()), newId: deps.attempts?.newId ?? randomUUID }),
@@ -97,6 +111,7 @@ export async function buildApp(deps: AppDeps): Promise<FastifyInstance> {
   registerQueueRoutes(app, db, base, deps.scheduler ?? null);
   registerTutorRoutes(app, db, base, { onQueued: () => deps.scheduler?.kick() });
   if (deps.stt) registerSttRoutes(app, deps.stt);
+  if (deps.residency) registerAiModelRoutes(app, deps.residency);
   registerContentRoutes(app, db, { now: deps.attempts?.now ?? (() => new Date()), newId: deps.attempts?.newId ?? randomUUID }, { onBatchQueued: () => deps.scheduler?.kick() });
 
   const uiBuilt = existsSync(path.join(config.webDist, "index.html"));
@@ -135,7 +150,7 @@ export async function buildApp(deps: AppDeps): Promise<FastifyInstance> {
       db: { status: dbStatus },
       ui: { built: uiBuilt },
       // STT status comes from the voice service (ready = local weights found). AI status is whatever the runner honestly reports; Nimble routing stays disabled until its gate (D42).
-      ai: deps.aiStatus?.() ?? { ollama: "not_implemented", nimble: "not_implemented", qwen: "not_implemented" },
+      ai: (await deps.aiStatus?.()) ?? { ollama: "not_implemented", model: "not_implemented", modelTag: LOCAL_MODEL_TAG, modelState: "unloaded" },
       stt: { status: deps.stt ? (deps.stt.available() ? "ready" : "unavailable") : "not_implemented" },
       degradedReasons: [...degradedReasons(), ...(dbStatus === "ready" ? [] : ["db_unavailable"])],
     };

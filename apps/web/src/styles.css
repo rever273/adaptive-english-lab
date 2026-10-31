@@ -583,3 +583,12 @@ kbd { font: 600 0.78rem ui-monospace, "Cascadia Mono", Consolas, monospace; padd
 .word-image-dialog::backdrop { background: rgba(0,0,0,.7); }
 .word-image-dialog button { display: block; margin-left: auto; margin-bottom: 8px; }
 .word-image-dialog img { display: block; max-width: 100%; max-height: 75vh; object-fit: contain; }
+
+/* TASK_023: bottom-right notice for the local model; the AI activity panel moves up while it is shown */
+.model-notice { position: fixed; right: 1rem; bottom: 1rem; z-index: 41; max-width: min(24rem, calc(100vw - 2rem)); display: flex; align-items: center; gap: 0.5rem; padding: 0.5rem 0.8rem; border-radius: 0.6rem; border: 1px solid var(--border); background: var(--surface); color: var(--text); box-shadow: 0 6px 18px rgb(0 0 0 / 40%); font-size: 0.9rem; animation: model-notice-in 0.2s ease-out; }
+.model-notice-error { border-color: var(--err-fg); }
+.model-notice-ready { animation: model-notice-in 0.2s ease-out, model-notice-out 0.6s ease-in 2.4s forwards; }
+@keyframes model-notice-in { from { opacity: 0; transform: translateY(0.5rem); } to { opacity: 1; transform: none; } }
+@keyframes model-notice-out { to { opacity: 0; } }
+body:has(.model-notice) .ai-panel, body:has(.model-notice) .ai-pill { bottom: 4.25rem; }
+@media (prefers-reduced-motion: reduce) { .model-notice, .model-notice-ready { animation: none; } }

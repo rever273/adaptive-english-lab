@@ -94,7 +94,7 @@ describe("vocabulary in a browser", () => {
     expect(q<{ n: number }>("SELECT COUNT(*) AS n FROM vocabulary_revisions WHERE source = 'user'")[0]!.n).toBe(1);
 
     await page.getByLabel(`${lemma} learned`).click();
-    await page.waitForFunction(() => document.querySelector<HTMLInputElement>('input[type="checkbox"]')?.checked === true, undefined, T);
+    await page.waitForFunction(() => document.querySelector<HTMLInputElement>('input[type="checkbox"][aria-label$=" learned"]')?.checked === true, undefined, T);
     expect(q<{ learned: number }>("SELECT learned FROM vocabulary_entries WHERE lemma = ?", lemma)[0]!.learned).toBe(1);
     expect(q<{ n: number }>("SELECT COUNT(*) AS n FROM attempts")[0]!.n).toBe(attemptsBefore); // vocabulary never writes attempts or scores
     await shot("04-edited-learned");

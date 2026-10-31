@@ -74,6 +74,14 @@ export interface SchedulerOptions {
   config?: Partial<SchedulerConfig>;
   /** called after persisted job state changed (SSE fan-out, tests) */
   onChange?: () => void;
+  /** speech recognition runs in the cloud (Groq): practice then never holds back local AI work (see practiceHoldsLlm) */
+  cloudSpeech?: boolean;
+  /** true while the model residency service loads/unloads the model: no unit is started meanwhile (D67) */
+  modelTransition?: () => boolean;
+  /** overrides config.idleUnloadMs (the residency service knows whether the learner wants the model kept warm) */
+  idleUnloadMs?: () => number;
+  /** local speech starts: stop a model load that is in flight and report the models it may have touched (they are then proven released) */
+  abortModelLoad?: () => Promise<string[]>;
 }
 
 /**
@@ -136,13 +144,43 @@ export class GpuScheduler {
     this.kick();
   }
 
+  /**
+   * THE predicate that decides whether practice holds back local LLM work (D66/D67):
+   *  - cloud speech (Groq key): never. Answer analysis, word enrichment and generation start at once, even in an open session;
+   *  - local speech (faster-whisper on this GPU): yes - STT has priority and the LLM yields (grant from beginPractice, or a live lease
+   *    whose session can still use the microphone).
+   */
+  private practiceHoldsLlm(): boolean {
+    return !this.o.cloudSpeech && (this.practiceGrant || this.practiceLeaseLive());
+  }
+
   private practiceLeaseLive(): boolean {
     const live = this.db.prepare("SELECT session_id AS id FROM practice_leases WHERE expires_at > ?").all(iso(this.clock.now())) as Array<{ id: string }>;
     // released explicitly by the client (voiceDone) or, after a restart, derived from the database: no voice-capable exercise left
     return live.some((l) => !this.voiceDone.has(l.id) && leaseHoldsGpu(this.db, l.id));
   }
   practiceActive(): boolean {
-    return this.practiceGrant || this.practiceLeaseLive();
+    return this.practiceHoldsLlm();
+  }
+
+  /** the unit currently running (it holds the model), or null */
+  activeJob(): { kind: JobKind } | null {
+    return this.active ? { kind: this.active.job.kind } : null;
+  }
+
+  /** The residency service loaded our model: it is ours (admission counts it as already resident), the idle clock restarts. */
+  noteModelLoaded(models: string[]): void {
+    this.resident = { models, lastUsed: this.clock.now().getTime() };
+  }
+  noteModelReleased(): void {
+    this.resident = null;
+  }
+
+  /** Warm-up admission: null when a model needing peakMib fits (telemetry unavailable = do not block), else the waiting reason. */
+  async vramShortfall(peakMib: number): Promise<string | null> {
+    const sample = await this.sample();
+    if (!sample) return null;
+    return sample.totalMib - sample.usedMib >= peakMib + this.cfg.reserveMib ? null : "insufficient_vram";
   }
 
   /**
@@ -154,11 +192,13 @@ export class GpuScheduler {
     const start = this.clock.now().getTime();
     this.practiceGrant = true;
     if (this.active) await this.stopActive("practice");
-    const rel = this.resident ? await this.verifiedRelease(this.resident.models) : { verified: true, elapsedMs: 0, samples: 0 };
+    const aborted = (await this.o.abortModelLoad?.().catch(() => [])) ?? []; // a warm-up in flight must not finish on top of the speech model
+    const toRelease = [...new Set([...(this.resident?.models ?? []), ...aborted])];
+    const rel = toRelease.length > 0 ? await this.verifiedRelease(toRelease) : { verified: true, elapsedMs: 0, samples: 0 };
     if (rel.verified) this.resident = null;
     const loaded = await this.o.control.listLoaded().catch(() => null);
     const ownedStillThere = this.resident !== null;
-    const ready = rel.verified && !ownedStillThere && loaded !== null && this.active === null;
+    const ready = rel.verified && !ownedStillThere && loaded !== null && this.active === null && !this.o.modelTransition?.();
     return { ready, reason: ready ? null : ownedStillThere || this.active !== null ? "teardown_unproven" : "model_server_unreachable", elapsedMs: this.clock.now().getTime() - start };
   }
 
@@ -226,12 +266,15 @@ export class GpuScheduler {
       }
     }
 
+    // never free the model while the residency service is loading/unloading it (it confirms residency through /api/ps)
+    if (this.o.modelTransition?.() && !practice) return;
     // free the GPU of an idle resident model (VRAM for the desktop) and always when practice needs it
-    if (this.resident && (practice || nowMs - this.resident.lastUsed >= this.cfg.idleUnloadMs)) {
+    if (this.resident && (practice || nowMs - this.resident.lastUsed >= (this.o.idleUnloadMs?.() ?? this.cfg.idleUnloadMs))) {
       const rel = await this.verifiedRelease(this.resident.models);
       if (rel.verified) this.resident = null;
     }
 
+    if (this.o.modelTransition?.()) return; // the residency service is loading/unloading the model: start nothing on top (it kicks us after)
     const candidates = this.eligible();
     if (candidates.length === 0) return;
     if (practice) {
@@ -277,7 +320,7 @@ export class GpuScheduler {
       return;
     }
     // Practice or shutdown can begin while telemetry or model release is awaited.
-    if (this.stopped || this.practiceActive()) return;
+    if (this.stopped || this.practiceActive() || this.o.modelTransition?.()) return;
     const current = getJob(this.db, job.id);
     if (!current || !["queued", "waiting_for_gpu"].includes(current.state) || current.cancelRequested) return;
     // Takeover of an EXPIRED foreign lease (a crashed or unresponsive previous owner): fencing only stops its stale commits, it does not

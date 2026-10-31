@@ -4,9 +4,32 @@ import { loadBlueprint, loadSettings } from "../../sessions/policy.js";
 import { vocabularyPracticeStatus } from "../../vocabulary/practice.js";
 import { difficultyLevels } from "@english-lab/contracts";
 import { scaleQuotas, DEFAULT_QUOTAS } from "@english-lab/learning";
+import { lessonPlanView, needMessage } from "./lessonNeeds.js";
 
-/** Read-only stock warning before exhaustion. Availability never counts drafts, used sentences or reservations. */
-export function replenishmentStock(db: Db) {
+/**
+ * Read-only stock warning before exhaustion. Availability never counts drafts, used sentences or reservations.
+ * D68: grammar is judged by the DEFICITS of the lesson the app offers next (per format and skill, under the learner's level range, fresh
+ * plus reusable exercises, for the next 2 sessions); `recommended` is the batch size the Content Studio pre-fills.
+ */
+export function replenishmentStock(db: Db, now: Date = new Date()) {
+  const plan = lessonPlanView(db, now);
+  if (plan) {
+    const next = plan.lessons[plan.nextIndex]!;
+    const vocab = vocabularyPracticeStatus(db);
+    const low = next.deficit > 0;
+    const grammar = {
+      available: next.available,
+      threshold: next.taskCount * next.sessions,
+      low,
+      scope: "next lesson",
+      lesson: { key: next.key, label: next.label, title: next.title, range: next.range, sessions: next.sessions, fresh: next.fresh, reusable: next.reusable },
+      deficits: [...next.formats.filter((f) => f.deficit > 0).map((f) => ({ kind: "format" as const, name: f.format, need: f.need, have: f.have, deficit: f.deficit })), ...next.skills.filter((k) => k.deficit > 0).map((k) => ({ kind: "skill" as const, name: k.skill, need: k.target, have: k.have, deficit: k.deficit }))],
+      recommended: next.recommended,
+      message: low ? needMessage(next) : `Lesson ${next.label} at ${next.range} has enough exercises for the next ${next.sessions} sessions (${next.available} usable).`,
+      bySkill: next.skills.map((k) => ({ skill: k.skill, available: k.have })),
+    };
+    return { grammar, vocabulary: { available: vocab.freshAvailable, threshold: vocab.taskCount * 2, low: vocab.words > 0 && vocab.freshAvailable < vocab.taskCount * 2 } };
+  }
   const settings = loadSettings(db).values;
   const last = db.prepare("SELECT blueprint_revision_id AS id FROM sessions WHERE purpose = 'practice' AND blueprint_revision_id IS NOT NULL ORDER BY created_at DESC, rowid DESC LIMIT 1").get() as { id: string } | undefined;
   const policy = last ? loadBlueprint(db, last.id).policy : null;

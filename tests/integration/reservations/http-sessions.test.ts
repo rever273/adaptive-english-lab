@@ -157,7 +157,7 @@ describe("errors and shortage are explicit", () => {
     expect(e.code).toBe("CONTENT_SHORTAGE");
     const d = e.details as { deficits: Array<{ format: string; needed: number; available: number }>; requestedN: number; largestFeasibleN: number | null };
     expect(d.requestedN).toBe(18);
-    expect(d.deficits.some((x) => x.available < x.needed)).toBe(true);
+    expect(d.deficits.length).toBeGreaterThan(0); // D68: skipped exercises are due repeats (capped at 30%), which still cannot fill 18 slots
     const dash = DashboardSchema.parse((await get("/api/v1/dashboard")).json());
     expect(dash.blueprints[0]).toMatchObject({ readySessions: 0, shortage: { requestedN: 18 } });
   });

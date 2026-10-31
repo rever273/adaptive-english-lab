@@ -56,14 +56,21 @@ describe("T3a when grading may start", () => {
   });
 });
 
-describe("T3b verdict text for an unconfirmed answer", () => {
-  it("names the AI verdict and says it is not counted yet", () => {
+describe("T3b / D65 verdict text for an unconfirmed answer", () => {
+  it("states a decided AI verdict plainly, with its reason", () => {
+    const base = { explanation_ru: "Всё верно.", findings: [] };
+    expect(unconfirmedLabel({ verdict: "correct", aiChecked: true, aiReview: { judgement: "acceptable", ...base } })).toBe("Correct (checked by AI) — Всё верно.");
+    expect(unconfirmedLabel({ verdict: "incorrect", aiChecked: true, aiReview: { judgement: "incorrect_candidate", ...base } })).toBe("Incorrect (checked by AI) — Всё верно. · counts in your stats after review");
+    expect(unconfirmedLabel({ verdict: "correct", aiReview: { judgement: "acceptable", ...base } })).toContain("(checked by AI)");
+  });
+  it("an undecided answer is unresolved, never called ambiguous", () => {
     const base = { explanation_ru: "x", findings: [] };
-    expect(unconfirmedLabel({ verdict: "correct", aiReview: { judgement: "acceptable", ...base } })).toBe("Looks correct (AI check) — not counted in your stats yet");
-    expect(unconfirmedLabel({ verdict: "incorrect", aiReview: { judgement: "incorrect_candidate", ...base } })).toBe("Looks wrong (AI check) — not counted in your stats yet");
-    expect(unconfirmedLabel({ verdict: "ambiguous", aiReview: { judgement: "ambiguous", ...base } })).toContain("could not decide");
-    expect(unconfirmedLabel({ verdict: "pending" })).toBe("Waiting for the AI check — not counted in your stats yet");
-    for (const f of [{ verdict: "correct" }, { verdict: "incorrect" }, { verdict: "pending" }]) expect(unconfirmedLabel(f)).toContain("not counted in your stats yet");
+    for (const f of [{ verdict: "ambiguous", aiReview: { judgement: "ambiguous" as const, ...base } }, { verdict: "pending", aiReview: { judgement: "abstain" as const, ...base } }, { verdict: "pending", unresolved: true }]) {
+      const label = unconfirmedLabel(f);
+      expect(label).toBe("Could not be checked automatically — it will be reviewed later");
+      expect(label.toLowerCase()).not.toContain("ambiguous");
+    }
+    expect(unconfirmedLabel({ verdict: "pending" })).toBe("Waiting for the AI check");
   });
 });
 

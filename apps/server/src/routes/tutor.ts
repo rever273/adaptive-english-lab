@@ -6,7 +6,7 @@ import { agentTask, type AgentTaskKind } from "../domain/tutor/agentExport.js";
 import { askTutor, getThread } from "../domain/tutor/repository.js";
 
 const idParams = { schema: { params: { type: "object", properties: { id: { type: "string", minLength: 1, maxLength: 64 } }, required: ["id"] } } } as const;
-const TaskQuery = z.object({ kind: z.enum(["session", "exercise", "batch", "findings", "coverage", "progress", "lessons", "vocabulary"]), id: z.string().max(64).optional() }).strict();
+const TaskQuery = z.object({ kind: z.enum(["session", "exercise", "batch", "findings", "coverage", "progress", "lessons", "vocabulary", "review"]), id: z.string().max(64).optional() }).strict();
 
 /**
  * Tutor (spec/02, spec/08): POST /tutor shows the approved rule at once and queues the local model for new examples / free questions (202).
@@ -22,7 +22,7 @@ export function registerTutorRoutes(app: FastifyInstance, db: Db, deps: { now: (
   app.get<{ Params: { id: string } }>("/api/v1/tutor/threads/:id", idParams, async (req) => getThread(db, req.params.id));
 
   // answered slots the learner can ask about (same gate as feedback is enforced again at ask time)
-  // ?filter=mistakes keeps only first answers that were wrong, "I don't know" or not yet confirmed (D63)
+  // Keep mistakes and unresolved answers; a tentative correct is still unconfirmed, but is available in All recent tasks.
   app.get("/api/v1/tutor/slots", async (req) => {
     const mistakesOnly = (req.query as { filter?: string }).filter === "mistakes";
     const rows = db
@@ -39,7 +39,7 @@ export function registerTutorRoutes(app: FastifyInstance, db: Db, deps: { now: (
            LEFT JOIN first f ON f.slot_id = ss.id
           WHERE (EXISTS (SELECT 1 FROM attempts a WHERE a.slot_id = ss.id) OR EXISTS (SELECT 1 FROM session_events e WHERE e.slot_id = ss.id AND e.event_type IN ('show_answer','skip')))
             AND NOT (s.purpose IN ('heldout','diagnostic') AND s.status = 'active')
-            AND (@mistakes = 0 OR f.verdict IN ('incorrect','idk') OR (f.verdict IS NOT NULL AND f.confirmation <> 'confirmed'))
+            AND (@mistakes = 0 OR f.verdict IN ('incorrect','idk') OR (f.verdict IS NOT NULL AND f.verdict <> 'correct' AND f.confirmation <> 'confirmed'))
           ORDER BY s.created_at DESC, ss.ordinal DESC LIMIT @limit`,
       )
       .all({ mistakes: mistakesOnly ? 1 : 0, limit: mistakesOnly ? 500 : 60 }) as Array<{ slotId: string; sessionId: string; ordinal: number; q: string | null; revisionId: string; type: string; c: string; purpose: string; verdict: string | null; confirmation: string | null; lastEvent: string | null }>;

@@ -79,6 +79,7 @@ export function loadAttemptFacts(db: Db, p: { watermark: number; asOf: string; c
          JOIN exercise_revisions er ON er.id = ss.exercise_revision_id
         WHERE t.submitted_at <= @asOf
           AND NOT EXISTS (SELECT 1 FROM vocabulary_sessions vs WHERE vs.session_id = s.id)
+          AND COALESCE(json_extract(ss.cohort_json, '$.repeat'), 0) <> 1 -- D68: labelled repeats are practice only, not accuracy facts
         ORDER BY t.submitted_at, t.id`,
     )
     .all({ w: p.watermark, asOf: p.asOf }) as Array<Record<string, any>>;
@@ -121,6 +122,7 @@ export function loadSlotFacts(db: Db, p: { sessionEventWatermark: number; asOf: 
               EXISTS (SELECT 1 FROM session_events e WHERE e.slot_id = ss.id AND e.event_type IN ('skip','continue') AND e.rowid <= @w AND e.server_at <= @asOf) AS closed
          FROM session_slots ss JOIN sessions s ON s.id = ss.session_id JOIN exercise_revisions er ON er.id = ss.exercise_revision_id
         WHERE NOT EXISTS (SELECT 1 FROM vocabulary_sessions vs WHERE vs.session_id = s.id)
+          AND COALESCE(json_extract(ss.cohort_json, '$.repeat'), 0) <> 1 -- D68: labelled repeats are practice only, not accuracy facts
         ORDER BY ss.id`,
     )
     .all({ w: p.sessionEventWatermark, asOf: p.asOf }) as Array<Record<string, any>>;

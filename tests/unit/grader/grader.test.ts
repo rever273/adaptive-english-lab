@@ -139,3 +139,31 @@ describe("IDK and malformed answers", () => {
     shapeError(() => assess("detect_error", text("s2")));
   });
 });
+
+describe("D65 contraction equivalence", () => {
+  const withAccepted = (accepted: string[]) => {
+    const c = fixture("guided_short_answer");
+    c.payload.accepted_answers = accepted;
+    return ctx("guided_short_answer", text(""), { content: c });
+  };
+  const grade = (accepted: string[], answer: string) => ClosedFormAssessor.assess({ ...withAccepted(accepted), rawAnswer: text(answer) });
+
+  it("a contraction equals its full form in both directions, case and quotes ignored", () => {
+    expect(grade(["I am not going to the meeting."], "I’m not going to the meeting.")).toMatchObject({ verdict: "correct", confirmation: "confirmed", source: "deterministic" });
+    expect(grade(["They don't know the answer."], "They do not know the answer")).toMatchObject({ verdict: "correct", confirmation: "confirmed" });
+    expect(grade(["She cannot attend."], "She can't attend.")).toMatchObject({ verdict: "correct" });
+    expect(grade(["We won't be late."], "We will not be late.")).toMatchObject({ verdict: "correct" });
+  });
+
+  it("negation stays significant: a contraction never matches the positive form", () => {
+    expect(grade(["They do not know the answer."], "They do know the answer.")).toMatchObject({ verdict: "pending" });
+    expect(grade(["They do know the answer."], "They don't know the answer.")).toMatchObject({ verdict: "pending" });
+    expect(grade(["She can attend."], "She can't attend.")).toMatchObject({ verdict: "pending" });
+  });
+
+  it("'s and 'd are not expanded; other words stay significant", () => {
+    expect(grade(["He is ready."], "He's ready.")).toMatchObject({ verdict: "pending" });
+    expect(grade(["I would go."], "I'd go.")).toMatchObject({ verdict: "pending" });
+    expect(grade(["I am not going."], "I'm not going to.")).toMatchObject({ verdict: "pending" });
+  });
+});

@@ -4,8 +4,8 @@ import { ApiError } from "../../errors.js";
 import { localDateIn } from "../attempts/canonical.js";
 import { nearMatchOfFirst } from "./feedback.js";
 import type { SessionDeps } from "./policy.js";
+import { AI_CHECK_ACTIVE, unresolvedAttempts } from "./reviewQueue.js";
 
-const AI_CHECK_ACTIVE: ReadonlySet<string> = new Set(["queued", "waiting_for_gpu", "running", "paused"]);
 
 /**
  * Counts for the finish screen. First attempts only; assisted first attempts (hint / answer seen before) are their own bucket and
@@ -17,6 +17,8 @@ export function summarize(db: Db, sessionId: string, status: "completed" | "ende
   let pendingAnalysis = 0;
   let aiWaiting = 0;
   let detailDiffers = 0;
+  // D65: first attempts decided by the local AI (provisional) and those it could not settle
+  const aiChecked = { correct: 0, incorrect: 0 };
   for (const { id } of slots) {
     const first = db.prepare("SELECT id, hints_before AS hints, answer_seen_before AS seen FROM attempts WHERE slot_id = ? AND attempt_no = 1").get(id) as { id: string; hints: number; seen: number } | undefined;
     if (!first) {
@@ -30,7 +32,7 @@ export function summarize(db: Db, sessionId: string, status: "completed" | "ende
     if (latest.verdict === "pending" || latest.verdict === "ambiguous") pendingAnalysis++;
     // the local AI check of this answer is still queued/running: nothing has been produced for it yet (a failed or finished job is not waiting)
     if ((latest.verdict === "pending" || latest.verdict === "ambiguous") && AI_CHECK_ACTIVE.has((db.prepare("SELECT state FROM jobs WHERE idempotency_key = ?").get(`free_text_analysis:${latestAttempt.id}`) as { state: string } | undefined)?.state ?? "")) aiWaiting++;
-    const firstAssessment = db.prepare("SELECT verdict, confirmation FROM assessment_revisions WHERE attempt_id = ? ORDER BY sequence DESC LIMIT 1").get(first.id) as { verdict: string; confirmation: string };
+    const firstAssessment = db.prepare("SELECT verdict, confirmation, source FROM assessment_revisions WHERE attempt_id = ? ORDER BY sequence DESC LIMIT 1").get(first.id) as { verdict: string; confirmation: string; source: string };
     if (first.hints > 0 || first.seen > 0) counts.assisted++;
     else if (firstAssessment.verdict === "correct" && firstAssessment.confirmation === "confirmed") {
       counts.correct++;
@@ -38,8 +40,13 @@ export function summarize(db: Db, sessionId: string, status: "completed" | "ende
     }
     else if (firstAssessment.verdict === "incorrect" && firstAssessment.confirmation === "confirmed") counts.incorrect++;
     else if (firstAssessment.verdict === "idk") counts.idk++;
-    else counts.pending++;
+    else if (firstAssessment.source === "model" && firstAssessment.confirmation === "tentative" && (firstAssessment.verdict === "correct" || firstAssessment.verdict === "incorrect")) aiChecked[firstAssessment.verdict]++;
+    else {
+      counts.pending++;
+    }
   }
+  // the same queue the dashboard notice counts: unresolved pending/ambiguous answers AND model-"incorrect" ones waiting for an agent to confirm them
+  const unresolved = unresolvedAttempts(db).filter((q) => q.sessionId === sessionId).length;
   const notes: string[] = [];
   if (status === "ended_early") notes.push("Ended early: this does not count as a completed lesson.");
   if (pendingAnalysis > 0) notes.push(`${pendingAnalysis} written answer(s) remain unconfirmed. AI suggestions may appear below.`);
@@ -59,8 +66,12 @@ export function summarize(db: Db, sessionId: string, status: "completed" | "ende
       .all(sessionId) as Array<{ lemma: string | null }>;
     practiseAgain = rows.map((r) => r.lemma).filter((l): l is string => Boolean(l));
   }
+  if (aiChecked.correct > 0) notes.push(`${aiChecked.correct} answer(s) were judged correct by the local AI: they count in your progress with a lower weight until they are confirmed.`);
+  if (aiChecked.incorrect > 0) notes.push(`${aiChecked.incorrect} answer(s) were judged incorrect by the local AI: they will count in your progress only after review, so a wrong AI verdict cannot lower your results.`);
+  const repeats = (db.prepare("SELECT COUNT(*) AS n FROM session_slots WHERE session_id = ? AND json_extract(cohort_json, '$.repeat') = 1").get(sessionId) as { n: number }).n;
+  if (repeats > 0 && !vocabulary) notes.push(`${repeats} task(s) were repeats of sentences you had seen. They are extra practice and do not change your skill levels.`);
   if (detailDiffers > 0) notes.push(`${detailDiffers} answer(s) used the right construction with a different name or number: counted for the construction, the different word is marked in red below.`);
-  return { sessionId, status, total: slots.length, counts, pendingAnalysis, aiWaiting, ...(detailDiffers > 0 ? { detailDiffers } : {}), category: vocabulary ? "vocabulary" : "grammar", xpEarned, ...(vocabulary ? { practiseAgain } : {}), notes };
+  return { sessionId, status, total: slots.length, counts, pendingAnalysis, aiWaiting, ...(aiChecked.correct + aiChecked.incorrect > 0 ? { aiChecked } : {}), ...(unresolved > 0 ? { unresolved } : {}), ...(detailDiffers > 0 ? { detailDiffers } : {}), ...(repeats > 0 && !vocabulary ? { repeats } : {}), category: vocabulary ? "vocabulary" : "grammar", xpEarned, ...(vocabulary ? { practiseAgain } : {}), notes };
 }
 
 /**

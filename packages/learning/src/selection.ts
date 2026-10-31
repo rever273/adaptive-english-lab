@@ -11,6 +11,21 @@
 import type { Dimension } from "./mastery.js";
 
 export const SELECTION_VERSION = "selection-v1";
+/**
+ * D68: grammar practice may bring back a labelled repeat. The solver itself is unchanged for fresh candidates (and keeps the
+ * `selection-v1` seed prefix, so a bank without repeats gives the same sessions); only the recorded algorithm id is new.
+ */
+export const GRAMMAR_SELECTION_V2 = "grammar-selection-v2";
+
+/** repeat limits of grammar-selection-v2 (stored in algorithm_versions) */
+export const GRAMMAR_REPEAT_CONFIG = {
+  /** missed / assisted / skipped exercises return from the next session on; they may take at most this share of the slots */
+  soonShare: 0.3,
+  /** all repeats together never take more than this share */
+  totalShare: 0.6,
+  /** an exercise answered correctly (unaided) is due again only after this many days */
+  correctAfterDays: 14,
+} as const;
 
 export type Format = "choose_form" | "choose_missing_fragment" | "detect_error" | "guided_short_answer" | "russian_to_english_short" | "context_reading";
 export type NonReadingFormat = Exclude<Format, "context_reading">;
@@ -44,6 +59,11 @@ export interface Candidate {
   childCount: number;
   /** all sentence-unit fingerprints the revision would reserve (prompt, passage, options, accepted answers) */
   unitFingerprints: readonly string[];
+  /**
+   * D68: this exercise was shown before (an ended grammar practice session) and is due again. `unitFingerprints` then lists only the
+   * units never exposed (the ledger already holds the rest). "missed" / "assisted" return soon, "review" (a correct answer) rarely.
+   */
+  repeat?: { reason: "missed" | "assisted" | "review"; ofSlotId: string };
 }
 
 export interface SelectionInput {
@@ -85,10 +105,12 @@ export interface SelectedSlot {
   /** 0-based index among the children of a reading passage */
   childIndex: number | null;
   inputPreference: "text" | "voice";
+  /** D68: set when the slot is a labelled repeat */
+  repeat?: { reason: "missed" | "assisted" | "review"; ofSlotId: string };
 }
 
 export interface Deficit {
-  kind: "format" | "family_cap" | "no_mistake" | "diversity" | "reading" | "search_budget";
+  kind: "format" | "family_cap" | "no_mistake" | "diversity" | "reading" | "search_budget" | "repeat_cap";
   format?: Format;
   needed?: number;
   available?: number;
@@ -198,6 +220,9 @@ function solve(input: SelectionInput): SelectionResult {
     .slice()
     .sort((a, b) => (a.revisionId < b.revisionId ? -1 : 1));
 
+  const repeatSoonCap = Math.floor(GRAMMAR_REPEAT_CONFIG.soonShare * n);
+  const repeatTotalCap = Math.floor(GRAMMAR_REPEAT_CONFIG.totalShare * n);
+
   // 2. reading block first: it fixes which recognition slots disappear
   let quotas: Record<NonReadingFormat, number> = { ...input.quotas };
   let reading: Candidate | null = null;
@@ -207,7 +232,15 @@ function solve(input: SelectionInput): SelectionResult {
       deficits.push({ kind: "reading", format: "context_reading", needed: 1, available: 0, message: "This lesson needs a reading passage and none is available" });
       return { ...empty(), deficits };
     }
-    reading = options[Math.floor(rand() * options.length)]!;
+    const freshOptions = options.filter((c) => !c.repeat); // fresh first: a repeated passage only when no new one is left
+    // a repeated passage uses its questions from the repeat budget, so it is offered only when it fits the caps
+    const fits = (c: Candidate) => c.childCount <= repeatTotalCap && (c.repeat?.reason === "review" || c.childCount <= repeatSoonCap);
+    const readingFrom = freshOptions.length > 0 ? freshOptions : options.filter(fits);
+    if (readingFrom.length === 0) {
+      deficits.push({ kind: "reading", format: "context_reading", needed: 1, available: 0, message: "This lesson needs a reading passage: no new one is left and a repeated passage would exceed the repeat limits" });
+      return { ...empty(), deficits };
+    }
+    reading = readingFrom[Math.floor(rand() * readingFrom.length)]!;
     quotas = applyReading(quotas, reading.childCount);
   }
   const readingSlots = reading ? reading.childCount : 0;
@@ -221,6 +254,24 @@ function solve(input: SelectionInput): SelectionResult {
   for (const f of FORMAT_ORDER) {
     const available = new Set(pool.filter((c) => c.format === f).map((c) => c.exerciseId)).size;
     if (available < quotas[f]) deficits.push({ kind: "format", format: f, needed: quotas[f], available, message: `Not enough approved ${f} exercises: ${available} of ${quotas[f]} available` });
+  }
+  if (deficits.length === 0) {
+    // the repeat limits can be the binding constraint even when every format has enough exercises in total
+    const readingSoon = reading?.repeat && reading.repeat.reason !== "review" ? reading.childCount : 0;
+    const readingAll = reading?.repeat ? reading.childCount : 0;
+    let needAll = 0;
+    let needSoon = 0;
+    for (const f of FORMAT_ORDER) {
+      const fresh = new Set(pool.filter((c) => c.format === f && !c.repeat).map((c) => c.exerciseId)).size;
+      const review = new Set(pool.filter((c) => c.format === f && c.repeat?.reason === "review").map((c) => c.exerciseId)).size;
+      const need = Math.max(0, quotas[f] - fresh);
+      needAll += need;
+      needSoon += Math.max(0, need - review);
+    }
+    const over = Math.max(needAll - (repeatTotalCap - readingAll), needSoon - (repeatSoonCap - readingSoon));
+    if (over > 0) {
+      deficits.push({ kind: "repeat_cap", needed: needAll, available: Math.max(0, repeatTotalCap - readingAll), message: `Only ${Math.max(0, repeatTotalCap - readingAll)} repeated exercise(s) can be used per session; ${over} more NEW exercise(s) are needed` });
+    }
   }
   if (quotas.detect_error >= 4 && !pool.some((c) => c.format === "detect_error" && c.noMistake)) {
     deficits.push({ kind: "no_mistake", format: "detect_error", needed: 1, available: 0, message: "No approved \"No mistake\" case is available for detect_error" });
@@ -271,10 +322,17 @@ function solve(input: SelectionInput): SelectionResult {
   let needNoMistake = quotas.detect_error >= 4;
   const jitter = new Map<string, number>(pool.map((c) => [c.revisionId, rand()]));
   const cap = familyCap(n);
+  // D68 repeat budget: missed/assisted repeats up to soonShare, all repeats up to totalShare (a repeated passage counts all its questions)
+  const soonCap = repeatSoonCap;
+  const totalCap = repeatTotalCap;
+  let soonUsed = reading?.repeat && reading.repeat.reason !== "review" ? reading.childCount : 0;
+  let repeatUsed = reading?.repeat ? reading.childCount : 0;
 
   const score = (spec: Spec, c: Candidate): { score: number; bonus: number } => {
     const p = input.priority(c.skillId, c.dimension, c.cohort ?? "") * mult(c.skillId);
     const j = (jitter.get(c.revisionId) ?? 0) * 1e-6;
+    // fresh first: a repeat after a correct answer is the last choice, so it fills a slot only when nothing else can
+    if (c.repeat?.reason === "review") return { score: -1000 + p + j, bonus: 0 };
     if (spec.role === "weak") return { score: p + j, bonus: 0 };
     if (spec.role === "discovery") {
       const bonus = input.discovery.bonusBySkill[c.skillId] ?? 0; // bonus is not multiplied by the agent multiplier
@@ -290,6 +348,11 @@ function solve(input: SelectionInput): SelectionResult {
     if (usedExercise.has(c.exerciseId) || usedCluster.has(c.templateCluster)) return false;
     if ((familyCount.get(c.family) ?? 0) + 1 > cap) return false;
     if (c.unitFingerprints.some((f) => usedFp.has(f))) return false;
+    if (c.repeat) {
+      if (spec.role === "discovery") return false; // a probe must be a new look at the suspected skill
+      if (repeatUsed + 1 > totalCap) return false;
+      if (c.repeat.reason !== "review" && soonUsed + 1 > soonCap) return false;
+    }
     if (spec.role === "discovery") {
       if (c.skillId !== spec.skill) return false;
       if (!(c.dimension === "recognition" || c.dimension === "correction")) return false;
@@ -322,6 +385,10 @@ function solve(input: SelectionInput): SelectionResult {
     const tries = (forceNoMistake ? options.filter((o) => o.c.noMistake) : options).slice(0, 6);
     for (const o of tries) {
       chosen.push({ spec, cand: o.c, score: o.score, bonus: o.bonus });
+      if (o.c.repeat) {
+        repeatUsed++;
+        if (o.c.repeat.reason !== "review") soonUsed++;
+      }
       for (const f of o.c.unitFingerprints) usedFp.add(f);
       usedExercise.add(o.c.exerciseId);
       usedCluster.add(o.c.templateCluster);
@@ -338,6 +405,10 @@ function solve(input: SelectionInput): SelectionResult {
 
       needNoMistake = hadNoMistake;
       if (spec.role === "discovery") discoveryUsed.delete(o.c.skillId);
+      if (o.c.repeat) {
+        repeatUsed--;
+        if (o.c.repeat.reason !== "review") soonUsed--;
+      }
       if (!hadContext) usedContext.delete(o.c.contextId);
       if (!hadSkill) usedSkill.delete(o.c.skillId);
       familyCount.set(o.c.family, (familyCount.get(o.c.family) ?? 1) - 1);
@@ -384,6 +455,7 @@ function solve(input: SelectionInput): SelectionResult {
       readingGroupId: readingChild === null ? null : `reading:${reading!.revisionId}`,
       childIndex: readingChild,
       inputPreference: "text",
+      ...(c.repeat ? { repeat: c.repeat } : {}),
     });
   };
   const readingAt = reading ? Math.floor(sequence.length / 2) : -1;
@@ -475,6 +547,9 @@ export function hardViolations(slots: readonly SelectedSlot[], n: number, candid
   if (n >= 10 && formats.size < 3) v.push("fewer than 3 formats");
   const detect = slots.filter((s) => s.format === "detect_error");
   if (detect.length >= 4 && !detect.some((s) => candidates.get(s.revisionId)?.noMistake)) v.push("no No-mistake case");
+  const repeats = slots.filter((s) => s.repeat);
+  if (repeats.length > Math.floor(GRAMMAR_REPEAT_CONFIG.totalShare * n)) v.push(`repeats ${repeats.length} above the cap`);
+  if (repeats.filter((s) => s.repeat!.reason !== "review").length > Math.floor(GRAMMAR_REPEAT_CONFIG.soonShare * n)) v.push("missed/assisted repeats above the cap");
   if (quotas) for (const f of FORMAT_ORDER) if (slots.filter((s) => s.format === f).length > quotas[f]) v.push(`format ${f} above quota`);
   return v;
 }

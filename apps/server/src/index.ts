@@ -4,10 +4,17 @@ import { ConfigError, loadConfig } from "./config.js";
 import { prepareDatabase } from "./db/prepare.js";
 import { NvidiaSmiTelemetry } from "./adapters/gpu/nvidiaSmi.js";
 import { OllamaClient, OllamaModelControl } from "./adapters/gpu/ollamaClient.js";
-import { NimbleDecisionClient, OllamaChatClient } from "./adapters/ollama/chat.js";
+import { LOCAL_MODEL_TAG, MODEL_KEEP_ALIVE, RESIDENT_NUM_CTX } from "./domain/ai/config.js";
+import { ModelResidency } from "./queue/modelResidency.js";
+import { loadSettings } from "./domain/sessions/policy.js";
+import { preloadModelOnStart } from "@english-lab/contracts";
+import { OllamaChatClient } from "./adapters/ollama/chat.js";
 import { VocabularyJobRunner } from "./domain/vocabulary/enrichment.js";
 import { TutorJobRunner } from "./domain/tutor/runner.js";
-import { AdvisoryJobRunner } from "./domain/content/batches/advisoryRunner.js";
+import { GroqWorker } from "./adapters/stt/groqWorker.js";
+import { existsSync, readFileSync } from "node:fs";
+import path from "node:path";
+import { parseEnv } from "node:util";
 import { AnalysisJobRunner } from "./domain/ai/analysisRunner.js";
 import { GenerationJobRunner } from "./domain/content/batches/generationRunner.js";
 import { GpuScheduler } from "./queue/scheduler.js";
@@ -37,6 +44,10 @@ async function main(): Promise<void> {
     throw err;
   }
 
+  const envPath = path.join(config.projectRoot, ".env");
+  const localEnv = existsSync(envPath) ? parseEnv(readFileSync(envPath, "utf8")) : {};
+  const groqKey = process.env.GROQ_API_KEY ?? process.env.groq_api_key ?? localEnv.GROQ_API_KEY ?? localEnv.groq_api_key;
+  const cloudSpeech = Boolean(groqKey);
   const instanceId = randomUUID();
   const startedAt = new Date().toISOString();
   const lock: LockInfo = {
@@ -66,7 +77,7 @@ async function main(): Promise<void> {
   const logStream = openLogStream(config.logsDir);
   let shuttingDown = false;
   let app: Awaited<ReturnType<typeof buildApp>>;
-  // The single GPU dispatcher. The only model runner is the Qwen free-text analysis (tentative drafts); Nimble routing stays disabled (D42).
+  // The single GPU dispatcher. Every local model job (analysis, vocabulary, drafts, tutor) uses the ONE model of ai-config-v3 (D67).
   const ollama = new OllamaClient();
   const analysisOpts = {
     installedDigest: async (tag: string): Promise<string | null> => {
@@ -87,26 +98,44 @@ async function main(): Promise<void> {
     runtimeVersion: () => analysisOpts.runtimeVersion(),
     deps: { now: () => new Date(), newId: randomUUID },
   });
-  const advisory = new AdvisoryJobRunner({ db, decision: new NimbleDecisionClient(ollama), installedDigest: (tag) => analysisOpts.installedDigest(tag), runtimeVersion: () => analysisOpts.runtimeVersion(), deps: { now: () => new Date(), newId: randomUUID } });
   const vocabulary = new VocabularyJobRunner({ db, chat: new OllamaChatClient(ollama), installedDigest: (tag) => analysisOpts.installedDigest(tag), runtimeVersion: () => analysisOpts.runtimeVersion(), deps: { now: () => new Date(), newId: randomUUID } });
   const tutor = new TutorJobRunner({ db, chat: new OllamaChatClient(ollama), installedDigest: (tag) => analysisOpts.installedDigest(tag), runtimeVersion: () => analysisOpts.runtimeVersion(), deps: { now: () => new Date(), newId: randomUUID } });
   let analysisReady = false;
-  let advisoryReady = false;
+  let warmed = false;
+
+  const modelControl = new OllamaModelControl(ollama);
   const scheduler = new GpuScheduler({
     db,
     newId: randomUUID,
     telemetry: new NvidiaSmiTelemetry(),
-    control: new OllamaModelControl(ollama),
-    runners: config.aiRunners === false ? [] : [analysis, generation, advisory, vocabulary, tutor],
+    control: modelControl,
+    modelTransition: () => residency.transitioning(),
+    abortModelLoad: () => residency.abortLoad(),
+    idleUnloadMs: () => residency.idleUnloadMs(),
+    runners: config.aiRunners === false ? [] : [analysis, generation, vocabulary, tutor],
     instanceId,
+    cloudSpeech,
+  });
+
+  // Residency of the one model: warm-up, manual load/unload, unload on stop (D67). It talks to the model server only through the dispatcher's hand-shake.
+  const residency = new ModelResidency({
+    host: modelControl,
+    dispatcher: scheduler,
+    model: LOCAL_MODEL_TAG,
+    numCtx: RESIDENT_NUM_CTX,
+    keepAlive: MODEL_KEEP_ALIVE,
+    preloadEnabled: () => preloadModelOnStart(loadSettings(db).values),
+    autoAllowed: () => config.aiRunners !== false && analysisReady, // no routing (digest drift, runners off): never load ~10 GB the app will not use
   });
 
   const stt = new SttService({
     db,
     deps: { now: () => new Date(), newId: randomUUID },
     scheduler,
-    available: () => findSttModel() !== null,
+    cloud: cloudSpeech,
+    available: () => cloudSpeech || findSttModel() !== null,
     createWorker: () => {
+      if (groqKey) return { worker: new GroqWorker(groqKey), modelPath: "groq" };
       const l = resolveSttLaunch();
       return l.ok ? { worker: new SttWorker(l.launch), modelPath: l.modelPath } : null;
     },
@@ -118,7 +147,9 @@ async function main(): Promise<void> {
     app?.log.info({ reason }, "shutdown: stop admission");
     try {
       await stt.shutdown(); // the voice child first: it holds the card
+      residency.halt(); // no new warm-up from here on
       await scheduler.stop(); // stop admission, abort + discard the running unit, prove the release, give the lease back
+      await residency.shutdown(); // unload our model (bounded); if the process dies abruptly keep_alive expiry frees the card
       await app?.close(); // drain in-flight requests
       db.pragma("wal_checkpoint(TRUNCATE)");
       db.close();
@@ -141,7 +172,8 @@ async function main(): Promise<void> {
     sessions: { banner: process.env.ENGLISHLAB_BANNER ?? null },
     scheduler,
     stt,
-    aiStatus: () => ({ ollama: analysisReady ? "ready" : "unavailable", nimble: advisoryReady ? "ready" : "unavailable", qwen: analysisReady ? "ready" : "unavailable" }),
+    residency,
+    aiStatus: async () => ({ ollama: analysisReady ? "ready" : "unavailable", model: analysisReady ? "ready" : "unavailable", modelTag: LOCAL_MODEL_TAG, modelState: (await residency.status()).state }),
   });
 
   try {
@@ -176,13 +208,14 @@ async function main(): Promise<void> {
     const r = await analysis.prepare().catch((e: Error) => ({ ok: false, reason: e.message }));
     const g = await generation.prepare().catch((e: Error) => ({ ok: false, reason: e.message }));
     analysisReady = r.ok && g.ok;
+    if (analysisReady && !warmed) {
+      warmed = true;
+      residency.warmOnStart(); // background: the first load takes ~40 s and must not delay start-up
+    }
     const v = await vocabulary.prepare().catch((e: Error) => ({ ok: false, reason: e.message }));
     const t = await tutor.prepare().catch((e: Error) => ({ ok: false, reason: e.message }));
-    const n = await advisory.prepare().catch((e: Error) => ({ ok: false, reason: e.message }));
-    advisoryReady = n.ok; // Nimble is a HELPER (hints for the reviewer, D49), never a gate on Qwen analysis
-    if (!n.ok) app.log.info({ reason: n.reason }, "advisory runner not ready");
     app.log.info({ ok: r.ok, reason: r.ok ? undefined : r.reason }, "analysis runner prepare");
-    if (!(r.ok && g.ok && n.ok && v.ok && t.ok)) setTimeout(() => void prepareAnalysis(), 60_000).unref();
+    if (!(r.ok && g.ok && v.ok && t.ok)) setTimeout(() => void prepareAnalysis(), 60_000).unref();
   };
   void prepareAnalysis();
   process.once("SIGINT", () => void shutdown("SIGINT"));

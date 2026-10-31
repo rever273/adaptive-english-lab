@@ -23,6 +23,7 @@ import { PLAYABLE_BLUEPRINT_STATUSES, loadBlueprint, loadSettings, type SessionD
 import { computeReadiness } from "../domain/sessions/readiness.js";
 import { revealSlot } from "../domain/sessions/reveal.js";
 import { currentSessionId, getSnapshot, recentSessionId, sessionCategory, type SessionCategory } from "../domain/sessions/snapshot.js";
+import { reviewStatus } from "../domain/sessions/reviewQueue.js";
 import { activityProgress } from "../domain/sessions/xp.js";
 import { ApiError } from "../errors.js";
 
@@ -136,6 +137,6 @@ export function registerSessionRoutes(app: FastifyInstance, db: Db, deps: Sessio
         const ready = computeReadiness(db, deps, r.id);
         return { blueprintRevisionId: r.id, key: r.key, title: bp.policy.title, status: r.status, readySessions: ready.readySessions, shortage: ready.shortage };
       });
-    return { activeSessionId: currentSessionId(db, "grammar"), taskCount: settings.values.taskCount, blueprints, banner: opts.banner ?? null, diagnostic: diagnosticStatus(db, deps), heldout: heldoutStatus(db, deps) };
+    return { activeSessionId: currentSessionId(db, "grammar"), taskCount: settings.values.taskCount, blueprints, banner: opts.banner ?? null, diagnostic: diagnosticStatus(db, deps), review: reviewStatus(db), heldout: heldoutStatus(db, deps) };
   });
 }

@@ -46,11 +46,11 @@ export function registerQueueRoutes(app: FastifyInstance, db: Db, deps: QueueDep
   });
 
   // D64: a compact picture for the floating AI panel. Jobs of one kind that are still open form the current "wave"; done/failed count the
-  // jobs of that kind created since the oldest open one, and the time per item is the median of the last finished ones (measured, not guessed).
+  // jobs of that kind that FINISHED since the oldest open one was created (jobs queued together finish in order, so counting by created_at dropped them: "0 / 9" instead of "11 / 20"), and the time per item is the median of the last finished ones (measured, not guessed).
   app.get("/api/v1/ai/activity", async () => {
     const open = db.prepare("SELECT kind, COUNT(*) AS n, MIN(created_at) AS since, SUM(state = 'running') AS running, SUM(state = 'waiting_for_gpu') AS waiting, SUM(state = 'paused') AS paused FROM jobs WHERE state IN ('queued','waiting_for_gpu','running','paused') AND kind <> 'test_unit' GROUP BY kind").all() as Array<{ kind: string; n: number; since: string; running: number; waiting: number; paused: number }>;
     const waves = open.map((w) => {
-      const closed = db.prepare("SELECT SUM(state = 'completed') AS done, SUM(state IN ('failed','cancelled')) AS failed FROM jobs WHERE kind = ? AND created_at >= ? AND state IN ('completed','failed','cancelled')").get(w.kind, w.since) as { done: number | null; failed: number | null };
+      const closed = db.prepare("SELECT SUM(state = 'completed') AS done, SUM(state IN ('failed','cancelled')) AS failed FROM jobs WHERE kind = ? AND finished_at >= ? AND state IN ('completed','failed','cancelled')").get(w.kind, w.since) as { done: number | null; failed: number | null };
       const recent = (db.prepare("SELECT (julianday(finished_at) - julianday(started_at)) * 86400000 AS ms FROM jobs WHERE kind = ? AND state = 'completed' AND started_at IS NOT NULL AND finished_at IS NOT NULL ORDER BY finished_at DESC LIMIT 9").all(w.kind) as Array<{ ms: number }>).map((r) => r.ms).sort((a, b) => a - b);
       const reason = w.waiting > 0 ? (db.prepare("SELECT e.reason AS r FROM job_events e JOIN jobs j ON j.id = e.job_id WHERE j.kind = ? AND j.state = 'waiting_for_gpu' ORDER BY e.rowid DESC LIMIT 1").get(w.kind) as { r: string } | undefined)?.r ?? null : null;
       const done = closed.done ?? 0;

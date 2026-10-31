@@ -22,6 +22,7 @@ function BatchStudio({ category, onCategoryChange }: { category: "grammar" | "vo
   const [stock, setStock] = useState<Awaited<ReturnType<typeof fetchContentStock>> | null>(null);
   const [open, setOpen] = useState<string | null>(null);
   const [count, setCount] = useState(50);
+  const [countTouched, setCountTouched] = useState(false);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [note, setNote] = useState<string | null>(null);
@@ -29,8 +30,10 @@ function BatchStudio({ category, onCategoryChange }: { category: "grammar" | "vo
     try {
       const [b, c, s] = await Promise.all([fetchBatches(), fetchCoverage(), fetchContentStock()]);
       setBatches(b.batches.filter(b => (b.category ?? "grammar") === category)); setOtherCount(b.batches.filter(b => (b.category ?? "grammar") !== category).length); setCoverage(c); setStock(s);
+      // D68: the batch size is pre-filled from the next lesson's deficit (+20%) until the learner types their own
+      const rec = s[category].recommended; if (!countTouched && rec && rec > 0) setCount(Math.min(500, rec));
     } catch(e) { setError(errorText(e)); }
-  }, [category]);
+  }, [category, countTouched]);
   useEffect(() => { void load(); const t = setInterval(() => void load(), 5000); return () => clearInterval(t); }, [load]);
   const start = async () => {
     setBusy(true); setError(null); setNote(null);
@@ -44,7 +47,7 @@ function BatchStudio({ category, onCategoryChange }: { category: "grammar" | "vo
       <p className="lede">Create new {category === "grammar" ? "exercises for your learning skills" : "exercises using your saved words"}. When generation finishes, copy the task to your agent. It checks, repairs and publishes the results for you.</p>
       {error && <p className="notice notice-error" role="alert">{error}</p>}
       {note && <p className="notice notice-info" role="status">{note}</p>}
-      <div className="actions"><label className="inline"><span>Batch size</span><input type="number" min={1} max={500} value={count} onChange={e => setCount(Number(e.target.value))} aria-label="Batch size" /></label><button className="btn btn-primary" disabled={busy || !Number.isInteger(count) || count < 1 || count > 500} onClick={() => void start()}>Start batch</button></div>
+      <div className="actions"><label className="inline"><span>Batch size</span><input type="number" min={1} max={500} value={count} onChange={e => { setCountTouched(true); setCount(Number(e.target.value)); }} aria-label="Batch size" /></label><button className="btn btn-primary" disabled={busy || !Number.isInteger(count) || count < 1 || count > 500} onClick={() => void start()}>Start batch</button></div>
     </section>
     <section className="card"><h2>Batches</h2>
       {otherCount > 0 && <p className="small muted">Showing {category} batches. <button className="link" onClick={() => onCategoryChange(category === "grammar" ? "vocabulary" : "grammar")}>Show {otherCount} {category === "grammar" ? "vocabulary" : "grammar"} {otherCount === 1 ? "batch" : "batches"}</button></p>}
@@ -57,7 +60,7 @@ function BatchStudio({ category, onCategoryChange }: { category: "grammar" | "vo
       </li>)}</ul>}
     </section>
     <section className="card"><h2>Coverage</h2>
-      {low && <p className={`notice ${low.low ? "notice-error" : "notice-info"}`} role="status">{low.available} new approved exercises available.{low.low ? ` Stock is running low (warning below ${low.threshold}). Create a new batch.` : ""}</p>}
+      {low && <p className={`notice ${low.low ? "notice-error" : "notice-info"}`} role="status">{low.message ?? `${low.available} new approved exercises available.${low.low ? ` Stock is running low (warning below ${low.threshold}). Create a new batch.` : ""}`}{low.recommended ? ` Suggested batch size: ${low.recommended} (deficit + 20%).` : ""}</p>}
       {category === "vocabulary" ? <VocabularyStudio /> : coverage && <><p>{coverage.totals.releasedExercises} published grammar exercises in total. Used sentences are excluded from available stock.</p><details><summary>Coverage by skill</summary><ul className="small">{coverage.skills.map(s => <li key={s.skill}><code>{s.skill}</code>: {s.released} published, {s.inReview} awaiting agent</li>)}</ul></details></>}
     </section>
   </>;
@@ -84,7 +87,7 @@ function ItemRow({item}: {item: BatchItem}) {
   const [open,setOpen] = useState(false);
   const [error,setError] = useState<string | null>(null);
   const toggle = async () => { setOpen(!open); if (!open && item.revisionId && !content) {try {setContent((await fetchRevisionContent(item.revisionId)).content);} catch(e) {setError(errorText(e));}} };
-  return <><tr><td>{item.ordinal+1}</td><td>{item.plan.vocabulary?.lemma ?? item.plan.target_skill}</td><td>{STATUS_LABEL[item.status]}</td><td><button className="link" onClick={() => void toggle()}>{open ? "Hide" : "View"}</button></td></tr>{open && <tr><td colSpan={4}>{error ? <p>{error}</p> : content ? <Preview c={content} /> : item.error ? <p className="muted">Generation did not produce a valid draft. The agent can replace or reject this item.</p> : <p>Loading?</p>}</td></tr>}</>;
+  return <><tr><td>{item.ordinal+1}</td><td>{item.plan.vocabulary?.lemma ?? item.plan.target_skill}{item.plan.lesson ? <span className="muted small"> · {/l(\d+)$/i.test(item.plan.lesson) ? `L${/l(\d+)$/i.exec(item.plan.lesson)![1]!.padStart(2, "0")}` : item.plan.lesson}</span> : null}</td><td>{STATUS_LABEL[item.status]}</td><td><button className="link" onClick={() => void toggle()}>{open ? "Hide" : "View"}</button></td></tr>{open && <tr><td colSpan={4}>{error ? <p>{error}</p> : content ? <Preview c={content} /> : item.error ? <p className="muted">Generation did not produce a valid draft. The agent can replace or reject this item.</p> : <p>Loading?</p>}</td></tr>}</>;
 }
 function Preview({ c }: { c: Record<string, unknown> }) {
   const p = c.payload as Record<string, any>;
