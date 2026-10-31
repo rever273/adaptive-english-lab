@@ -462,7 +462,7 @@ export class GpuScheduler {
       }
       return;
     }
-    failOrRetry(this.db, this.deps, job.id, token, { code: err.code, transient: err.transient });
+    failOrRetry(this.db, this.deps, job.id, token, { code: err.code, transient: err.transient, diagnosticCodes: err.diagnosticCodes });
   }
 
   /** Waits for a unit to settle within `ms`, polling the clock in small steps (no dangling long timers, deterministic under a fake clock). */

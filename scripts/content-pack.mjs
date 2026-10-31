@@ -67,10 +67,17 @@ for (const ex of pack.items) {
   }
 }
 
+/**
+ * A pack item with revision N > 1 corrects an earlier revision. In a database that never had that exercise (a fresh install) there is nothing
+ * to correct, so it is registered as that exercise's first revision; where the earlier revision exists it is registered as the next one.
+ */
+const forThisDb = (content) => (content.revision > 1 && !db.prepare("SELECT 1 FROM exercise_revisions WHERE exercise_id = ? LIMIT 1").get(content.id) ? { ...content, revision: 1 } : content);
+
 /** register every item inside one transaction; on check it is rolled back, so the live bank is the reference and nothing is kept */
 function registerAll() {
   const out = [];
-  for (const content of pack.items) {
+  for (const item of pack.items) {
+    const content = forThisDb(item);
     try {
       const r = repo.registerRevision(db, deps, { content, actor: authorActor, reason: `content pack ${name}` });
       out.push({ content, ...r, error: null });

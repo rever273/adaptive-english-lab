@@ -14,8 +14,9 @@ import { SCREEN_PROMPT } from "./advisoryRunner.js";
 import { registerRevision, submitForReview, taxonomyForNewRevisions } from "../repository.js";
 import { validateExercise } from "../validator.js";
 import { GENERATION_PROMPT } from "./repository.js";
-import { GENERATION_SYSTEM_V3, GENERATION_SYSTEM_V4, assembleExercise, buildGenerationUser, buildGenerationUserV4, draftFormat, draftFormatsText, type Built } from "./draftFormats.js";
+import { GENERATION_SYSTEM_V3, GENERATION_SYSTEM_V4, GENERATION_SYSTEM_V5, assembleExercise, buildGenerationUser, buildGenerationUserV4, draftFormat, draftFormatsText, type Built } from "./draftFormats.js";
 import type { ItemPlan } from "./plan.js";
+import { VOCABULARY_SYSTEM, VOCABULARY_SYSTEM_V2, assembleVocabulary, vocabularyFormat } from "./vocabularyDrafts.js";
 
 export interface GenerationPayload {
   batchId: string;
@@ -88,7 +89,7 @@ export class GenerationJobRunner implements JobRunner<GenerationPayload> {
   }
 
   private queued(payload: GenerationPayload): QueuedItem[] {
-    const rows = this.o.db.prepare(`SELECT id, ordinal, plan_json FROM batch_items WHERE batch_id = ? AND state = 'queued' AND ordinal IN (${payload.ordinals.map(() => "?").join(",")}) ORDER BY ordinal`).all(payload.batchId, ...payload.ordinals) as Array<{ id: string; ordinal: number; plan_json: string }>;
+    const rows = this.o.db.prepare(`SELECT id, ordinal, plan_json FROM batch_items WHERE batch_id = ? AND state = 'queued' AND NOT EXISTS (SELECT 1 FROM batch_completions bc WHERE bc.batch_id = batch_items.batch_id) AND ordinal IN (${payload.ordinals.map(() => "?").join(",")}) ORDER BY ordinal`).all(payload.batchId, ...payload.ordinals) as Array<{ id: string; ordinal: number; plan_json: string }>;
     return rows.map((r) => ({ id: r.id, ordinal: r.ordinal, plan: JSON.parse(r.plan_json) as ItemPlan }));
   }
 
@@ -105,11 +106,14 @@ export class GenerationJobRunner implements JobRunner<GenerationPayload> {
 
     const skills = taxonomyForNewRevisions(this.o.db).skills;
     const version = (this.o.db.prepare("SELECT prompt_version_id AS v FROM batches WHERE id = ?").get(payload.batchId) as { v: string } | undefined)?.v;
-    if (version !== "generation-v3" && version !== "generation-v4") throw new RunnerError("unsupported_prompt_version", "This batch uses an unavailable historical generation prompt.", false);
+    const vocabulary = version === "vocabulary-generation-v1" || version === "vocabulary-generation-v2";
+    const targetedRetry = version === "generation-v5" || version === "vocabulary-generation-v2";
+    if (version !== "generation-v3" && version !== "generation-v4" && version !== "generation-v5" && !vocabulary) throw new RunnerError("unsupported_prompt_version", "This batch uses an unavailable historical generation prompt.", false);
     const first = items[0]!.plan;
     const model = { tag: m.tag, digest: m.digest };
-    const user = (version === "generation-v4" ? buildGenerationUserV4 : buildGenerationUser)(payload.batchId, items.map((i) => i.plan));
-    const build = (raw: unknown, item: QueuedItem): Built => assembleExercise(raw, item.plan, { exerciseId: exerciseIdFor(payload.batchId, item.ordinal), model, promptVersion: version, taxonomySkillIds: skills });
+    const user = vocabulary ? JSON.stringify({ batch_id: payload.batchId, items: items.map(i => i.plan), count: items.length }) : (version === "generation-v4" || version === "generation-v5" ? buildGenerationUserV4 : buildGenerationUser)(payload.batchId, items.map((i) => i.plan));
+    const system = vocabulary ? (version === "vocabulary-generation-v2" ? VOCABULARY_SYSTEM_V2 : VOCABULARY_SYSTEM) : version === "generation-v5" ? GENERATION_SYSTEM_V5 : version === "generation-v4" ? GENERATION_SYSTEM_V4 : GENERATION_SYSTEM_V3;
+    const build = (raw: unknown, item: QueuedItem): Built => vocabulary ? assembleVocabulary(raw, item.plan, exerciseIdFor(payload.batchId, item.ordinal), model, skills, version) : assembleExercise(raw, item.plan, { exerciseId: exerciseIdFor(payload.batchId, item.ordinal), model, promptVersion: version!, taxonomySkillIds: skills });
 
     const parse = (text: string): { ok: true; list: unknown[] } | { ok: false; issues: ValidationIssue[] } => {
       let v: unknown;
@@ -138,10 +142,10 @@ export class GenerationJobRunner implements JobRunner<GenerationPayload> {
       client: this.o.chat,
       model: m.tag,
       messages: [
-        { role: "system", content: version === "generation-v4" ? GENERATION_SYSTEM_V4 : GENERATION_SYSTEM_V3 },
+        { role: "system", content: system },
         { role: "user", content: user },
       ],
-      format: draftFormat(first.type as ExerciseType, items.length),
+      format: vocabulary ? vocabularyFormat(items.length) : draftFormat(first.type as ExerciseType, items.length),
       options: { num_ctx: GENERATION_PARAMS.numCtx, num_predict: GENERATION_PARAMS.numPredict, temperature: GENERATION_PARAMS.temperature, seed: GENERATION_PARAMS.seed },
       validate,
       signal: ctx.signal,
@@ -156,13 +160,39 @@ export class GenerationJobRunner implements JobRunner<GenerationPayload> {
     const rawText = result.ok ? (result.usage.rawOutputs.at(-1) ?? "") : (result.usage.rawOutputs.at(-1) ?? "");
     const parsed = parse(rawText);
     // A shorter array cannot identify which requested ordinal was omitted. Quarantine the whole unit.
-    const ambiguousCount = version === "generation-v4" && parsed.ok && parsed.list.length !== items.length;
-    const proposals: Array<{ item: QueuedItem; built: Built }> = items.map((item, i) => ({
+    const ambiguousCount = (version === "generation-v4" || version === "generation-v5" || vocabulary) && parsed.ok && parsed.list.length !== items.length;
+    const proposals: Array<{ item: QueuedItem; built: Built; proposal?: unknown }> = items.map((item, i) => ({
       item,
+      proposal: parsed.ok && !ambiguousCount ? parsed.list[i] : undefined,
       built: parsed.ok && !ambiguousCount && i < parsed.list.length ? build(parsed.list[i], item) : { ok: false, issues: [{ code: parsed.ok ? "MISSING_OUTPUT" : parsed.issues[0]!.code, path: "", message: parsed.ok ? "the model returned fewer exercises than requested; ordinal mapping is ambiguous" : parsed.issues[0]!.message }] },
     }));
+    // Retry only failed ordinals individually. A short unit response cannot be mapped safely;
+    // single-item requests recover it without guessing or overwriting valid siblings.
+    let individualCalls = 0;
+    if (targetedRetry) for (const candidate of proposals) {
+      if (candidate.built.ok) continue;
+      const item = candidate.item;
+      const retryUser = vocabulary ? JSON.stringify({ batch_id: payload.batchId, items: [item.plan], count: 1 }) : buildGenerationUserV4(payload.batchId, [item.plan]);
+      const failure = candidate.built.issues.map(i => `${i.code}: ${i.message}`).join("; ");
+      const retry = await runStructured<unknown>({
+        client: this.o.chat, model: m.tag,
+        messages: [{ role: "system", content: system }, { role: "user", content: retryUser }, { role: "user", content: `Previous validation failed: ${failure}. Generate one corrected draft for this item.` }],
+        format: vocabulary ? vocabularyFormat(1) : draftFormat(item.plan.type as ExerciseType, 1),
+        options: { num_ctx: GENERATION_PARAMS.numCtx, num_predict: GENERATION_PARAMS.numPredict, temperature: GENERATION_PARAMS.temperature, seed: GENERATION_PARAMS.seed },
+        validate: text => {
+          try {
+            const drafts = (JSON.parse(text) as { drafts?: unknown }).drafts;
+            if (!Array.isArray(drafts) || drafts.length !== 1) return { ok: false, value: null, issues: [{ code: "COUNT", message: "Return exactly one draft." }] };
+            const built = build(drafts[0], item);
+            return built.ok ? { ok: true, value: drafts[0], issues: [] } : { ok: false, value: null, issues: built.issues.map(i => ({ code: i.code, message: i.message })) };
+          } catch { return { ok: false, value: null, issues: [{ code: "NOT_JSON", message: "Return JSON only." }] }; }
+        }, signal: ctx.signal, sleep: this.o.sleep,
+      });
+      individualCalls += retry.usage.calls;
+      if (retry.ok) { candidate.proposal = retry.value; candidate.built = build(retry.value, item); }
+    }
     const modelVersionId = this.modelVersionId;
-    const usage = { calls: result.usage.calls, repaired: result.usage.repaired, transportRetries: result.usage.transportRetries };
+    const usage = { calls: result.usage.calls + individualCalls, individualCalls, repaired: result.usage.repaired, transportRetries: result.usage.transportRetries };
     return {
       schemaVersion: "generation-v1",
       output: { batchId: payload.batchId, ordinals: payload.ordinals, proposed: parsed.ok ? parsed.list.length : 0, outputHash: sha(rawText), valid: proposals.filter((p) => p.built.ok).length },
@@ -184,16 +214,17 @@ export class GenerationJobRunner implements JobRunner<GenerationPayload> {
   }
 
   /** Runs inside completeJob's transaction. Each item is its own savepoint: one bad draft never rolls back its siblings. */
-  private commit(db: Db, payload: GenerationPayload, proposals: Array<{ item: QueuedItem; built: Built }>, model: { tag: string; digest: string; modelVersionId: string | null }): void {
+  private commit(db: Db, payload: GenerationPayload, proposals: Array<{ item: QueuedItem; built: Built; proposal?: unknown }>, model: { tag: string; digest: string; modelVersionId: string | null }): void {
+    if (db.prepare("SELECT 1 FROM batch_completions WHERE batch_id = ?").get(payload.batchId)) return;
     const deps = this.o.deps;
     const now = deps.now().toISOString();
     const settle = db.prepare("UPDATE batch_items SET state = ?, revision_id = ?, error_json = ?, updated_at = ? WHERE id = ? AND state = 'queued'");
     const actor = { type: "model" as const, id: `${model.tag}@${model.digest.slice(0, 12)}` };
-    for (const { item, built } of proposals) {
+    for (const { item, built, proposal } of proposals) {
       const still = db.prepare("SELECT state FROM batch_items WHERE id = ?").get(item.id) as { state: string } | undefined;
       if (still?.state !== "queued") continue; // settled by another delivery
       if (!built.ok) {
-        settle.run("invalid", null, JSON.stringify({ stage: "validation", issues: built.issues }), now, item.id);
+        settle.run("invalid", null, JSON.stringify({ stage: "validation", issues: built.issues, proposal }), now, item.id);
         continue;
       }
       try {
@@ -207,7 +238,7 @@ export class GenerationJobRunner implements JobRunner<GenerationPayload> {
         })();
       } catch (e) {
         const err = e as ApiError & { details?: { errors?: unknown } };
-        settle.run("invalid", null, JSON.stringify({ stage: "registration", code: err.code ?? "ERROR", message: err.message, details: err.details ?? null }), now, item.id);
+        settle.run("invalid", null, JSON.stringify({ stage: "registration", code: err.code ?? "ERROR", message: err.message, details: err.details ?? null, proposal: built.exercise }), now, item.id);
       }
     }
     // an item the model never answered stays accounted for: it is quarantined, not silently dropped

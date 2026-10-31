@@ -9,8 +9,8 @@ import type { ChatClient, ChatResult, CallStats } from "../../../apps/server/src
 import { AI_CONFIG_V2 } from "../../../apps/server/src/domain/ai/config.js";
 import { getReport } from "../../../apps/server/src/domain/reports/report.js";
 import { VocabularyJobRunner } from "../../../apps/server/src/domain/vocabulary/enrichment.js";
-import { addWord, getEntry, listWords, lookupWord, patchWord, revisionHistory, vocabularyTotals } from "../../../apps/server/src/domain/vocabulary/repository.js";
-import { getJob } from "../../../apps/server/src/queue/jobs.js";
+import { addWord, getEntry, listWords, lookupWord, patchWord, queueMissingLevels, recoverLegacyVocabularyFailures, removeWord, revisionHistory, vocabularyTotals } from "../../../apps/server/src/domain/vocabulary/repository.js";
+import { enqueue, getJob } from "../../../apps/server/src/queue/jobs.js";
 import { GpuScheduler } from "../../../apps/server/src/queue/scheduler.js";
 import { ApiError } from "../../../apps/server/src/errors.js";
 import { FakeClock, FakeGpu, flush } from "../../fixtures/queue/fakes.js";
@@ -160,7 +160,7 @@ class ScriptedChat implements ChatClient {
     return { text: this.respond(++this.calls, user.entry_id), stats };
   }
 }
-const goodDraft = (entryId: string, o: Record<string, unknown> = {}) => JSON.stringify({ schema_version: "vocabulary-v1", entry_id: entryId, translation_ru: "собрание", part_of_speech: "noun", example_en: "The meeting was moved to Friday.", collocations: ["hold a meeting"], ...o });
+const goodDraft = (entryId: string, o: Record<string, unknown> = {}) => JSON.stringify({ schema_version: "vocabulary-v2", entry_id: entryId, translation_ru: "собрание", part_of_speech: "noun", cefr_level: "B1", example_en: "The meeting was moved to Friday.", collocations: ["hold a meeting"], ...o });
 
 async function aiRig(respond: (call: number, entryId: string) => string) {
   env = await makeEnv();
@@ -196,6 +196,64 @@ describe("the AI draft (Qwen through the dispatcher)", () => {
     expect(one<{ pos: string }>(env!.db, "SELECT pos FROM vocabulary_entries WHERE id = ?", w.id).pos).toBe("unknown"); // the stored entry was not rewritten by the model
   });
 
+  it("old words without any text draft get one full enrichment instead of a level-only job", async () => {
+    const r = await aiRig((_c, id) => goodDraft(id, { cefr_level: "A2" }));
+    const w = addWord(env!.db, deps(), { word: "meeting" }).entry;
+    expect(await r.settle(w.id)).toBe("completed");
+    expect(getEntry(env!.db, w.id).level).toBe("A2");
+    expect(queueMissingLevels(env!.db, deps())).toBe(0); // it already has one
+    // a word stored before vocabulary-v2: no job, no level
+    const oldId = randomUUID();
+    env!.db.prepare("INSERT INTO vocabulary_entries(id, lemma, pos, language, learned, user_revision, surface_forms_json, created_at) VALUES (?,?,?,?,?,?,?,?)").run(oldId, "moved", "unknown", "en", 0, 0, "[]", "2026-10-01T00:00:00Z");
+    expect(queueMissingLevels(env!.db, deps())).toBe(1);
+    expect(queueMissingLevels(env!.db, deps())).toBe(0); // idempotent
+    expect(await r.settle(oldId)).toBe("completed");
+    expect(getEntry(env!.db, oldId).level).toBe("A2");
+    expect(revisionHistory(env!.db, oldId)).toEqual([expect.objectContaining({ source: "model", status: "draft" })]);
+  });
+
+  it("retries a validation failure with a new seed and commits only the successful draft", async () => {
+    const r = await aiRig((call, id) => call <= 2 ? goodDraft(id, { translation_ru: "meeting" }) : goodDraft(id));
+    const w = addWord(env!.db, deps(), { word: "meeting" }).entry;
+    expect(await r.settle(w.id)).toBe("completed");
+    expect(r.chat.calls).toBe(3); // first call and repair fail, one new queued attempt succeeds
+    const job = one<{ retry_count: number; error_code: string | null }>(env!.db, "SELECT retry_count, error_code FROM jobs WHERE idempotency_key = ?", `vocab:${w.id}:0`);
+    expect(job).toEqual({ retry_count: 1, error_code: null });
+    const events = rows<{ reason: string }>(env!.db, "SELECT reason FROM job_events WHERE job_id = (SELECT id FROM jobs WHERE idempotency_key = ?) ORDER BY sequence", `vocab:${w.id}:0`);
+    expect(events.some(e => e.reason === "retry:failed_validation|TRANSLATION")).toBe(true);
+    expect(JSON.stringify(events)).not.toContain("The group gathered");
+    expect(revisionHistory(env!.db, w.id)).toHaveLength(1);
+    const metrics = one<{ m: string }>(env!.db, "SELECT metrics_json AS m FROM job_results WHERE job_id = (SELECT id FROM jobs WHERE idempotency_key = ?)", `vocab:${w.id}:0`);
+    expect(JSON.parse(metrics.m).seed).toBe(43);
+  });
+
+  it("retains a validated translation as a partial draft when both example attempts omit the word", async () => {
+    const r = await aiRig((_call, id) => goodDraft(id, { example_en: "The group gathered on Friday." }));
+    const w = addWord(env!.db, deps(), { word: "meeting" }).entry;
+    expect(await r.settle(w.id)).toBe("completed");
+    expect(r.chat.calls).toBe(2);
+    expect(getEntry(env!.db, w.id)).toMatchObject({ translation: { text: "собрание", source: "ai_draft" }, example: { text: "", source: null }, aiExampleOmitted: true });
+    const result = one<{ schema: string; output: string }>(env!.db, "SELECT schema_version AS schema, output_json AS output FROM job_results WHERE job_id = (SELECT id FROM jobs WHERE idempotency_key = ?)", `vocab:${w.id}:0`);
+    expect(result.schema).toBe("vocabulary-partial-v1");
+    expect(JSON.parse(result.output)).toMatchObject({ example_en: "", incomplete_fields: ["example_en"], issue_codes: ["EXAMPLE_WITHOUT_WORD"] });
+    expect(result.output).not.toContain("The group gathered");
+  });
+
+  it("retries legacy validation failures only once and does not discard the translation for a level-only task", async () => {
+    const r = await aiRig((_call, id) => goodDraft(id));
+    const w = addWord(env!.db, deps(), { word: "meeting" }).entry;
+    const jobId = one<{ id: string }>(env!.db, "SELECT id FROM jobs WHERE idempotency_key = ?", `vocab:${w.id}:0`).id;
+    // Simulate the historical state while respecting the queue's state machine.
+    env!.db.prepare("UPDATE jobs SET state = 'running' WHERE id = ?").run(jobId);
+    env!.db.prepare("UPDATE jobs SET state = 'failed', error_code = 'failed_validation' WHERE id = ?").run(jobId);
+    expect(recoverLegacyVocabularyFailures(env!.db, deps())).toBe(1);
+    expect(recoverLegacyVocabularyFailures(env!.db, deps())).toBe(0);
+    expect(queueMissingLevels(env!.db, deps())).toBe(0);
+    expect(rows(env!.db, "SELECT id FROM jobs WHERE json_extract(payload_json, '$.entryId') = ?", w.id)).toHaveLength(1);
+    expect(await r.settle(w.id)).toBe("completed");
+    expect(getEntry(env!.db, w.id).translation).toEqual({ text: "собрание", source: "ai_draft" });
+  });
+
   it("a late AI result never overwrites what the learner wrote in the meantime (concurrent manual edit + job result)", async () => {
     const r = await aiRig((_c, id) => goodDraft(id, { translation_ru: "встреча", example_en: "We had a meeting yesterday." }));
     const w = addWord(env!.db, deps(), { word: "meeting" }).entry;
@@ -216,7 +274,6 @@ describe("the AI draft (Qwen through the dispatcher)", () => {
   it("an invalid draft (English translation, no use of the word, unknown POS, wrong entry, prose) is refused: no revision, the word is still saved", async () => {
     for (const bad of [
       (id: string) => goodDraft(id, { translation_ru: "meeting" }),
-      (id: string) => goodDraft(id, { example_en: "Something unrelated entirely." }),
       (id: string) => goodDraft(id, { part_of_speech: "whatever" }),
       () => goodDraft("another-entry"),
       () => "Sure! The word means 'собрание'.",
@@ -224,11 +281,37 @@ describe("the AI draft (Qwen through the dispatcher)", () => {
       const r = await aiRig((_c, id) => bad(id));
       const w = addWord(env!.db, deps(), { word: "meeting" }).entry;
       expect(await r.settle(w.id)).toBe("failed");
+      expect(r.chat.calls).toBe(8); // four bounded attempts, each with at most one repair
       expect(revisionHistory(env!.db, w.id)).toEqual([]);
-      expect(getEntry(env!.db, w.id)).toMatchObject({ lemma: "meeting", translation: { source: null } });
+      expect(getEntry(env!.db, w.id)).toMatchObject({ lemma: "meeting", translation: { source: null }, aiPending: false, aiError: "failed_validation" });
       env!.cleanup();
       env = null;
     }
+  });
+
+  it("does not recover a failed old job over a user's own translation", async () => {
+    env = await makeEnv();
+    const w = addWord(env.db, deps(), { word: "meeting" }).entry;
+    patchWord(env.db, deps(), w.id, { expectedRevision: 0, translationRu: "моя запись" });
+    const job = one<{ id: string }>(env.db, "SELECT id FROM jobs WHERE idempotency_key = ?", `vocab:${w.id}:0`);
+    env.db.prepare("UPDATE jobs SET state = 'running' WHERE id = ?").run(job.id);
+    env.db.prepare("UPDATE jobs SET state = 'failed', error_code = 'failed_validation' WHERE id = ?").run(job.id);
+    expect(recoverLegacyVocabularyFailures(env.db, deps())).toBe(0);
+    expect(getEntry(env.db, w.id)).toMatchObject({ translation: { text: "моя запись", source: "user" }, aiError: null });
+  });
+
+  it("does not requeue two historical failures for the same word at startup", async () => {
+    env = await makeEnv();
+    const w = addWord(env.db, deps(), { word: "meeting" }).entry;
+    enqueue(env.db, deps(), { kind: "vocabulary_enrichment", payload: { entryId: w.id, expectedUserRevision: 0 }, idempotencyKey: `legacy:${w.id}`, priority: 2 });
+    const jobs = rows<{ id: string }>(env.db, "SELECT id FROM jobs WHERE kind = 'vocabulary_enrichment'");
+    for (const job of jobs) {
+      env.db.prepare("UPDATE jobs SET state = 'running' WHERE id = ?").run(job.id);
+      env.db.prepare("UPDATE jobs SET state = 'failed', error_code = 'failed_validation' WHERE id = ?").run(job.id);
+    }
+    expect(recoverLegacyVocabularyFailures(env.db, deps())).toBe(1);
+    expect(recoverLegacyVocabularyFailures(env.db, deps())).toBe(0);
+    expect(one<{ n: number }>(env.db, "SELECT COUNT(*) AS n FROM jobs WHERE state = 'queued'").n).toBe(1);
   });
 
   it("with the AI offline the word is saved, listed and editable; the draft simply never arrives", async () => {
@@ -257,6 +340,7 @@ describe("vocabulary over HTTP", () => {
     const add = await call("POST", "/api/v1/vocabulary", { word: "Ferry", selected: "ferries" });
     expect(add.statusCode).toBe(201);
     const w = add.json() as { id: string; userRevision: number; created: boolean };
+    expect((await call("GET", "/api/v1/jobs?kind=vocabulary_enrichment")).json()).toMatchObject({ jobs: [{ word: "ferry" }] });
     expect((await call("POST", "/api/v1/vocabulary", { word: "ferry" })).statusCode).toBe(200);
     expect(((await call("GET", "/api/v1/vocabulary?q=fer")).json() as { words: unknown[]; totals: { words: number } }).totals.words).toBe(1);
     expect((await call("GET", "/api/v1/vocabulary/lookup?word=Ferries")).json()).toMatchObject({ known: true });
@@ -272,6 +356,39 @@ describe("vocabulary over HTTP", () => {
     const got = (await call("GET", `/api/v1/vocabulary/${w.id}`)).json() as { history: unknown[] };
     expect(got.history).toHaveLength(1);
     expect((await call("GET", "/api/v1/vocabulary/nope")).statusCode).toBe(404);
+    expect((await call("POST", `/api/v1/vocabulary/${w.id}/remove`, {})).statusCode).toBe(200);
+    expect((await call("GET", "/api/v1/jobs?kind=vocabulary_enrichment")).json()).toMatchObject({ jobs: [{ word: null }] });
     expect((await call("GET", "/api/v1/vocabulary/flashcards")).statusCode).toBe(404); // no review schedule, no flashcards
+  });
+});
+
+describe("removing a word and the sentence it was met in (D63)", () => {
+  it("hides a removed word everywhere, keeps its history, brings it back when saved again, and remembers the task sentence for the AI", async () => {
+    const x = await diagEnv({ diagnostic: true });
+    env = x.env;
+    const sess = createDiagnosticBlock(env.db, sessionDeps(env), { purpose: "diagnostic", timezone: "Australia/Brisbane", seed: "met" });
+    const slot = slotsOf(env, sess.sessionId).find((s) => s.type === "choose_form")!;
+    const sentence = JSON.parse(slot.content_json).prompt_en as string;
+    const word = sentence.split(/[^A-Za-z]+/).find((w) => w.length >= 5)!.toLowerCase();
+
+    const a = addWord(env.db, deps(), { word, slotId: slot.slot_id });
+    expect(one<{ n: number }>(env.db, "SELECT COUNT(*) AS n FROM vocabulary_encounters WHERE entry_id = ? AND kind = 'displayed' AND slot_id = ?", a.entry.id, slot.slot_id).n).toBe(1);
+    // a slot whose text does not contain the word leaves no trace
+    const other = slotsOf(env, sess.sessionId).find((s) => !JSON.stringify(JSON.parse(s.content_json).payload).toLowerCase().includes("pharmacy"))!;
+    const b = addWord(env.db, deps(), { word: "pharmacy", slotId: other.slot_id });
+    expect(one<{ n: number }>(env.db, "SELECT COUNT(*) AS n FROM vocabulary_encounters WHERE entry_id = ? AND kind = 'displayed'", b.entry.id).n).toBe(0);
+
+    removeWord(env.db, deps(), a.entry.id);
+    removeWord(env.db, deps(), a.entry.id); // idempotent
+    expect(listWords(env.db).words.map((w) => w.lemma)).toEqual(["pharmacy"]);
+    expect(lookupWord(env.db, word)).toBeNull();
+    expect(vocabularyTotals(env.db).words).toBe(1);
+    expect(one<{ n: number }>(env.db, "SELECT COUNT(*) AS n FROM vocabulary_entries").n).toBe(2); // nothing is deleted
+    expect(() => env!.db.prepare("DELETE FROM vocabulary_entry_events").run()).toThrow(/append-only/);
+
+    const again = addWord(env.db, deps(), { word });
+    expect(again.created).toBe(true);
+    expect(again.entry.id).toBe(a.entry.id); // the same entry, history intact
+    expect(listWords(env.db).words.map((w) => w.lemma).sort()).toEqual(["pharmacy", word].sort());
   });
 });

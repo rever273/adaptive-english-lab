@@ -14,7 +14,7 @@ import { TUTOR_PROMPT } from "./repository.js";
 export interface TutorPayload {
   messageId: string;
   slotId: string;
-  kind: "more_examples" | "question";
+  kind: "more_examples" | "question" | "explain_ru";
   question: string | null;
 }
 export interface TutorDraft {
@@ -110,7 +110,12 @@ export class TutorJobRunner implements JobRunner<TutorPayload> {
     const own = [content.prompt_en, ...bankTexts(content, row.type)];
     const user = JSON.stringify({
       message_id: messageId,
-      request: kind === "more_examples" ? "Give new examples of this rule." : "Answer the learner's question about this rule.",
+      request:
+        kind === "more_examples"
+          ? "Give new examples of this rule."
+          : kind === "explain_ru"
+            ? "Explain this rule again in Russian, in more detail than verified_rule_ru: step by step, when to use it and when not, and the most common mistake. Do not just repeat verified_rule_ru."
+            : "Answer the learner's question about this rule.",
       learner_question: question,
       verified_rule_ru: content.explanation_ru,
       exercise_prompt_en: content.prompt_en,

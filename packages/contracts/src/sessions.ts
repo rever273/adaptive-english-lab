@@ -34,6 +34,8 @@ export const SlotSummarySchema = z
     attempts: z.number().int().min(0),
     /** latest assessment of the newest attempt, if any: never a fabricated result for pending answers */
     latest: z.object({ verdict: z.string(), confirmation: z.string() }).nullable(),
+    /** vocabulary only (D64): this sentence was shown before and is offered again on purpose; absent for every fresh slot */
+    repeat: z.object({ reason: z.enum(["missed", "assisted", "review"]) }).strict().optional(),
   })
   .strict();
 
@@ -48,6 +50,8 @@ export const SessionSnapshotSchema = z
     endedAt: z.string().nullable(),
     progress: z.object({ closed: z.number().int(), total: z.number().int() }).strict(),
     slots: z.array(SlotSummarySchema),
+    /** grammar (default, every older session) or vocabulary practice (migration 016) */
+    category: z.enum(["grammar", "vocabulary"]).optional(),
   })
   .strict();
 export type SessionSnapshot = z.infer<typeof SessionSnapshotSchema>;
@@ -56,7 +60,9 @@ export const CreateSessionResponseSchema = z.object({ sessionId: z.string(), sna
 export type CreateSessionResponse = z.infer<typeof CreateSessionResponseSchema>;
 
 /** GET /api/v1/sessions/current */
-export const CurrentSessionResponseSchema = z.object({ session: SessionSnapshotSchema.nullable() }).strict();
+export const CurrentSessionResponseSchema = z
+  .object({ session: SessionSnapshotSchema.nullable(), otherActive: z.object({ sessionId: z.string(), category: z.enum(["grammar", "vocabulary"]) }).strict().nullable().optional() })
+  .strict();
 
 export const LeaseRequestSchema = z.object({ tabId: z.string().min(1).max(64) }).strict();
 export const LeaseResponseSchema = z.object({ leaseToken: z.number().int().positive(), expiresAt: z.string(), heartbeatSeconds: z.number().int() }).strict();
@@ -120,6 +126,30 @@ export const FeedbackResponseSchema = z
     message: z.string(),
     /** the task as it was asked (so a block review can show question next to answer) */
     prompt: z.string().nullable().optional(),
+    /** the learner's FIRST answer as text (what the summary counts); absent while feedback is closed */
+    yourAnswer: z.string().nullable().optional(),
+    /** D64: the construction is right but a name/number differs from the approved sentence (counted for the construction, shown as a slip) */
+    detail: z
+      .object({ approved: z.string(), tokens: z.array(z.object({ text: z.string(), differs: z.boolean() }).strict()), expected: z.array(z.string()) })
+      .strict()
+      .optional(),
+    /** vocabulary practice: the tested word and, for a choice, why each option is or is not the best one here (after the answer only) */
+    vocabulary: z
+      .object({
+        lemma: z.string(),
+        family: z.enum(["recognition", "guided_recall", "collocation"]),
+        partOfSpeech: z.string(),
+        /** the word in Russian: your own text or the AI draft from the dictionary, else the reviewed one from the exercise */
+        translationRu: z.string().nullable(),
+        translationSource: z.enum(["user", "ai_draft", "exercise"]).nullable(),
+        /** the finished sentence split at the gap, and the tested form, so the page can colour the word; the Russian sentence when reviewed */
+        sentence: z.object({ before: z.string(), filled: z.string(), after: z.string(), form: z.string() }).strict().nullable(),
+        sentenceRu: z.string().nullable(),
+        wordRu: z.string().nullable(),
+        options: z.array(z.object({ text: z.string(), rationaleRu: z.string(), correct: z.boolean(), chosen: z.boolean() }).strict()),
+      })
+      .strict()
+      .optional(),
   })
   .strict();
 export type FeedbackResponse = z.infer<typeof FeedbackResponseSchema>;
@@ -144,6 +174,12 @@ export const SessionSummarySchema = z
       })
       .strict(),
     pendingAnalysis: z.number().int(),
+    /** D64: first attempts counted as correct whose name/number differs from the approved sentence (a subset of counts.correct) */
+    detailDiffers: z.number().int().optional(),
+    /** vocabulary sessions: the session category, the activity XP it earned and the words whose first try was wrong or "I don't know" */
+    category: z.enum(["grammar", "vocabulary"]).optional(),
+    xpEarned: z.number().int().optional(),
+    practiseAgain: z.array(z.string()).optional(),
     notes: z.array(z.string()),
   })
   .strict();

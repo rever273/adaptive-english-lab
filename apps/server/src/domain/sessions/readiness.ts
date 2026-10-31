@@ -1,5 +1,5 @@
 import { clampMultiplier, selectSession, scaleQuotas, discoveryProbeLimit, type Candidate } from "@english-lab/learning";
-import type { ShortageDetails } from "@english-lab/contracts";
+import { voiceTaskCount, type ShortageDetails } from "@english-lab/contracts";
 import type { Db } from "../../db/open.js";
 import { loadBlockedFingerprints, loadCandidates } from "./bank.js";
 import { loadBlueprint, loadPlan, loadSettings, type SessionDeps } from "./policy.js";
@@ -33,7 +33,7 @@ export function computeReadiness(db: Db, deps: SessionDeps, blueprintRevisionId:
     const r = selectSession({
       n,
       weakRatio: settings.values.weakRatio,
-      voiceTarget: settings.values.voiceTarget,
+      voiceTarget: voiceTaskCount(settings.values),
       seed: `readiness-${ready}`,
       quotas,
       readingBlocks: blueprint.policy.readingBlocks,

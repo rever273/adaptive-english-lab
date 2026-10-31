@@ -11,6 +11,7 @@ export interface ItemPlan {
   context_id: string;
   /** detect_error only: this item must be a fully correct sentence (the "No mistake" quota) */
   noMistake?: boolean;
+  vocabulary?: { lemma: string; translationRu: string | null; family: "recognition" | "guided_recall" | "collocation" };
 }
 
 export const TOPICS = ["workplace", "travel", "health", "services", "education", "community", "technology", "household"] as const;

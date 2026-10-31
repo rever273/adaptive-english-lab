@@ -53,9 +53,12 @@ export const configHashOf = (m: Pick<PinnedModel, "numCtx"> & { numPredict?: num
 /**
  * Measured ADDITIONAL peak VRAM (whole-card peak minus the desktop baseline) from real runs on this machine (RTX 5060 Ti 16 GiB):
  * qwen3:8b ctx 4096 = 8215 - 2000 = 6215 MiB (TASK_008 verify:gpu 2026-10-28); qwen3:14b = 12271 - 1936 = 10335 MiB (TASK_002).
+ * nimble-v3 = 11756 - ~2000 = 9750 MiB (TASK_009 benchmark, D49): it was recorded in the decision log but missing here, so the advisory
+ * draft screens queued by every generation batch waited forever as profile_unknown (D64).
  * Admission = free >= measured peak + reserve. A model without an entry here never starts in profiled mode.
  */
 export const MEASURED_ADDITIONAL_PEAK_MIB: Record<string, number> = {
   "qwen3:8b": 6215,
   "qwen3:14b": 10335,
+  "nimble-v3:latest": 9750,
 };

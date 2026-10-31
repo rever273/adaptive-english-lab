@@ -135,6 +135,11 @@ export function writeAssessmentRevision(
     decision.aiAnnotationId ?? null,
   );
 
+  // Vocabulary assessments share the immutable assessment ledger but are not grammar evidence.
+  const vocabulary = db.prepare("SELECT 1 FROM vocabulary_sessions WHERE session_id = ?").get(ctx.sessionId) !== undefined;
+  if (vocabulary) {
+    return { id, attempt_id: attempt.id, sequence, source: decision.source, verdict: decision.verdict, confirmation: decision.confirmation, criterion_version: attempt.criterion_version };
+  }
   for (const f of decision.findings ?? []) insertFinding(db, deps, ctx, id, f);
 
   if (DETERMINATE.has(decision.verdict)) {

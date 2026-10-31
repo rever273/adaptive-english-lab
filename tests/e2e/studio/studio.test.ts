@@ -3,7 +3,7 @@
 import { spawnSync } from "node:child_process";
 import Database from "better-sqlite3";
 import { randomUUID } from "node:crypto";
-import { mkdirSync, writeFileSync } from "node:fs";
+import { mkdirSync, writeFileSync, readFileSync } from "node:fs";
 import path from "node:path";
 import { chromium, type Browser, type BrowserContext, type Page } from "playwright-core";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
@@ -17,7 +17,7 @@ import { FakeModel, FakeNimble } from "../../integration/batches/fixtures.js";
 import { freePort, makeScratchRoot, projectRoot } from "../../integration/helpers.js";
 
 const T = { timeout: 15_000 };
-const SHOTS = path.join(projectRoot, "documentation", "spec", "evidence", "task-012", "screenshots");
+const SHOTS = path.join(projectRoot, "documentation", "spec", "evidence", "task-019", "screenshots");
 let scratch: ReturnType<typeof makeScratchRoot>;
 let base: string;
 let env: NodeJS.ProcessEnv;
@@ -62,22 +62,20 @@ afterAll(async () => {
 });
 
 describe("Content Studio and AI Tasks in a real browser", () => {
-  it("creates a test batch, shows drafts with hints, imports a review, publishes only the ticked drafts", async () => {
+  it("starts a regular batch, copies an agent task and shows final results without manual JSON", async () => {
     await page.goto(base);
-    await page.getByRole("button", { name: "Content Studio" }).click();
-    await page.getByTestId("trial-gate").waitFor(T);
-    expect(await page.getByTestId("trial-gate").innerText()).toContain("Larger batches are closed");
-    expect(await page.getByRole("button", { name: "Start batch" }).isDisabled()).toBe(true);
+    const notice = page.getByLabel("Exercise stock running low");
+    await notice.waitFor(T);
+    await notice.getByRole("button", {name:"Open Content Studio"}).click();
+    expect(await page.getByLabel("Batch size").inputValue()).toBe("50");
+    expect(await page.getByRole("button", {name:"Start batch",exact:true}).isEnabled()).toBe(true);
     await shot("studio-empty");
-
-    await page.getByTestId("create-trial").click();
-    await page.getByText("Started: 24 drafts in 14 short tasks").waitFor(T);
-
-    // AI Tasks: the 14 jobs are visible and waiting (no model runs in this test)
-    await page.getByRole("button", { name: "AI Tasks" }).click();
+    await page.getByLabel("Batch size").fill("6");
+    await page.getByRole("button", {name:"Start batch",exact:true}).click();
+    await page.getByText("Started 6 drafts.", {exact:false}).waitFor(T);
+    await page.getByRole("button", { name: "AI Tasks",exact:true }).click();
     await page.getByTestId("jobs").waitFor(T);
-    expect(await page.getByTestId("jobs").locator("tbody tr").count()).toBe(14);
-    expect(await page.getByTestId("job-counts").innerText()).toMatch(/14/);
+    expect(await page.getByTestId("jobs").locator("tbody tr").count()).toBe(6);
     await shot("ai-tasks-waiting");
 
     // the generator (scripted model) writes the drafts into the same database file
@@ -105,49 +103,44 @@ describe("Content Studio and AI Tasks in a real browser", () => {
       clock.advance(1500);
     }
     const revs = db.prepare("SELECT bi.revision_id AS rid, er.content_hash AS hash FROM batch_items bi JOIN exercise_revisions er ON er.id = bi.revision_id WHERE bi.batch_id = ? ORDER BY bi.ordinal").all(batchId) as Array<{ rid: string; hash: string }>;
-    expect(revs).toHaveLength(24);
+    expect(revs).toHaveLength(6);
     db.close();
 
-    // Studio: open the batch, see drafts and hints
-    await page.getByRole("button", { name: "Content Studio" }).click();
+    await page.getByRole("button", { name: "Content Studio",exact:true }).click();
     await page.getByTestId("batches").getByRole("button").first().click();
     await page.getByTestId("batch-detail").waitFor(T);
-    await expect.poll(async () => await page.getByTestId("batch-detail").locator("tbody tr[data-status]").count(), T).toBe(24);
-    expect(await page.getByTestId("batch-detail").innerText()).toContain("hint");
-    await page.getByTestId("batch-detail").getByRole("button", { name: "View" }).first().click();
-    await page.getByTestId("batch-detail").locator(".preview").first().waitFor(T);
-    await shot("studio-batch-drafts");
+    await page.getByLabel("Task for the reviewing agent").waitFor(T);
+    expect(await page.getByLabel("Task for the reviewing agent").inputValue()).toContain("content:agent -- prepare");
+    await page.getByRole("button", {name:"Copy",exact:true}).click();
+    await page.getByRole("button", {name:"Copied",exact:true}).waitFor(T);
+    expect(await page.getByLabel("Review manifest (JSON)").count()).toBe(0);
+    await shot("studio-agent-task");
 
-    // a reviewer's manifest: approve 20, reject 4 (pasted into the page)
-    const checklist = Object.fromEntries(REVIEW_CHECKLIST_KEYS.map((k) => [k, true]));
-    const manifest = { schema_version: "content-review-v1", reviewer: "agent:e2e-reviewer@1", review_version: "e2e-pass", items: revs.map((r, i) => ({ revision_id: r.rid, content_hash: r.hash, verdict: i < 20 ? "approved" : "rejected", checklist, reason: "e2e" })) };
-    const stale = { ...manifest, items: manifest.items.map((x, i) => (i === 0 ? { ...x, content_hash: "0".repeat(64) } : x)) };
-    await page.getByLabel("Review manifest (JSON)").fill(JSON.stringify(stale));
-    await page.getByRole("button", { name: "Import reviews" }).click();
-    await page.getByRole("alert").filter({ hasText: "refused" }).waitFor(T);
-    await shot("studio-stale-manifest-refused");
-    await page.getByLabel("Review manifest (JSON)").fill(JSON.stringify(manifest));
-    await page.getByRole("button", { name: "Import reviews" }).click();
-    await page.getByText("Recorded 24 reviews: 20 approved").waitFor(T);
-
-    // publish only 5 ticked drafts
-    const boxes = page.getByTestId("batch-detail").getByRole("checkbox");
-    expect(await boxes.count()).toBe(20);
-    for (let i = 0; i < 5; i++) await boxes.nth(i).check();
-    await page.getByRole("button", { name: "Check the release" }).click();
-    await page.getByText("Checked 5 exercises").waitFor(T);
-    await shot("studio-release-checked");
-    await page.getByRole("button", { name: "Publish 5 exercises" }).click();
-    await page.getByText("Published 5 exercises. The rest of the batch was not published.").waitFor(T);
-
-    const b = (await api(`/api/v1/content/batches/${batchId}`)).json as { counts: Record<string, number> };
-    expect(b.counts).toMatchObject({ released: 5, approved: 15, rejected: 4 });
-    await shot("studio-after-release");
-
+    // The actual CLI prepares and finalizes through the running service; no user JSON entry.
+    const work=path.join(scratch.root,"agent-work");
+    const agent=(cmd:string)=>script("content-agent",cmd,batchId,"--work",work);
+    const prepared=agent("prepare"); expect(prepared.status,prepared.stderr).toBe(0);
+    const plan=JSON.parse(readFileSync(path.join(work,"plan.json"),"utf8"));
+    plan.author="agent:e2e-planner@1";
+    plan.items.forEach((i:any,n:number)=>{i.reason="Synthetic UI fixture"; if(n>=3)i.action="reject";});
+    writeFileSync(path.join(work,"plan.json"),JSON.stringify(plan));
+    const checked=agent("check");expect(checked.status,checked.stderr).toBe(0);
+    const packet=JSON.parse(readFileSync(path.join(work,"final-review-packet.json"),"utf8"));
+    const review={schema_version:"content-review-v1",reviewer:"agent:e2e-reviewer@1",review_version:"e2e-final-v1",items:packet.items.map((i:any)=>({ordinal:i.ordinal,content_hash:i.content_hash,verdict:"approved",checklist:Object.fromEntries(REVIEW_CHECKLIST_KEYS.map(k=>[k,true])),reason:"Synthetic infrastructure fixture"}))};
+    writeFileSync(path.join(work,"review.json"),JSON.stringify(review));
+    const finalized=agent("finalize");expect(finalized.status,finalized.stderr).toBe(0);
+    await page.getByText("Completed: 3 accepted",{exact:false}).waitFor(T);
+    const b=(await api(`/api/v1/content/batches/${batchId}`)).json as {counts:Record<string,number>};
+    expect(b.counts).toMatchObject({released:3,rejected:3});
+    await shot("studio-completed");
+    await page.getByText("Vocabulary exercises", {exact:true}).first().click();
+    await page.getByTestId("vocab-studio").waitFor(T);
+    expect(await page.getByLabel("Batch size").inputValue()).toBe("50");
+    await shot("studio-vocabulary");
     // the same pages at phone width
     await page.setViewportSize({ width: 640, height: 900 });
     await shot("studio-640");
-    await page.getByRole("button", { name: "AI Tasks" }).click();
+    await page.getByRole("button", { name: "AI Tasks",exact:true }).click();
     await page.getByTestId("jobs").waitFor(T);
     await shot("ai-tasks-640");
     expect(await page.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth + 1)).toBe(true); // no horizontal page scroll
@@ -157,7 +150,7 @@ describe("Content Studio and AI Tasks in a real browser", () => {
     await page.setViewportSize({ width: 1280, height: 900 });
     const r = await api("/api/v1/content/batches", { count: 24, mode: "balanced", trial: true });
     expect([202, 409]).toContain(r.status); // a second test batch is allowed
-    await page.getByRole("button", { name: "AI Tasks" }).click();
+    await page.getByRole("button", { name: "AI Tasks",exact:true }).click();
     await page.getByTestId("jobs").waitFor(T);
     const row = page.getByTestId("jobs").locator("tbody tr[data-state='queued'], tbody tr[data-state='waiting_for_gpu']").first();
     await row.getByRole("button", { name: "Cancel" }).click();

@@ -80,8 +80,9 @@ describe("tutor in a browser", () => {
     const meta = q<{ sessionId: string; revisionId: string; explanation: string }>("SELECT ss.session_id AS sessionId, ss.exercise_revision_id AS revisionId, json_extract(er.content_json, '$.explanation_ru') AS explanation FROM session_slots ss JOIN exercise_revisions er ON er.id = ss.exercise_revision_id WHERE ss.id = ?", slotId)[0]!;
 
     await page.getByRole("button", { name: "Tutor", exact: true }).click();
+    await page.getByTestId("tutor-filter-all").check();
     await page.getByTestId("tutor-slot").waitFor(T);
-    await page.getByTestId("tutor-slot").selectOption(slotId);
+    await page.locator(`[data-slot-id="${slotId}"]`).click();
     await page.getByTestId("tutor-why").click();
     await page.getByTestId("tutor-reply").first().waitFor(T);
     expect(await page.getByTestId("tutor-reply").first().getAttribute("data-source")).toBe("approved_exercise");
@@ -97,6 +98,7 @@ describe("tutor in a browser", () => {
     expect(q<{ n: number }>("SELECT COUNT(*) AS n FROM tutor_messages WHERE source = 'model'")[0]!.n).toBe(0);
     await shot("02-queued");
 
+    await page.getByText("For an outside reviewer").click();
     await page.getByTestId("copy-session").click();
     await page.getByTestId("agent-task").waitFor(T);
     const copied = await page.evaluate(() => navigator.clipboard.readText());

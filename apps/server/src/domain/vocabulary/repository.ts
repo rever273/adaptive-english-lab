@@ -2,10 +2,11 @@ import { randomUUID } from "node:crypto";
 import { z } from "zod";
 import type { Db } from "../../db/open.js";
 import { ApiError } from "../../errors.js";
-import { enqueue } from "../../queue/jobs.js";
+import { applyAction, enqueue } from "../../queue/jobs.js";
 import { bankTexts, countOccurrences, isValidWord, matchForms, normalizeWord, shownTexts } from "./forms.js";
 
-export const VOCAB_PROMPT = "vocabulary-v1";
+export const VOCAB_PROMPT = "vocabulary-v3";
+export const CEFR_LEVELS = ["A1", "A2", "B1", "B2", "C1", "C2"] as const;
 export const POS_VALUES = ["noun", "verb", "adjective", "adverb", "preposition", "conjunction", "pronoun", "determiner", "phrase", "phrasal verb", "idiom", "other"] as const;
 
 interface Deps {
@@ -14,7 +15,34 @@ interface Deps {
 }
 const id = (d: Deps): string => (d.newId ?? randomUUID)();
 
-export const AddWordSchema = z.object({ word: z.string().min(1).max(120), selected: z.string().min(1).max(120).optional() }).strict();
+/** slotId: the task where the word was selected; its sentence is the first context for the translation (D63) */
+export const AddWordSchema = z.object({ word: z.string().min(1).max(120), selected: z.string().min(1).max(120).optional(), slotId: z.string().uuid().optional() }).strict();
+
+/** latest removal event wins; a removed word is hidden everywhere until it is saved again (D63, migration 014) */
+const isRemoved = (db: Db, entryId: string): boolean =>
+  (db.prepare("SELECT kind FROM vocabulary_entry_events WHERE entry_id = ? ORDER BY created_at DESC, rowid DESC LIMIT 1").get(entryId) as { kind: string } | undefined)?.kind === "removed";
+
+/** Hide a word from the vocabulary. History (revisions, encounters) stays; saving the word again brings it back. */
+export function removeWord(db: Db, deps: Deps, entryId: string): { removed: true } {
+  return db
+    .transaction((): { removed: true } => {
+      entryRow(db, entryId);
+      if (!isRemoved(db, entryId)) db.prepare("INSERT INTO vocabulary_entry_events(id, entry_id, kind, created_at) VALUES (?,?,?,?)").run(id(deps), entryId, "removed", deps.now().toISOString());
+      return { removed: true };
+    })
+    .immediate();
+}
+
+/** the word was met in this task: remember that (a displayed encounter), so the AI translates the sense used there */
+function noteMetIn(db: Db, deps: Deps, entryId: string, slotId: string | undefined): void {
+  if (!slotId) return;
+  const s = db.prepare("SELECT ss.exercise_revision_id AS revisionId, er.type AS type, er.content_json AS c FROM session_slots ss JOIN exercise_revisions er ON er.id = ss.exercise_revision_id WHERE ss.id = ?").get(slotId) as { revisionId: string; type: string; c: string } | undefined;
+  if (!s) return;
+  const forms = formsOf(entryRow(db, entryId));
+  const texts = bankTexts(JSON.parse(s.c) as { prompt_en: string; payload: Record<string, any> }, s.type);
+  if (!texts.some((t) => countOccurrences(t, forms) > 0)) return; // selected outside the exercise text: nothing to remember
+  insertEnc(db, deps).run(id(deps), entryId, s.revisionId, slotId, "displayed", 0, deps.now().toISOString());
+}
 export const PatchWordSchema = z
   .object({
     expectedRevision: z.number().int().min(0).optional(),
@@ -42,6 +70,13 @@ export interface EntryView {
   /** an AI draft exists that was written before the learner's last edit */
   draftPredatesEdit: boolean;
   aiPending: boolean;
+  /** Latest failed full enrichment, only when no translation or replacement job is available. */
+  aiError: string | null;
+  aiExampleOmitted: boolean;
+  /** AI draft CEFR level of the word in the sense the learner met it (D64), null until the model has written it */
+  level: string | null;
+  /** how many vocabulary-practice tasks on this word you have answered (first tries only; a plain count, not a score) */
+  practised: number;
   bank: { occurrences: number; revisions: number };
   displayed: { occurrences: number; slots: number };
   lastSeen: string | null;
@@ -79,7 +114,18 @@ function view(db: Db, e: EntryRow): EntryView {
   const pos = e.pos !== "unknown" ? { text: e.pos, source: "entry" as const } : pick(user?.part_of_speech, model?.part_of_speech);
   const bank = db.prepare("SELECT COUNT(*) AS n, COUNT(DISTINCT revision_id) AS r FROM vocabulary_encounters WHERE entry_id = ? AND kind = 'bank'").get(e.id) as { n: number; r: number };
   const shown = db.prepare("SELECT COUNT(*) AS n, COUNT(DISTINCT slot_id) AS s, MAX(created_at) AS last FROM vocabulary_encounters WHERE entry_id = ? AND kind = 'displayed'").get(e.id) as { n: number; s: number; last: string | null };
+  const level = db.prepare("SELECT level FROM vocabulary_levels WHERE entry_id = ? ORDER BY created_at DESC, rowid DESC LIMIT 1").get(e.id) as { level: string } | undefined;
+  const practised = (db
+    .prepare(
+      `SELECT COUNT(*) AS n FROM attempts t JOIN session_slots ss ON ss.id = t.slot_id JOIN vocabulary_sessions vs ON vs.session_id = ss.session_id
+         JOIN exercise_revisions er ON er.id = ss.exercise_revision_id
+        WHERE t.attempt_no = 1 AND lower(json_extract(er.content_json, '$.vocabulary.target.lemma')) = ?`,
+    )
+    .get(e.lemma) as { n: number }).n;
   const pending = db.prepare("SELECT 1 FROM jobs WHERE idempotency_key LIKE ? AND state IN ('queued','waiting_for_gpu','running','paused') LIMIT 1").get(`vocab:${e.id}:%`) !== undefined;
+  const translation = pick(user?.translation_ru, model?.translation_ru);
+  const modelResult = model ? db.prepare("SELECT jr.schema_version AS schema FROM vocabulary_revisions vr LEFT JOIN job_results jr ON jr.id = vr.job_result_id WHERE vr.entry_id = ? AND vr.revision = ?").get(e.id, model.revision) as { schema: string | null } | undefined : undefined;
+  const latestFullJob = db.prepare("SELECT state, error_code AS error FROM jobs WHERE kind = 'vocabulary_enrichment' AND json_extract(payload_json, '$.entryId') = ? AND COALESCE(json_extract(payload_json, '$.levelOnly'), 0) = 0 ORDER BY created_at DESC, rowid DESC LIMIT 1").get(e.id) as { state: string; error: string | null } | undefined;
   return {
     id: e.id,
     lemma: e.lemma,
@@ -88,11 +134,15 @@ function view(db: Db, e: EntryRow): EntryView {
     learned: e.learned === 1,
     userRevision: e.user_revision,
     surfaceForms: JSON.parse(e.surface_forms_json) as string[],
-    translation: pick(user?.translation_ru, model?.translation_ru),
+    translation,
     example: pick(user?.example_en, model?.example_en),
     collocations: uc.length > 0 ? { items: uc, source: "user" } : mc.length > 0 ? { items: mc, source: "ai_draft" } : { items: [], source: null },
     draftPredatesEdit: model?.based_on_user_rev != null && model.based_on_user_rev < e.user_revision,
     aiPending: pending,
+    aiError: !translation.text && !pending && latestFullJob?.state === "failed" ? latestFullJob.error : null,
+    aiExampleOmitted: !user?.example_en && modelResult?.schema === "vocabulary-partial-v1",
+    level: level?.level ?? null,
+    practised,
     bank: { occurrences: bank.n, revisions: bank.r },
     displayed: { occurrences: shown.n, slots: shown.s },
     lastSeen: shown.last,
@@ -127,12 +177,16 @@ export function addWord(db: Db, deps: Deps, input: unknown): { entry: EntryView;
           db.prepare("UPDATE vocabulary_entries SET surface_forms_json = ? WHERE id = ?").run(JSON.stringify([...forms, selected].sort()), existing.id);
           scanBankForEntry(db, deps, existing.id);
         }
-        return { entry: getEntry(db, existing.id), created: false };
+        const wasRemoved = isRemoved(db, existing.id);
+        if (wasRemoved) db.prepare("INSERT INTO vocabulary_entry_events(id, entry_id, kind, created_at) VALUES (?,?,?,?)").run(id(deps), existing.id, "restored", deps.now().toISOString());
+        noteMetIn(db, deps, existing.id, p.data.slotId);
+        return { entry: getEntry(db, existing.id), created: wasRemoved };
       }
       const entryId = id(deps);
       const forms = selected !== lemma && isValidWord(selected) ? [selected] : [];
       db.prepare("INSERT INTO vocabulary_entries(id, lemma, pos, language, learned, user_revision, surface_forms_json, created_at) VALUES (?,?,?,?,?,?,?,?)").run(entryId, lemma, "unknown", "en", 0, 0, JSON.stringify(forms), deps.now().toISOString());
       scanBankForEntry(db, deps, entryId);
+      noteMetIn(db, deps, entryId, p.data.slotId);
       enqueue(db, { now: deps.now, newId: deps.newId ?? randomUUID }, { kind: "vocabulary_enrichment", payload: { entryId, expectedUserRevision: 0 }, idempotencyKey: `vocab:${entryId}:0`, priority: 2 });
       return { entry: getEntry(db, entryId), created: true };
     })
@@ -166,24 +220,79 @@ export function patchWord(db: Db, deps: Deps, entryId: string, input: unknown): 
           db.prepare("UPDATE vocabulary_entries SET pos = ? WHERE id = ?").run(b.pos, entryId);
         }
       }
-      if (b.learned !== undefined) db.prepare("UPDATE vocabulary_entries SET learned = ? WHERE id = ?").run(b.learned ? 1 : 0, entryId);
+      if (b.learned !== undefined && (e.learned === 1) !== b.learned) {
+        db.prepare("UPDATE vocabulary_entries SET learned = ? WHERE id = ?").run(b.learned ? 1 : 0, entryId);
+        // the date of the switch, for "marked learned by date" in Vocabulary Analytics (migration 018); no XP, no score
+        db.prepare("INSERT INTO vocabulary_learned_events(id, entry_id, learned, created_at) VALUES (?,?,?,?)").run(id(deps), entryId, b.learned ? 1 : 0, deps.now().toISOString());
+      }
       return getEntry(db, entryId);
     })
     .immediate();
 }
 
 export function listWords(db: Db, o: { q?: string; learned?: boolean; limit?: number } = {}): { words: EntryView[]; total: number } {
-  const rows = db.prepare("SELECT id, lemma, pos, learned, user_revision, surface_forms_json, created_at FROM vocabulary_entries ORDER BY lemma").all() as EntryRow[];
+  const rows = (db.prepare("SELECT id, lemma, pos, learned, user_revision, surface_forms_json, created_at FROM vocabulary_entries ORDER BY lemma").all() as EntryRow[]).filter((r) => !isRemoved(db, r.id));
   const q = o.q ? normalizeWord(o.q) : "";
-  const all = rows.map((r) => view(db, r)).filter((v) => (o.learned === undefined || v.learned === o.learned) && (q === "" || v.lemma.includes(q) || v.translation.text.toLowerCase().includes(q) || v.surfaceForms.some((f) => f.includes(q))));
+  // most recently shown first, then never-shown words by when they were saved (newest first)
+  const recent = (v: EntryView) => v.lastSeen ?? "";
+  const all = rows
+    .map((r) => view(db, r))
+    .sort((a, b) => recent(b).localeCompare(recent(a)) || b.createdAt.localeCompare(a.createdAt))
+    .filter((v) => (o.learned === undefined || v.learned === o.learned) && (q === "" || v.lemma.includes(q) || v.translation.text.toLowerCase().includes(q) || v.surfaceForms.some((f) => f.includes(q))));
   return { words: all.slice(0, o.limit ?? 500), total: all.length };
+}
+
+/**
+ * D64: words saved before the CEFR level existed get one level-only job each (idempotent by key). Called at startup; the job goes through the
+ * single GPU dispatcher like any other draft and touches nothing the learner wrote.
+ */
+export function queueMissingLevels(db: Db, deps: Deps): number {
+  const missing = db
+    .prepare(`SELECT id FROM vocabulary_entries WHERE ${VISIBLE} AND NOT EXISTS (SELECT 1 FROM vocabulary_levels l WHERE l.entry_id = vocabulary_entries.id)`)
+    .all() as Array<{ id: string }>;
+  let queued = 0;
+  for (const { id: entryId } of missing) {
+    const hasDraft = db.prepare("SELECT 1 FROM vocabulary_revisions WHERE entry_id = ? AND source = 'model' LIMIT 1").get(entryId) !== undefined;
+    // A full translation job also creates the level. Do not run a level-only job that would discard a usable translation.
+    if (!hasDraft && db.prepare("SELECT 1 FROM jobs WHERE kind = 'vocabulary_enrichment' AND json_extract(payload_json, '$.entryId') = ? AND COALESCE(json_extract(payload_json, '$.levelOnly'), 0) = 0 LIMIT 1").get(entryId)) continue;
+    const rev = (db.prepare("SELECT user_revision AS r FROM vocabulary_entries WHERE id = ?").get(entryId) as { r: number }).r;
+    const key = hasDraft ? `vocab:${entryId}:level` : `vocab:${entryId}:${rev}`;
+    if (db.prepare("SELECT 1 FROM jobs WHERE idempotency_key = ?").get(key)) continue;
+    enqueue(db, { now: deps.now, newId: deps.newId ?? randomUUID }, { kind: "vocabulary_enrichment", payload: { entryId, expectedUserRevision: rev, ...(hasDraft ? { levelOnly: true } : {}) }, idempotencyKey: key, priority: 2 });
+    queued++;
+  }
+  return queued;
+}
+
+/** One-time recovery of old validation failures that predate bounded automatic retries. */
+export function recoverLegacyVocabularyFailures(db: Db, deps: Deps): number {
+  return db.transaction(() => {
+    const jobs = db.prepare(`SELECT j.id FROM jobs j JOIN vocabulary_entries e ON e.id = json_extract(j.payload_json, '$.entryId')
+      WHERE j.kind = 'vocabulary_enrichment' AND j.state = 'failed' AND j.error_code = 'failed_validation' AND j.retry_count = 0
+        AND COALESCE(json_extract(j.payload_json, '$.levelOnly'), 0) = 0
+        AND (SELECT kind FROM vocabulary_entry_events ev WHERE ev.entry_id = e.id ORDER BY ev.created_at DESC, ev.rowid DESC LIMIT 1) IS NOT 'removed'
+        AND NOT EXISTS (SELECT 1 FROM vocabulary_revisions vr WHERE vr.entry_id = e.id AND length(trim(vr.translation_ru)) > 0)
+        AND NOT EXISTS (SELECT 1 FROM job_events je WHERE je.job_id = j.id AND je.reason = 'retry_legacy_validation')
+        AND NOT EXISTS (SELECT 1 FROM jobs other WHERE other.id <> j.id AND other.kind = 'vocabulary_enrichment' AND json_extract(other.payload_json, '$.entryId') = e.id AND COALESCE(json_extract(other.payload_json, '$.levelOnly'), 0) = 0 AND other.state IN ('queued','waiting_for_gpu','running','paused'))`).all() as Array<{ id: string }>;
+    let recovered = 0;
+    for (const job of jobs) {
+      // Another failed job for the same entry may have been requeued earlier in this transaction.
+      const active = db.prepare(`SELECT 1 FROM jobs other JOIN jobs current ON json_extract(other.payload_json, '$.entryId') = json_extract(current.payload_json, '$.entryId')
+        WHERE current.id = ? AND other.id <> current.id AND other.kind = 'vocabulary_enrichment' AND COALESCE(json_extract(other.payload_json, '$.levelOnly'), 0) = 0
+          AND other.state IN ('queued','waiting_for_gpu','running','paused') LIMIT 1`).get(job.id);
+      if (active) continue;
+      applyAction(db, { now: deps.now, newId: deps.newId ?? randomUUID }, job.id, "retry", "retry_legacy_validation");
+      recovered++;
+    }
+    return recovered;
+  }).immediate();
 }
 
 /** For the popup: is the selected word (or a form of it) already saved? */
 export function lookupWord(db: Db, word: string): EntryView | null {
   const w = normalizeWord(word);
   if (!w) return null;
-  const rows = db.prepare("SELECT id, lemma, pos, learned, user_revision, surface_forms_json, created_at FROM vocabulary_entries").all() as EntryRow[];
+  const rows = (db.prepare("SELECT id, lemma, pos, learned, user_revision, surface_forms_json, created_at FROM vocabulary_entries").all() as EntryRow[]).filter((r) => !isRemoved(db, r.id));
   const hit = rows.find((r) => r.lemma === w || formsOf(r).includes(w));
   return hit ? view(db, hit) : null;
 }
@@ -252,12 +361,16 @@ export interface VocabularyTotals {
   bankOccurrences: number;
   displayedOccurrences: number;
 }
+/** entries whose latest event is not a removal (D63) */
+const VISIBLE = "(SELECT kind FROM vocabulary_entry_events ev WHERE ev.entry_id = vocabulary_entries.id ORDER BY ev.created_at DESC, ev.rowid DESC LIMIT 1) IS NOT 'removed'";
+const VISIBLE_ENC = "entry_id IN (SELECT id FROM vocabulary_entries WHERE " + VISIBLE + ")";
+
 export function vocabularyTotals(db: Db): VocabularyTotals {
   const n = (sql: string) => (db.prepare(sql).get() as { n: number }).n;
   return {
-    words: n("SELECT COUNT(*) AS n FROM vocabulary_entries"),
-    learned: n("SELECT COUNT(*) AS n FROM vocabulary_entries WHERE learned = 1"),
-    bankOccurrences: n("SELECT COUNT(*) AS n FROM vocabulary_encounters WHERE kind = 'bank'"),
-    displayedOccurrences: n("SELECT COUNT(*) AS n FROM vocabulary_encounters WHERE kind = 'displayed'"),
+    words: n(`SELECT COUNT(*) AS n FROM vocabulary_entries WHERE ${VISIBLE}`),
+    learned: n(`SELECT COUNT(*) AS n FROM vocabulary_entries WHERE learned = 1 AND ${VISIBLE}`),
+    bankOccurrences: n(`SELECT COUNT(*) AS n FROM vocabulary_encounters WHERE kind = 'bank' AND ${VISIBLE_ENC}`),
+    displayedOccurrences: n(`SELECT COUNT(*) AS n FROM vocabulary_encounters WHERE kind = 'displayed' AND ${VISIBLE_ENC}`),
   };
 }

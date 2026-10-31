@@ -79,9 +79,22 @@ export const SettingsV1Schema = z
     explanation: z.enum(["compact", "detailed"]),
     vocabularyShare: z.number().min(0).max(0.25),
     stockWarning: z.number().int().min(1).max(20),
+    vocabularyTaskCount: z.number().int().min(5).max(10).optional(),
+    /** D64/TASK_020: at most this many words never practised before enter one vocabulary session (default 4) */
+    vocabularyNewWordsPerSession: z.number().int().min(1).max(10).optional(),
+    /** D64: share of the session's tasks offered for voice (0..1). When set it replaces voiceTarget; older revisions do not have it. */
+    voiceShare: z.number().min(0).max(1).optional(),
   })
   .strict();
 export type SettingsV1 = z.infer<typeof SettingsV1Schema>;
+
+/** Older settings revisions predate vocabulary sessions. */
+export const vocabularyTaskCount = (v: Pick<SettingsV1, "vocabularyTaskCount">): number => v.vocabularyTaskCount ?? 8;
+
+export const vocabularyNewWordsPerSession = (v: Pick<SettingsV1, "vocabularyNewWordsPerSession">): number => v.vocabularyNewWordsPerSession ?? 4;
+
+/** How many tasks of a session are offered for voice: the share of the task count, rounded; otherwise the old fixed count. */
+export const voiceTaskCount = (v: Pick<SettingsV1, "taskCount" | "voiceTarget" | "voiceShare">): number => (v.voiceShare !== undefined ? Math.round(v.voiceShare * v.taskCount) : v.voiceTarget);
 
 export const DEFAULT_SETTINGS_V1: SettingsV1 = {
   schema_version: "settings-v1",
@@ -96,5 +109,6 @@ export const DEFAULT_SETTINGS_V1: SettingsV1 = {
 export * from "./attempts.js";
 export * from "./analytics.js";
 export * from "./exercises.js";
+export * from "./vocabulary-practice.js";
 export * from "./sessions.js";
 export * from "./batches.js";

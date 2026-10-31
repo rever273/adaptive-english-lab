@@ -10,6 +10,7 @@ export const CreateBatchRequestSchema = z
   .object({
     count: z.number().int().min(1).max(500),
     mode: z.enum(BATCH_MODES),
+    category: z.enum(["grammar", "vocabulary"]).default("grammar"),
     /** the 24-draft trial (4 per format) that must be fully reviewed before any larger batch */
     trial: z.boolean().default(false),
     /** skills to cover (required for manual; optional restriction for balanced/adaptive) */

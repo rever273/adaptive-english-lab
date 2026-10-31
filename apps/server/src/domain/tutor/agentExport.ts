@@ -9,7 +9,7 @@ import { ApiError } from "../../errors.js";
 export const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 export const EXPORT_LIMITS = { slots: 100, text: 2000, attemptsPerSlot: 5, findingsPerAttempt: 20 } as const;
 
-export type AgentTaskKind = "session" | "exercise" | "batch" | "findings" | "coverage" | "progress" | "lessons";
+export type AgentTaskKind = "session" | "exercise" | "batch" | "findings" | "coverage" | "progress" | "lessons" | "vocabulary";
 
 const cut = (s: string | null | undefined, n: number = EXPORT_LIMITS.text): string => ((s ?? "").length > n ? `${(s ?? "").slice(0, n)}…[cut]` : (s ?? ""));
 /** values written into Markdown: no raw HTML, no line structure of their own */
@@ -92,6 +92,7 @@ export function exportExercise(db: Db, revisionId: string): { json: object; mark
 /** The short text the learner copies for the VS Code agent: IDs, a relative spec path and an allowlisted command - never data. */
 export function agentTask(db: Db, kind: AgentTaskKind, id?: string): string {
   if (kind === "progress" || kind === "lessons") return workflowTask(db, kind);
+  if (kind === "vocabulary") return vocabularyTask();
   if (kind === "coverage") return "Check the content coverage. Run: npm run lab:export -- coverage. Use content/review-guidelines.md. Report gaps; do not modify raw attempts.";
   if (kind === "findings") return "Review the tentative AI findings. Run: npm run lab:export -- findings --status tentative --limit 100. Use content/review-guidelines.md. Return a finding-review-v1 manifest; preserve raw attempts.";
   mustBeId(id ?? "", `${kind} id`);
@@ -105,7 +106,7 @@ export function agentTask(db: Db, kind: AgentTaskKind, id?: string): string {
     return `Review exercise revision ${id} (revision ${r.revision}). Run: npm run lab:export -- exercise ${id}. Use content/review-guidelines.md. Return a content-review-v1 manifest; preserve raw attempts.`;
   }
   if (!db.prepare("SELECT 1 FROM batches WHERE id = ?").get(id)) throw new ApiError(404, "BATCH_NOT_FOUND", "Unknown batch");
-  return `Review batch ${id} using lab:export. Run: npm run lab:export -- batch ${id}. Use content/review-guidelines.md. Return a content-review-v1 manifest; do not modify raw attempts.`;
+  return `Complete and publish batch ${id}. Run npm run content:agent -- prepare ${id}. Follow content/agent-workflows/common.md and the category instruction selected by the command. Review every item, repair suitable drafts, obtain independent review from a separate agent and run check/finalize yourself. Preserve raw attempts and lesson selection. Do not ask the learner to copy JSON or run commands. Report only the final accepted, corrected and rejected counts.`;
 }
 
 const PACK_STEPS = [
@@ -119,6 +120,20 @@ const COMMON = [
   "Read content/review-guidelines.md and follow any local project instructions. Work on your own and run every command yourself; do not ask me to run anything. Never edit the SQLite database or raw attempts directly; use only the commands below. Do not commit or push.",
   "If you change code, run npm run typecheck and the tests of the area you changed before you finish.",
 ].join("\n");
+
+/** Vocabulary exercises (vocabulary TZ, stage E): the coding agent drafts them, a different reviewer checks every item, pack publishes. */
+function vocabularyTask(): string {
+  return [
+    "English Lab: create new vocabulary exercises for the words in my dictionary.",
+    COMMON,
+    "1. Run: npm run lab:export -- vocabulary (read-only). It lists my words, their meaning so far and how many NEW approved exercises each word still has.",
+    "2. For every word with fewer than 3 new exercises write 3-4 new ones in a pack content/packs/vocab-<yyyymmdd>/index.mjs. Copy the format of content/packs/vocab-starter/index.mjs exactly (helpers recognition(), recall(), collocation()).",
+    "   Mix: about 50% recognition (one gap in a short adult B2 sentence, 4 options of the SAME part of speech and grammatical form), 30% guided recall (one word typed, first-letter cue in the sentence, every acceptable answer listed), 20% collocation (the natural partner word or preposition of the target).",
+    "   Rules: exactly one option fits the context; every option has rationaleRu (why it fits / why not HERE, never 'wrong everywhere'); no giveaways from articles, tense, length or topic; correct surface form written out (no suffix rules); Australian spelling; target.lemma is the dictionary word exactly as listed, partOfSpeech and senseId name the sense (e.g. endeavour as a noun vs a verb); about 15% of sentences about technology/AI/IT; never reuse a sentence (pack check refuses shown or existing ones). Words outside my dictionary may be distractors only.",
+    PACK_STEPS.replace("write items with buildBlock from content/first10/lib.mjs, format as in content/first10/L01.mjs and L03.mjs (reading)", "vocabulary items use the helpers in content/packs/vocab-starter/index.mjs; blueprints: []"),
+    "3. Reply in Russian, briefly: which words got new exercises, how many were approved / flagged / rejected, and how many new vocabulary exercises are available now.",
+  ].join("\n");
+}
 
 /** Copy-and-paste tasks for the learner's coding agent: complete instructions with IDs and allowlisted commands only, never learner data (D62). */
 function workflowTask(db: Db, kind: "progress" | "lessons"): string {

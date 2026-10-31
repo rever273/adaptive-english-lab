@@ -46,17 +46,16 @@ describe("content batch API", () => {
     // the creating call kicked the dispatcher, so a first unit may already be done: the counts are real rows and always sum to the request
     expect(Object.values(view.counts).reduce((a, n) => a + n, 0)).toBe(24);
 
-    // the larger batch is refused with a precise reason until the trial is reviewed
-    const early = await post("/api/v1/content/batches", { count: 50, mode: "balanced" });
-    expect(early.statusCode).toBe(409);
-    expect(ErrorEnvelopeSchema.parse(early.json()).error.code).toBe("TRIAL_REQUIRED");
     expect((await get(`/api/v1/content/batches/not-a-batch`)).statusCode).toBe(404);
 
     await drive(r, () => batchJobsSettled(r, created.batchId));
     const done = (await get(`/api/v1/content/batches/${created.batchId}`)).json() as { counts: Record<string, number>; generationDone: boolean };
     expect(done).toMatchObject({ generationDone: true });
     expect(done.counts.ready_for_review).toBe(24);
-    expect(((await get("/api/v1/content/batches")).json() as { batches: unknown[] }).batches).toHaveLength(1);
+    // Regular replenishment is available immediately; publication still requires individual review.
+    const early = await post("/api/v1/content/batches", { count: 50, mode: "balanced" });
+    expect(early.statusCode).toBe(202);
+    expect(((await get("/api/v1/content/batches")).json() as { batches: unknown[] }).batches).toHaveLength(2);
   });
 
   it("review-import, release preview and release run end-to-end over HTTP; stale input answers 409", async () => {

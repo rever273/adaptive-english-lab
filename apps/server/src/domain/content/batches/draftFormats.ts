@@ -100,6 +100,11 @@ All items in this request test the same skill card. Use the rule to design the t
 Write natural, varied adult contexts and a concise correct Russian explanation. Do not copy the skill-card examples. Ensure exactly one correct option where requested.
 Return one draft for each requested item in the same order. If you cannot meet the requirements, return fewer drafts; they will be discarded for review safety. Never claim approval or invent fields.`;
 
+export const GENERATION_SYSTEM_V5 = `${GENERATION_SYSTEM_V4}
+Before returning each draft, insert every option into its sentence: exactly one must work under ordinary Australian English readings. Add clear time or meaning context; do not reject a grammatical dialect variant. A collective noun may take singular or plural agreement in Australian English; police takes plural agreement.
+For detect_error, identify one genuine error, ensure each segment is copied exactly from the sentence and every correction fixes it; do not call an indefinite article wrong merely because a noun is specific. For no-mistake items every segment must be correct.
+For short answers, give a precise Russian meaning, natural accepted English answers and an accurate rubric; never list an ungrammatical answer. For reading, ask distinct questions about the target construction, with exactly one correct option per question. Hints must not reveal the answer. Explain the actual rule in natural Russian.`;
+
 export const GENERATION_SYSTEM_V2 = `You write practice items for ONE adult learner of Australian English (level B2). You output JSON only, in the requested shape.
 Rules: natural adult topics (work, services, travel, community, health, technology), no personal-life questions, no listening. Sentences 8-20 words.
 Every item must test exactly the TARGET SKILL given for it. Russian text (hint_ru, explanation_ru, cue_ru, meaning_ru, marker_ru, reject_ru) must be correct Russian; English text must be correct, natural Australian English.

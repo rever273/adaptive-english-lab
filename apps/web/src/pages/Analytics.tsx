@@ -1,4 +1,5 @@
 import { useCallback, useEffect, useState } from "react";
+import { VocabularyAnalytics } from "./VocabularyAnalytics";
 import { ApiRequestError, createExport, decideExternalReport, fetchExternal, fetchFindings, fetchReport, importExternalReport, type DiscoveryAuditData, type ExternalData, type FindingData, type Ratio, type SavedReportData } from "../api";
 
 const pct = (x: number | null): string => (x === null ? "—" : `${(x * 100).toFixed(1)}%`);
@@ -144,7 +145,7 @@ function ExternalSection() {
   );
 }
 
-export function Analytics() {
+function GrammarAnalytics() {
   const [protocol, setProtocol] = useState<"practice" | "diagnostic-v1">("practice");
   const [difficulty, setDifficulty] = useState("B2");
   const [saved, setSaved] = useState<SavedReportData | null>(null);
@@ -336,6 +337,20 @@ export function Analytics() {
           </ul>
         )}
       </section>
+    </>
+  );
+}
+
+/** Grammar | Vocabulary: two separate analytics areas with their own filters; nothing is mixed between them */
+export function Analytics({ initialView = "grammar" }: { initialView?: "grammar" | "vocabulary" } = {}) {
+  const [view, setView] = useState<"grammar" | "vocabulary">(initialView);
+  return (
+    <>
+      <div className="segmented page-switch" role="radiogroup" aria-label="Which analytics">
+        <label className={view === "grammar" ? "on" : ""}><input type="radio" name="an-view" checked={view === "grammar"} onChange={() => setView("grammar")} /> <i className="pi pi-pencil" aria-hidden="true" /> Grammar</label>
+        <label className={view === "vocabulary" ? "on" : ""}><input type="radio" name="an-view" checked={view === "vocabulary"} onChange={() => setView("vocabulary")} data-testid="analytics-vocabulary" /> <i className="pi pi-bookmark" aria-hidden="true" /> Vocabulary</label>
+      </div>
+      {view === "grammar" ? <GrammarAnalytics /> : <VocabularyAnalytics />}
     </>
   );
 }

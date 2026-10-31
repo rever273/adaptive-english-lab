@@ -2,6 +2,7 @@ import type { SessionSummary } from "@english-lab/contracts";
 import type { Db } from "../../db/open.js";
 import { ApiError } from "../../errors.js";
 import { localDateIn } from "../attempts/canonical.js";
+import { nearMatchOfFirst } from "./feedback.js";
 import type { SessionDeps } from "./policy.js";
 
 /**
@@ -12,6 +13,7 @@ export function summarize(db: Db, sessionId: string, status: "completed" | "ende
   const slots = db.prepare("SELECT id FROM session_slots WHERE session_id = ?").all(sessionId) as Array<{ id: string }>;
   const counts = { correct: 0, incorrect: 0, idk: 0, assisted: 0, pending: 0, skipped: 0, unanswered: 0 };
   let pendingAnalysis = 0;
+  let detailDiffers = 0;
   for (const { id } of slots) {
     const first = db.prepare("SELECT id, hints_before AS hints, answer_seen_before AS seen FROM attempts WHERE slot_id = ? AND attempt_no = 1").get(id) as { id: string; hints: number; seen: number } | undefined;
     if (!first) {
@@ -25,7 +27,10 @@ export function summarize(db: Db, sessionId: string, status: "completed" | "ende
     if (latest.verdict === "pending" || latest.verdict === "ambiguous") pendingAnalysis++;
     const firstAssessment = db.prepare("SELECT verdict, confirmation FROM assessment_revisions WHERE attempt_id = ? ORDER BY sequence DESC LIMIT 1").get(first.id) as { verdict: string; confirmation: string };
     if (first.hints > 0 || first.seen > 0) counts.assisted++;
-    else if (firstAssessment.verdict === "correct" && firstAssessment.confirmation === "confirmed") counts.correct++;
+    else if (firstAssessment.verdict === "correct" && firstAssessment.confirmation === "confirmed") {
+      counts.correct++;
+      if (nearMatchOfFirst(db, id)) detailDiffers++;
+    }
     else if (firstAssessment.verdict === "incorrect" && firstAssessment.confirmation === "confirmed") counts.incorrect++;
     else if (firstAssessment.verdict === "idk") counts.idk++;
     else counts.pending++;
@@ -34,7 +39,23 @@ export function summarize(db: Db, sessionId: string, status: "completed" | "ende
   if (status === "ended_early") notes.push("Ended early: this does not count as a completed lesson.");
   if (pendingAnalysis > 0) notes.push(`${pendingAnalysis} written answer(s) remain unconfirmed. AI suggestions may appear below.`);
   if (counts.assisted > 0) notes.push("Assisted answers (hint or answer shown first) are listed separately and are not unaided evidence.");
-  return { sessionId, status, total: slots.length, counts, pendingAnalysis, notes };
+  const vocabulary = db.prepare("SELECT 1 FROM vocabulary_sessions WHERE session_id = ?").get(sessionId) !== undefined;
+  const xpEarned = (db.prepare("SELECT COALESCE(SUM(x.amount), 0) AS n FROM activity_xp_events x JOIN session_slots ss ON ss.id = x.slot_id WHERE ss.session_id = ?").get(sessionId) as { n: number }).n;
+  let practiseAgain: string[] = [];
+  if (vocabulary) {
+    // the tested words whose FIRST try was wrong or "I don't know" (a later correct retry does not erase that)
+    const rows = db
+      .prepare(
+        `SELECT DISTINCT json_extract(er.content_json, '$.vocabulary.target.lemma') AS lemma
+           FROM session_slots ss JOIN exercise_revisions er ON er.id = ss.exercise_revision_id
+           JOIN attempts t ON t.slot_id = ss.id AND t.attempt_no = 1
+          WHERE ss.session_id = ? AND (t.idk = 1 OR (SELECT a.verdict FROM assessment_revisions a WHERE a.attempt_id = t.id ORDER BY a.sequence DESC LIMIT 1) = 'incorrect')`,
+      )
+      .all(sessionId) as Array<{ lemma: string | null }>;
+    practiseAgain = rows.map((r) => r.lemma).filter((l): l is string => Boolean(l));
+  }
+  if (detailDiffers > 0) notes.push(`${detailDiffers} answer(s) used the right construction with a different name or number: counted for the construction, the different word is marked in red below.`);
+  return { sessionId, status, total: slots.length, counts, pendingAnalysis, ...(detailDiffers > 0 ? { detailDiffers } : {}), category: vocabulary ? "vocabulary" : "grammar", xpEarned, ...(vocabulary ? { practiseAgain } : {}), notes };
 }
 
 /**

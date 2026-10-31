@@ -2,7 +2,7 @@ import type { FastifyInstance } from "fastify";
 import { z } from "zod";
 import type { Db } from "../db/open.js";
 import { ApiError } from "../errors.js";
-import { addWord, getEntry, listWords, lookupWord, patchWord, revisionHistory, vocabularyTotals } from "../domain/vocabulary/repository.js";
+import { addWord, getEntry, listWords, lookupWord, patchWord, removeWord, revisionHistory, vocabularyTotals } from "../domain/vocabulary/repository.js";
 
 const idParams = { schema: { params: { type: "object", properties: { id: { type: "string", minLength: 1, maxLength: 64 } }, required: ["id"] } } } as const;
 const ListQuery = z.object({ q: z.string().max(80).optional(), learned: z.enum(["true", "false"]).optional(), limit: z.coerce.number().int().min(1).max(1000).optional() }).strict();
@@ -34,4 +34,7 @@ export function registerVocabularyRoutes(app: FastifyInstance, db: Db, deps: { n
   app.get<{ Params: { id: string } }>("/api/v1/vocabulary/:id", idParams, async (req) => ({ ...getEntry(db, req.params.id), history: revisionHistory(db, req.params.id) }));
 
   app.patch<{ Params: { id: string } }>("/api/v1/vocabulary/:id", idParams, async (req) => patchWord(db, deps, req.params.id, req.body));
+
+  // hide a word (history is kept; saving it again brings it back)
+  app.post<{ Params: { id: string } }>("/api/v1/vocabulary/:id/remove", idParams, async (req) => removeWord(db, deps, req.params.id));
 }

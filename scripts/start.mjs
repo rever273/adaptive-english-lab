@@ -29,12 +29,31 @@ async function getHealth(port) {
   }
 }
 
+/** after a restart an open tab reconnects by itself (and reloads); only when none does, within a few seconds, a new tab is opened */
+async function openBrowserUnlessTabReconnects(port) {
+  if (noOpen) return;
+  const until = Date.now() + 8000;
+  while (Date.now() < until) {
+    try {
+      const res = await fetch(`http://127.0.0.1:${port}/api/v1/ui/clients`, { signal: AbortSignal.timeout(1000) });
+      if (res.ok && (await res.json()).open > 0) {
+        console.log("An English Lab tab is already open; it reconnects and reloads by itself.");
+        return;
+      }
+    } catch {
+      /* keep waiting */
+    }
+    await new Promise((r) => setTimeout(r, 400));
+  }
+  openBrowser();
+}
+
 const existing = readLock(config.lockPath);
 if (existing && classifyLock(existing) !== "stale") {
   const health = await getHealth(existing.port);
   if (health && health.instanceId === existing.instanceId) {
     console.log(`English Lab is already running (pid ${existing.pid}) at http://127.0.0.1:${existing.port}/`);
-    openBrowser();
+    await openBrowserUnlessTabReconnects(existing.port);
     process.exit(0);
   }
   console.error(`A lock exists for pid ${existing.pid} but it is not answering as English Lab. Not touching it; see ${config.lockPath}`);
@@ -69,10 +88,18 @@ while (Date.now() < deadline) {
     process.exit(exitCode || 1);
   }
   const health = await getHealth(config.port);
-  const lock = readLock(config.lockPath);
+  // The new child may have exclusively created its lock but not finished writing it yet.
+  // Only the startup polling loop retries; an unreadable pre-existing lock above still refuses.
+  let lock;
+  try { lock = readLock(config.lockPath); }
+  catch (e) {
+    if (e.code !== "LOCK_UNVERIFIABLE") throw e;
+    await new Promise((r) => setTimeout(r, 300));
+    continue;
+  }
   if (health && lock && lock.pid === child.pid && health.instanceId === lock.instanceId) {
     console.log(`English Lab started (pid ${child.pid}) at ${url}  [status: ${health.status}, schema v${health.db.schemaVersion}]`);
-    openBrowser();
+    await openBrowserUnlessTabReconnects(config.port);
     if (!attached) process.exit(0);
     console.log("Press Ctrl+C to stop.");
     child.once("exit", (code) => process.exit(code ?? 0));

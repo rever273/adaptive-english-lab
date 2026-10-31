@@ -1,4 +1,4 @@
-// npm run lab:export -- batch <UUID> | session <UUID> | exercise <UUID> | coverage   [--db <sqlite file>] [--out <dir>]
+// npm run lab:export -- batch <UUID> | session <UUID> | exercise <UUID> | coverage | vocabulary   [--db <sqlite file>] [--out <dir>]
 // Read-only export for an external reviewer (spec/06): one read transaction, no writes, Markdown + JSON into <data root>/exports.
 // The database is opened READ-ONLY. It is safe to run while the app is running (WAL).
 import { mkdirSync, writeFileSync } from "node:fs";
@@ -15,8 +15,8 @@ const config = loadConfig();
 const dbPath = path.resolve(opt("--db", config.dbPath));
 const outDir = path.resolve(opt("--out", path.join(config.dataRoot, "exports")));
 
-if (!["batch", "session", "exercise", "coverage", "findings"].includes(what)) {
-  console.error("usage: npm run lab:export -- batch <UUID> | session <UUID> | exercise <UUID> (revision id) | coverage | findings [--status tentative] [--limit 100]  [--db <file>] [--out <dir>]");
+if (!["batch", "session", "exercise", "coverage", "findings", "vocabulary"].includes(what)) {
+  console.error("usage: npm run lab:export -- batch <UUID> | session <UUID> | exercise <UUID> (revision id) | coverage | vocabulary | findings [--status tentative] [--limit 100]  [--db <file>] [--out <dir>]");
   process.exit(2);
 }
 if (["batch", "session", "exercise"].includes(what) && !/^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(id ?? "")) {
@@ -27,6 +27,7 @@ const { openDatabase } = await loadServerModule("db/open.js");
 const { exportBatch, exportCoverage } = await loadServerModule("domain/content/batches/export.js");
 const { findingsForReview } = await loadServerModule("domain/reports/findingReview.js");
 const { exportSession, exportExercise } = await loadServerModule("domain/tutor/agentExport.js");
+const { exportVocabulary } = await loadServerModule("domain/vocabulary/practice.js");
 const db = openDatabase(dbPath, { readonly: true });
 try {
   let out;
@@ -34,9 +35,10 @@ try {
     const items = db.transaction(() => findingsForReview(db, { status: opt("--status", "tentative"), limit: Number(opt("--limit", "100")) })).deferred();
     const template = { schema_version: "finding-review-v1", reviewer: "agent:<name>@<version> | human:<name>", review_version: "<review pass id>", items: items.map((f) => ({ finding_id: f.finding_id, source_hash: f.source_hash, expected_sequence: f.expected_sequence, verdict: "confirmed | rejected | disputed | uncertain", reason: "" })) };
     out = { json: { schema_version: "finding-export-v1", exportedAt: new Date().toISOString(), findings: items, reviewManifestTemplate: template }, markdown: ["# AI findings to review", "", "Judge EVERY finding against the learner answer. Return a finding-review-v1 manifest (echo finding_id, source_hash and expected_sequence unchanged). Do not modify the database.", "", ...items.flatMap((f) => [`## ${f.finding_id}`, `skill ${f.skill_id} / ${f.finding_type} / confidence ${f.confidence} / model ${f.model}`, `task: ${f.prompt}`, `answer: ${JSON.stringify(f.answer)}`, `span ${f.span.start}-${f.span.end} (code points); suggested: ${f.correction}`, `explanation: ${f.explanation_ru}`, ""])].join(String.fromCharCode(10)) };
-  } else out = what === "batch" ? exportBatch(db, id) : what === "session" ? exportSession(db, id) : what === "exercise" ? exportExercise(db, id) : exportCoverage(db);
+  } else if (what === "vocabulary") out = exportVocabulary(db);
+  else out = what === "batch" ? exportBatch(db, id) : what === "session" ? exportSession(db, id) : what === "exercise" ? exportExercise(db, id) : exportCoverage(db);
   mkdirSync(outDir, { recursive: true });
-  const base = path.join(outDir, id ? `${what}-${id}` : what === "findings" ? "findings" : "coverage");
+  const base = path.join(outDir, id ? `${what}-${id}` : what === "findings" ? "findings" : what === "vocabulary" ? "vocabulary" : "coverage");
   writeFileSync(`${base}.json`, JSON.stringify(out.json, null, 2));
   writeFileSync(`${base}.md`, out.markdown);
   console.log(`exported ${what}${id ? ` ${id}` : ""}\n  ${base}.json\n  ${base}.md`);

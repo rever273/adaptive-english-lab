@@ -22,7 +22,8 @@ import { HEARTBEAT_SECONDS, takeLease } from "../domain/sessions/lease.js";
 import { PLAYABLE_BLUEPRINT_STATUSES, loadBlueprint, loadSettings, type SessionDeps } from "../domain/sessions/policy.js";
 import { computeReadiness } from "../domain/sessions/readiness.js";
 import { revealSlot } from "../domain/sessions/reveal.js";
-import { currentSessionId, getSnapshot } from "../domain/sessions/snapshot.js";
+import { currentSessionId, getSnapshot, recentSessionId, sessionCategory, type SessionCategory } from "../domain/sessions/snapshot.js";
+import { activityProgress } from "../domain/sessions/xp.js";
 import { ApiError } from "../errors.js";
 
 function parse<T>(schema: ZodType<T>, body: unknown): T {
@@ -51,6 +52,7 @@ export interface SessionRouteOptions {
 }
 
 export function registerSessionRoutes(app: FastifyInstance, db: Db, deps: SessionDeps, opts: SessionRouteOptions = {}): void {
+  app.get("/api/v1/activity-progress", async () => ({ grammar: activityProgress(db, "grammar"), vocabulary: activityProgress(db, "vocabulary") }));
   app.post("/api/v1/sessions", async (req, reply): Promise<CreateSessionResponse> => {
     const body = parse(CreateSessionRequestSchema, req.body);
     const r = body.purpose === "diagnostic" ? createDiagnosticBlock(db, deps, body) : body.purpose === "heldout" ? createHeldoutCheck(db, deps, body) : createPracticeSession(db, deps, body, { discovery: opts.discovery });
@@ -58,13 +60,21 @@ export function registerSessionRoutes(app: FastifyInstance, db: Db, deps: Sessio
     return r;
   });
 
-  app.get("/api/v1/sessions/current", async (): Promise<{ session: SessionSnapshot | null }> => {
-    const id = currentSessionId(db);
-    return { session: id ? getSnapshot(db, id) : null };
+  // ?category=grammar|vocabulary: the active session of that kind, plus a pointer to an active session of the other kind (only one can be open)
+  app.get("/api/v1/sessions/current", async (req): Promise<{ session: SessionSnapshot | null; otherActive?: { sessionId: string; category: SessionCategory } | null }> => {
+    const c = (req.query as { category?: string }).category;
+    if (c !== "grammar" && c !== "vocabulary") {
+      const id = currentSessionId(db);
+      return { session: id ? getSnapshot(db, id) : null };
+    }
+    const id = currentSessionId(db, c);
+    const any = id ? null : currentSessionId(db);
+    return { session: id ? getSnapshot(db, id) : null, otherActive: any ? { sessionId: any, category: sessionCategory(db, any) } : null };
   });
 
-  app.get("/api/v1/sessions/recent", async (): Promise<SessionSummary | null> => {
-    const last = db.prepare("SELECT id, status FROM sessions WHERE status IN ('completed','ended_early') ORDER BY ended_at DESC, rowid DESC LIMIT 1").get() as { id: string; status: "completed" | "ended_early" } | undefined;
+  app.get("/api/v1/sessions/recent", async (req): Promise<SessionSummary | null> => {
+    const c = (req.query as { category?: string }).category === "vocabulary" ? "vocabulary" : "grammar";
+    const last = recentSessionId(db, c);
     return last ? summarize(db, last.id, last.status) : null;
   });
 
@@ -111,6 +121,6 @@ export function registerSessionRoutes(app: FastifyInstance, db: Db, deps: Sessio
         const ready = computeReadiness(db, deps, r.id);
         return { blueprintRevisionId: r.id, key: r.key, title: bp.policy.title, status: r.status, readySessions: ready.readySessions, shortage: ready.shortage };
       });
-    return { activeSessionId: currentSessionId(db), taskCount: settings.values.taskCount, blueprints, banner: opts.banner ?? null, diagnostic: diagnosticStatus(db, deps), heldout: heldoutStatus(db, deps) };
+    return { activeSessionId: currentSessionId(db, "grammar"), taskCount: settings.values.taskCount, blueprints, banner: opts.banner ?? null, diagnostic: diagnosticStatus(db, deps), heldout: heldoutStatus(db, deps) };
   });
 }

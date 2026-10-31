@@ -12,6 +12,9 @@ const SettingsPatchSchema = z
     taskCount: z.number().int().min(5).max(30).optional(),
     weakRatio: z.number().min(0).max(1).optional(),
     voiceTarget: z.union([z.literal(0), z.literal(1), z.literal(2)]).optional(),
+    voiceShare: z.number().min(0).max(1).optional(),
+    vocabularyTaskCount: z.number().int().min(5).max(10).optional(),
+    vocabularyNewWordsPerSession: z.number().int().min(1).max(10).optional(),
   })
   .strict();
 

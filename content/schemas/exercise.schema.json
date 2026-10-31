@@ -187,6 +187,9 @@
             "accepted_option_ids",
             "multiple"
           ]
+        },
+        "vocabulary": {
+          "type": "object"
         }
       },
       "required": [
@@ -397,6 +400,9 @@
             "accepted_option_ids",
             "multiple"
           ]
+        },
+        "vocabulary": {
+          "type": "object"
         }
       },
       "required": [
@@ -623,6 +629,9 @@
             "corrections",
             "optional_correction"
           ]
+        },
+        "vocabulary": {
+          "type": "object"
         }
       },
       "required": [
@@ -853,6 +862,9 @@
             "rubric",
             "allow_voice"
           ]
+        },
+        "vocabulary": {
+          "type": "object"
         }
       },
       "required": [
@@ -1083,6 +1095,9 @@
             "rubric",
             "allow_voice"
           ]
+        },
+        "vocabulary": {
+          "type": "object"
         }
       },
       "required": [
@@ -1328,6 +1343,9 @@
             "paragraphs",
             "questions"
           ]
+        },
+        "vocabulary": {
+          "type": "object"
         }
       },
       "required": [

@@ -60,13 +60,14 @@ async function send<T>(method: "GET" | "POST" | "PATCH", path: string, schema: Z
 export const fetchHealth = (): Promise<Health> => send("GET", "/api/v1/health", HealthSchema);
 export const fetchCapabilities = (): Promise<Capabilities> => send("GET", "/api/v1/capabilities", CapabilitiesSchema);
 
-type SettingsValues = { taskCount: number; weakRatio: number; voiceTarget: 0 | 1 | 2 };
+type SettingsValues = { taskCount: number; weakRatio: number; voiceTarget: 0 | 1 | 2; voiceShare?: number; vocabularyTaskCount?: number; vocabularyNewWordsPerSession?: number };
 type SettingsView = { revision: number; values: SettingsValues; defaults: SettingsValues };
 export const fetchSettings = () => send("GET", "/api/v1/settings", typed<SettingsView>());
-export const saveSettings = (values: SettingsValues) => send("POST", "/api/v1/settings", typed<SettingsView>(), values);
+export const saveSettings = (values: { taskCount: number; weakRatio: number; voiceShare: number; vocabularyTaskCount?: number; vocabularyNewWordsPerSession?: number }) => send("POST", "/api/v1/settings", typed<SettingsView>(), values);
 export const fetchDashboard = () => send("GET", "/api/v1/dashboard", DashboardSchema);
-export const fetchCurrentSession = () => send("GET", "/api/v1/sessions/current", CurrentSessionResponseSchema);
-export const fetchRecentSession = () => send("GET", "/api/v1/sessions/recent", SessionSummarySchema.nullable());
+export type SessionCategory = "grammar" | "vocabulary";
+export const fetchCurrentSession = (category: SessionCategory = "grammar") => send("GET", `/api/v1/sessions/current?category=${category}`, CurrentSessionResponseSchema);
+export const fetchRecentSession = (category: SessionCategory = "grammar") => send("GET", `/api/v1/sessions/recent?category=${category}`, SessionSummarySchema.nullable());
 export const fetchSession = (id: string) => send("GET", `/api/v1/sessions/${id}`, SessionSnapshotSchema);
 export const createSession = (blueprintRevisionId: string) =>
   send("POST", "/api/v1/sessions", CreateSessionResponseSchema, { purpose: "practice", blueprintRevisionId, timezone: Intl.DateTimeFormat().resolvedOptions().timeZone || "UTC" });
@@ -87,6 +88,8 @@ const typed = <T>(): ZodType<T> => ({ parse: (x: unknown) => x as T }) as unknow
 export type ItemStatus = "queued" | "invalid" | "generated" | "ready_for_review" | "approved" | "released" | "flagged" | "rejected";
 export interface BatchSummary {
   id: string;
+  category: "grammar" | "vocabulary";
+  completion: { accepted: number; corrected: number; rejected: number; flagged: number; total: number } | null;
   createdAt: string;
   mode: string;
   purpose: "trial" | "scale";
@@ -100,7 +103,7 @@ export interface BatchSummary {
 export interface BatchItem {
   ordinal: number;
   status: ItemStatus;
-  plan: { type: string; target_skill: string; topic: string; noMistake?: boolean };
+  plan: { type: string; target_skill: string; topic: string; noMistake?: boolean; vocabulary?: { lemma: string } };
   revisionId: string | null;
   contentHash: string | null;
   reviews: number;
@@ -129,6 +132,8 @@ export interface PublicJob {
   finishedAt: string | null;
   retryCount: number;
   errorCode: string | null;
+  word?: string | null;
+  diagnosticCodes?: string[];
   progress: { done: number; total: number } | null;
 }
 export type GpuInfo =
@@ -137,13 +142,17 @@ export type GpuInfo =
 
 export const fetchBatches = () => send("GET", "/api/v1/content/batches", typed<{ batches: BatchSummary[]; trialGate: TrialGate }>());
 export const fetchBatch = (id: string) => send("GET", `/api/v1/content/batches/${id}`, typed<BatchSummary & { items: BatchItem[]; trialGate: TrialGate }>());
-export const createBatchApi = (body: { count: number; mode: "adaptive" | "balanced" | "manual"; trial?: boolean }) => send("POST", "/api/v1/content/batches", typed<{ batchId: string; items: number; units: number }>(), body);
+export const createBatchApi = (body: { count: number; mode: "adaptive" | "balanced" | "manual"; trial?: boolean; category?: "grammar" | "vocabulary" }) => send("POST", "/api/v1/content/batches", typed<{ batchId: string; items: number; units: number }>(), body);
+export const fetchContentStock = () => send("GET", "/api/v1/content/stock", typed<Record<"grammar" | "vocabulary", { available: number; threshold: number; low: boolean }>>());
 export const fetchCoverage = () => send("GET", "/api/v1/content/coverage", typed<Coverage>());
 export const fetchRevisionContent = (id: string) => send("GET", `/api/v1/content/revisions/${id}`, typed<{ revisionId: string; contentHash: string; status: string; content: Record<string, unknown> }>());
 export const importReview = (batchId: string, manifest: unknown) => send("POST", `/api/v1/content/batches/${batchId}/review-import`, typed<{ recorded: number; approved: number; flagged: number; rejected: number }>(), manifest);
 export const previewRelease = (revisionIds: string[]) => send("POST", "/api/v1/content/releases/preview", typed<{ manifestHash: string; items: unknown[] }>(), { revisionIds });
 export const publishReleaseApi = (body: { revisionIds: string[]; reviewer: string; manifestHash: string }) => send("POST", "/api/v1/content/releases", typed<{ released: number; replayed: boolean }>(), body);
-export const fetchJobs = () => send("GET", "/api/v1/jobs?limit=50", typed<{ jobs: PublicJob[] }>());
+export const fetchJobs = (limit = 30) => send("GET", `/api/v1/jobs?limit=${limit}`, typed<{ jobs: PublicJob[]; counts: Record<string, number>; total: number }>());
+export interface AiWave { kind: string; open: number; running: number; waiting: number; paused: number; done: number; failed: number; total: number; msPerItem: number | null; waitingReason: string | null }
+export interface AiActivity { waves: AiWave[]; active: { kind: string; runningForMs: number } | null; models: string[]; practiceActive: boolean; telemetry: { usedMib: number; totalMib: number } | null }
+export const fetchAiActivity = () => send("GET", "/api/v1/ai/activity", typed<AiActivity>());
 export const fetchGpu = () => send("GET", "/api/v1/gpu", typed<GpuInfo>());
 export const jobAction = (id: string, action: "pause" | "resume" | "retry" | "cancel") => send("POST", `/api/v1/jobs/${id}/actions`, typed<PublicJob>(), { action });
 
@@ -246,6 +255,13 @@ export interface VocabEntry {
   collocations: { items: string[]; source: Src };
   draftPredatesEdit: boolean;
   aiPending: boolean;
+  aiError?: string | null;
+  aiExampleOmitted?: boolean;
+  posSource: Src | "entry";
+  /** AI draft CEFR level (A1..C2) of the word in the sense it was met, or null (D64) */
+  level: string | null;
+  /** vocabulary-practice tasks on this word that you have answered (first tries) */
+  practised: number;
   bank: { occurrences: number; revisions: number };
   displayed: { occurrences: number; slots: number };
   lastSeen: string | null;
@@ -254,7 +270,8 @@ interface VocabTotals { words: number; learned: number; bankOccurrences: number;
 const anyOf = <T>() => ({ parse: (x: unknown) => x as T }) as unknown as ZodType<T>;
 export const fetchVocabulary = (q = "") => send("GET", `/api/v1/vocabulary${q ? `?q=${encodeURIComponent(q)}` : ""}`, anyOf<{ words: VocabEntry[]; totals: VocabTotals }>());
 export const lookupVocabulary = (word: string) => send("GET", `/api/v1/vocabulary/lookup?word=${encodeURIComponent(word)}`, anyOf<{ known: boolean; entry: VocabEntry | null }>());
-export const addVocabulary = (word: string, selected?: string) => send("POST", "/api/v1/vocabulary", anyOf<VocabEntry & { created: boolean }>(), { word, ...(selected ? { selected } : {}) });
+export const addVocabulary = (word: string, selected?: string, slotId?: string) => send("POST", "/api/v1/vocabulary", anyOf<VocabEntry & { created: boolean }>(), { word, ...(selected ? { selected } : {}), ...(slotId ? { slotId } : {}) });
+export const removeVocabulary = (id: string) => send("POST", `/api/v1/vocabulary/${id}/remove`, anyOf<{ removed: true }>(), {});
 export const patchVocabulary = (id: string, body: { expectedRevision?: number; translationRu?: string; exampleEn?: string; collocations?: string[]; pos?: string; learned?: boolean }) => send("PATCH", `/api/v1/vocabulary/${id}`, anyOf<VocabEntry>(), body);
 
 // ---- TASK_016: tutor ----
@@ -269,9 +286,44 @@ export interface TutorMessage {
   uncertaintyNoteRu: string | null;
   createdAt: string;
 }
-export interface TutorThread { slotId: string; messages: TutorMessage[]; pendingJobs: number }
-export interface TutorSlot { slotId: string; sessionId: string; ordinal: number; revisionId: string; type: string; purpose: string; skill: string; prompt: string }
-export const fetchTutorSlots = () => send("GET", "/api/v1/tutor/slots", anyOf<{ slots: TutorSlot[] }>());
+export interface TutorThread {
+  slotId: string; messages: TutorMessage[]; pendingJobs: number;
+  /** kinds of AI answers still being written ("explain_ru", "more_examples", "question") */
+  pendingKinds?: string[];
+}
+export interface TutorSlot { slotId: string; sessionId: string; ordinal: number; revisionId: string; type: string; purpose: string; skill: string; prompt: string; outcome: "correct" | "incorrect" | "idk" | "pending" | "skipped" | string; at: string | null }
+export const fetchTutorSlots = (filter: "all" | "mistakes" = "all") => send("GET", `/api/v1/tutor/slots?filter=${filter}`, anyOf<{ slots: TutorSlot[] }>());
 export const fetchTutorThread = (slotId: string) => send("GET", `/api/v1/tutor/threads/${slotId}`, anyOf<TutorThread>());
 export const askTutor = (body: { sessionId: string; slotId: string; kind: "why" | "explain_ru" | "more_examples" | "question"; question?: string }) => send("POST", "/api/v1/tutor", anyOf<{ threadId: string; jobId: string | null; messages: TutorMessage[] }>(), body);
-export const fetchAgentTask = (kind: "session" | "exercise" | "batch" | "findings" | "coverage" | "progress" | "lessons", id?: string) => send("GET", `/api/v1/tutor/agent-task?kind=${kind}${id ? `&id=${encodeURIComponent(id)}` : ""}`, anyOf<{ text: string }>());
+export const fetchAgentTask = (kind: "session" | "exercise" | "batch" | "findings" | "coverage" | "progress" | "lessons" | "vocabulary", id?: string) => send("GET", `/api/v1/tutor/agent-task?kind=${kind}${id ? `&id=${encodeURIComponent(id)}` : ""}`, anyOf<{ text: string }>());
+
+// ---- Vocabulary Practice, XP tracks, vocabulary coverage and analytics (vocabulary TZ) ----
+export interface TrackProgress { track: "grammar" | "vocabulary"; total: number; level: number; withinLevel: number; threshold: number; ruleVersion: string }
+export const fetchActivityProgress = () => send("GET", "/api/v1/activity-progress", typed<{ grammar: TrackProgress; vocabulary: TrackProgress }>());
+export interface VocabPracticeStatus { taskCount: number; available: number; freshAvailable?: number; repeatsAvailable?: number; repeatStock?: number; wordsWithContexts: number; words: number; learned: number; approvedForWords: number; draftsNotReleased: number; shortage: { available: number; requested: number; message: string } | null; activeSessionId: string | null }
+export const fetchVocabPractice = () => send("GET", "/api/v1/vocabulary/practice", typed<VocabPracticeStatus>());
+export const createVocabSession = (count?: number) =>
+  send("POST", "/api/v1/vocabulary/sessions", CreateSessionResponseSchema, { timezone: Intl.DateTimeFormat().resolvedOptions().timeZone, ...(count ? { count } : {}) });
+export interface VocabCoverageWord { lemma: string; entryId: string; learned: boolean; approved: number; available: number; shown: number; notReleased: number; families: Record<string, number>; streak?: number; recentMisses?: number; dueNow?: boolean; freshLeft?: number }
+export const fetchVocabCoverage = () => send("GET", "/api/v1/vocabulary/coverage", typed<{ words: VocabCoverageWord[]; exercisesForOtherWords: number; sessionSize: number; available: number; warning: string | null }>());
+export interface Rate { correct: number; total: number; rate: number | null; insufficient: boolean }
+export interface VocabAnalytics {
+  version: string;
+  window: { days: number | null; since: string | null; timezone: string };
+  minSample: number;
+  weakMinMisses: number;
+  xp: TrackProgress;
+  overall: Rate & { assisted: number; pending: number; skipped: number };
+  families: Record<"recognition" | "guided_recall" | "collocation", Rate & { assisted: number; pending: number }>;
+  series: Array<{ date: string; correct: number; total: number; xp: number }>;
+  growth: { series: Array<{ date: string; added: number; learned: number }>; learnedNow: number; learnedWithoutDate: number };
+  encounters: { uniqueWordsShown: number; displays: number; bankWords: number; bankContexts: number };
+  weak: Array<{ lemma: string; entryId: string | null; attempts: number; misses: number; firstSeen: string; lastSeen: string; lastResult: string | null; example: string | null }>;
+  words: Array<{ lemma: string; attempts: number; misses: number; lastSeen: string; lastResult: string | null }>;
+  retention: Rate;
+  repeats?: { count: number; correct: number; miss: number; assisted: number; pending: number };
+}
+export const fetchVocabAnalytics = (days: "7" | "30" | "90" | "all") =>
+  send("GET", `/api/v1/analytics/vocabulary?days=${days}&timezone=${encodeURIComponent(Intl.DateTimeFormat().resolvedOptions().timeZone)}`, typed<VocabAnalytics>());
+/** components that change XP (a finished task) announce it so the header refreshes at once */
+export const announceXp = () => window.dispatchEvent(new Event("el:xp"));

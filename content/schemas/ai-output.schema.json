@@ -294,6 +294,58 @@
         "reason_code",
         "missing_context"
       ]
+    },
+    {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "schema_version": {
+          "const": "vocabulary-v2"
+        },
+        "entry_id": {
+          "type": "string",
+          "minLength": 1
+        },
+        "translation_ru": {
+          "type": "string",
+          "minLength": 1
+        },
+        "part_of_speech": {
+          "type": "string",
+          "minLength": 1
+        },
+        "example_en": {
+          "type": "string",
+          "minLength": 1
+        },
+        "collocations": {
+          "type": "array",
+          "minItems": 1,
+          "items": {
+            "type": "string",
+            "minLength": 1
+          }
+        },
+        "cefr_level": {
+          "enum": [
+            "A1",
+            "A2",
+            "B1",
+            "B2",
+            "C1",
+            "C2"
+          ]
+        }
+      },
+      "required": [
+        "schema_version",
+        "entry_id",
+        "translation_ru",
+        "part_of_speech",
+        "example_en",
+        "collocations",
+        "cefr_level"
+      ]
     }
   ]
 }

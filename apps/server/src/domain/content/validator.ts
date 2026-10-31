@@ -1,7 +1,7 @@
 import { Ajv2020, type ValidateFunction } from "ajv/dist/2020.js";
 import { readFileSync } from "node:fs";
 import path from "node:path";
-import { DIMENSION_BY_TYPE, type ExerciseType, type PromptUnitFingerprint, type ValidationIssue, type ValidationResult } from "@english-lab/contracts";
+import { DIMENSION_BY_TYPE, VocabularyPracticeMetadataSchema, normaliseVocabularyAnswer, type ExerciseType, type PromptUnitFingerprint, type ValidationIssue, type ValidationResult } from "@english-lab/contracts";
 import { detectProjectRoot } from "../../config.js";
 import { BLANK, contentHashOf, markBlanks } from "./normalize.js";
 import { extractUnits } from "./units.js";
@@ -57,11 +57,13 @@ export function validateExercise(input: unknown, ctx: ValidationContext): Valida
     target_skill: string;
     additional_skills: string[];
     dimension: string;
+    bank_role: string;
     prompt_en: string;
     hints_ru: string[];
     explanation_ru: string;
     provenance: { origin: string; model_tag: string | null; model_digest: string | null };
     payload: Record<string, unknown>;
+    vocabulary?: unknown;
   };
 
   // The generation gateway only ever accepts drafts: a model cannot hand in an approved/validated revision.
@@ -85,6 +87,27 @@ export function validateExercise(input: unknown, ctx: ValidationContext): Valida
   });
 
   const p = ex.payload;
+  if (ex.vocabulary !== undefined) {
+    const result = VocabularyPracticeMetadataSchema.safeParse(ex.vocabulary);
+    if (!result.success) {
+      for (const issue of result.error.issues) err("VOCABULARY_SCHEMA", `/vocabulary/${issue.path.join("/")}`, issue.message);
+    } else {
+      const v = result.data;
+      if (ex.bank_role !== "practice") err("VOCABULARY_ROLE", "/bank_role", "Vocabulary exercises must use the practice bank");
+      if (v.family === "guided_recall") {
+        if (ex.type !== "guided_short_answer") err("VOCABULARY_FORMAT", "/type", "Guided recall requires guided_short_answer");
+        else if (JSON.stringify(v.acceptedAnswers.map(normaliseVocabularyAnswer).sort()) !== JSON.stringify((p.accepted_answers as string[]).map(normaliseVocabularyAnswer).sort()) || v.expectedWords !== p.max_words)
+          err("VOCABULARY_ANSWER_MISMATCH", "/vocabulary", "Reviewed answers and word count must match the grading payload");
+      } else if (ex.type !== "choose_form" && ex.type !== "choose_missing_fragment") {
+        err("VOCABULARY_FORMAT", "/type", "Vocabulary choice requires a choice format");
+      } else {
+        const opts = p.options as Opt[];
+        const sameOptions = opts.length === v.options.length && opts.every((o) => v.options.some((x) => x.id === o.id && x.text === o.text));
+        if (!sameOptions || p.multiple !== false || JSON.stringify(p.accepted_option_ids) !== JSON.stringify([v.acceptedOptionId]))
+          err("VOCABULARY_ANSWER_MISMATCH", "/vocabulary", "Reviewed options and accepted answer must match the grading payload");
+      }
+    }
+  }
   const closedChoice = (options: Opt[], accepted: string[], at: string, multiple: boolean | null) => {
     const ids = options.map((o) => o.id);
     for (const d of dup(ids)) err("DUPLICATE_ID", `${at}/options`, `option id ${d} is used twice`);

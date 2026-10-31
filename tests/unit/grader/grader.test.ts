@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { ClosedFormAssessor, NO_MISTAKE_ID, normalizeAnswerText } from "../../../apps/server/src/domain/content/grader.js";
+import { ClosedFormAssessor, NO_MISTAKE_ID, nearMatch, normalizeAnswerText } from "../../../apps/server/src/domain/content/grader.js";
 import type { AssessContext } from "../../../apps/server/src/domain/attempts/ports.js";
 import { ApiError } from "../../../apps/server/src/errors.js";
 import { fixture, type FixtureName } from "../../fixtures/exercises/load.js";
@@ -100,6 +100,23 @@ describe("free text: exact approved alternative or pending - never wrong by code
     const c = fixture("guided_short_answer");
     c.payload.accepted_answers = [];
     expect(ClosedFormAssessor.assess(ctx("guided_short_answer", text("anything"), { content: c }))).toMatchObject({ verdict: "pending" });
+  });
+
+  it("D64 near match: only a different NAME or NUMBER, everything else word for word, is confirmed for the construction", () => {
+    const melb = ["They are thinking of moving to Melbourne."];
+    const m = nearMatch("They are thinking of moving to Brisbane.", melb, ["thinking of moving"]);
+    expect(m).toMatchObject({ approved: melb[0], expected: ["Melbourne"] });
+    expect(m!.tokens.filter((t) => t.differs).map((t) => t.text)).toEqual(["Brisbane"]);
+    expect(nearMatch("They are thinking of moving to brisbane", melb)).toBeNull(); // not written as a name
+    expect(nearMatch("They are thinking of move to Melbourne", melb)).toBeNull(); // the construction itself differs
+    expect(nearMatch("They are thinking about moving to Sydney", melb)).toBeNull(); // two words differ, one is not a name
+    expect(nearMatch("They are thinking of moving to Perth soon", melb)).toBeNull(); // different length
+    expect(nearMatch("We left in 2019.", ["We left in 2021."])).toMatchObject({ expected: ["2021"] });
+    expect(nearMatch("Anna is thinking of moving to Melbourne", ["Tom is thinking of moving to Melbourne"])).toBeNull(); // the first word is not proof of a name
+    const c = fixture("guided_short_answer");
+    c.payload.accepted_answers = melb;
+    expect(ClosedFormAssessor.assess(ctx("guided_short_answer", text("They are thinking of moving to Brisbane."), { content: c }))).toMatchObject({ verdict: "correct", confirmation: "confirmed", source: "deterministic" });
+    expect(ClosedFormAssessor.assess(ctx("guided_short_answer", text("They are thinking of move to Melbourne."), { content: c }))).toMatchObject({ verdict: "pending" });
   });
 
   it("normalisation keeps negation, numbers and articles", () => {

@@ -20,6 +20,8 @@ import { registerAnalyticsRoutes } from "./routes/analytics.js";
 import { registerReportRoutes } from "./routes/reports.js";
 import { registerBackupRoutes } from "./routes/backups.js";
 import { registerVocabularyRoutes } from "./routes/vocabulary.js";
+import { registerVocabularyPracticeRoutes } from "./routes/vocabularyPractice.js";
+import { registerUiRoutes } from "./routes/ui.js";
 import { registerTutorRoutes } from "./routes/tutor.js";
 import { registerAttemptRoutes } from "./routes/attempts.js";
 import { registerContentRoutes } from "./routes/content.js";
@@ -88,6 +90,8 @@ export async function buildApp(deps: AppDeps): Promise<FastifyInstance> {
   registerReportRoutes(app, db, { now: deps.attempts?.now ?? (() => new Date()), exportsRoot: path.join(config.dataRoot, "exports") });
   const base = { now: deps.attempts?.now ?? (() => new Date()), newId: deps.attempts?.newId ?? randomUUID };
   registerSessionRoutes(app, db, base, { ...(deps.sessions ?? {}), onLease: () => deps.scheduler?.kick(), onSessionEnd: (id) => void deps.stt?.stopForSession(id) });
+  registerVocabularyPracticeRoutes(app, db, base);
+  registerUiRoutes(app);
   registerQueueRoutes(app, db, base, deps.scheduler ?? null);
   registerTutorRoutes(app, db, base, { onQueued: () => deps.scheduler?.kick() });
   if (deps.stt) registerSttRoutes(app, deps.stt);

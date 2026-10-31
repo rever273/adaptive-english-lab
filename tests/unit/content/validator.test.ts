@@ -73,6 +73,26 @@ describe("a model cannot hand in authority", () => {
   });
 });
 
+describe("vocabulary revision metadata", () => {
+  it("is included in the content hash and must agree with the graded options", () => {
+    const base = fixture("choose_form");
+    const p = base.payload as { options: Array<{ id: string; text: string }>; accepted_option_ids: string[] };
+    const vocab = {
+      schemaVersion: "vocabulary-practice-v1",
+      family: "recognition",
+      target: { entryId: "entry", lemma: "publish", senseId: "sense", partOfSpeech: "verb", surfaceForm: "published" },
+      options: p.options.map((o) => ({ ...o, rationaleRu: "Причина выбора." })),
+      acceptedOptionId: p.accepted_option_ids[0],
+    };
+    const item = { ...base, vocabulary: vocab };
+    const original = check(item);
+    expect(original.ok).toBe(true);
+    const changed = check({ ...item, vocabulary: { ...vocab, target: { ...vocab.target, senseId: "other" } } });
+    expect(changed.contentHash).not.toBe(original.contentHash);
+    expect(codes(check({ ...item, vocabulary: { ...vocab, acceptedOptionId: p.options[1]!.id } }))).toContain("VOCABULARY_ANSWER_MISMATCH");
+  });
+});
+
 describe("closed-choice invariants (spec/05 1, 2, 6)", () => {
   it("accepted ids must be options, unique and non-empty; not every option may be accepted", () => {
     expect(codes(check(mutate("choose_form", (c) => (c.payload.accepted_option_ids = ["zzz"]))))).toContain("ACCEPTED_NOT_IN_OPTIONS");

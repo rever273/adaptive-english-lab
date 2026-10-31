@@ -102,15 +102,13 @@ describe("starting diagnostic in a browser", () => {
     expect(formats.filter((f) => f === "detect_error")).toHaveLength(3);
     expect(formats.filter((f) => f === "guided_short_answer" || f === "russian_to_english_short")).toHaveLength(2);
 
-    await page.getByTestId("all-closed").waitFor(T);
-    await page.getByRole("button", { name: /finish|complete/i }).first().click();
-    await page.getByTestId("summary").waitFor(T);
+    await page.getByTestId("summary").waitFor(T); // the last task closes the block and the results open by themselves
     await page.getByTestId("block-review").waitFor(T);
     const review = await page.getByTestId("block-review").innerText();
     expect(review).toContain("Your answers");
     expect(await page.getByTestId("block-review").locator("li").count()).toBe(8);
     expect(review).toMatch(/Not this time/); // the deliberately wrong first answer is explained only now
-    expect(review).toContain("Correct:");
+    expect(review).toContain("Right answer:");
     await shot("diagnostic-4-review-after-block");
 
     // evidence: eight first attempts under purpose diagnostic, none of them practice evidence

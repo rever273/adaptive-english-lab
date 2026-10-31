@@ -4,6 +4,7 @@ import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import { ErrorEnvelopeSchema, ExerciseReportResponseSchema, REVIEW_CHECKLIST_KEYS, SessionBootstrapSchema, type ReviewChecklist } from "../../../packages/contracts/src/index.js";
 import { buildApp } from "../../../apps/server/src/app.js";
 import { approveRevision, isSelectable, publishRelease, registerRevision, submitForReview, submitReview } from "../../../apps/server/src/domain/content/repository.js";
+import { loadCandidates } from "../../../apps/server/src/domain/sessions/bank.js";
 import { uniq } from "../../fixtures/exercises/load.js";
 import { advance, makeEnv, makeSession, one, testConfigFor, type Env } from "../attempts/fixtures.js";
 
@@ -29,6 +30,29 @@ afterAll(async () => {
 
 const deps = () => ({ now: env.deps.now, newId: randomUUID });
 const post = (url: string, payload: unknown, headers: Record<string, string> = {}) => app.inject({ method: "POST", url, payload: payload as object, headers: { host: HOST, origin: ORIGIN, cookie, "x-csrf-token": csrf, ...headers } });
+
+it("blocks the Studio release route for vocabulary and excludes released vocabulary from the grammar bank", async () => {
+  const content = uniq("choose_form", "Vocabulary isolation");
+  content.vocabulary = {
+    schemaVersion: "vocabulary-practice-v1",
+    family: "recognition",
+    target: { entryId: "test-entry", lemma: "publish", senseId: "test-sense", partOfSpeech: "verb", surfaceForm: "published" },
+    options: content.payload.options.map((o: { id: string; text: string }) => ({ ...o, rationaleRu: "Тестовое пояснение." })),
+    acceptedOptionId: content.payload.accepted_option_ids[0],
+  };
+  const revision = registerRevision(env.db, deps(), { content, actor: { type: "agent", id: "author" } });
+  const response = await post("/api/v1/content/releases", { revisionIds: [revision.revisionId], reviewer: "agent:reviewer@1", manifestHash: "a".repeat(64) });
+  expect(response.statusCode).toBe(422);
+  expect(response.json().error.code).toBe("VOCABULARY_PACK_REQUIRED");
+
+  submitForReview(env.db, deps(), revision.revisionId, { type: "agent", id: "reviewer" });
+  const checklist = Object.fromEntries(REVIEW_CHECKLIST_KEYS.map((k) => [k, true])) as ReviewChecklist;
+  submitReview(env.db, deps(), { revisionId: revision.revisionId, reviewer: "agent:reviewer@1", reviewVersion: "v1", contentHash: revision.contentHash, checklist, verdict: "approved" });
+  approveRevision(env.db, deps(), { revisionId: revision.revisionId, actor: { type: "agent", id: "reviewer" } });
+  publishRelease(env.db, deps(), { revisionIds: [revision.revisionId], reviewer: "agent:reviewer@1" });
+  expect(isSelectable(env.db, revision.revisionId)).toBe(true);
+  expect(loadCandidates(env.db, "practice").some((candidate) => candidate.revisionId === revision.revisionId)).toBe(false);
+});
 
 let n = 0;
 function released() {

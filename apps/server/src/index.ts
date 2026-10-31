@@ -17,6 +17,8 @@ import { SttService } from "./domain/stt/sttService.js";
 import { acquireLock, LockError, releaseLock, type LockInfo } from "./lock.js";
 import { openLogStream } from "./logging.js";
 import { getProcessStartTime } from "./processIdentity.js";
+import { regradeNearMatches } from "./domain/attempts/regrade.js";
+import { queueMissingLevels, recoverLegacyVocabularyFailures } from "./domain/vocabulary/repository.js";
 
 // Exit codes are read by scripts/start.mjs.
 const EXIT = { config: 2, lock: 3, port: 4, database: 5, other: 1 } as const;
@@ -162,6 +164,11 @@ async function main(): Promise<void> {
     },
     "started",
   );
+  // D64: written answers that the near-match rule now confirms, and CEFR levels for words saved before levels existed
+  const regraded = regradeNearMatches(db, { now: () => new Date(), newId: randomUUID });
+  const recoveredVocabulary = recoverLegacyVocabularyFailures(db, { now: () => new Date(), newId: randomUUID });
+  const levelJobs = queueMissingLevels(db, { now: () => new Date(), newId: randomUUID });
+  if (regraded + levelJobs + recoveredVocabulary > 0) app.log.info({ regraded, levelJobs, recoveredVocabulary }, "startup follow-ups");
   scheduler.start();
   // Model identity + measured profile; until it succeeds, analysis jobs wait as profile_unknown. Retried while the server runs.
   const prepareAnalysis = async (): Promise<void> => {

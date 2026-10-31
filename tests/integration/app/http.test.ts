@@ -34,7 +34,7 @@ describe("GET /api/v1/health and /capabilities", () => {
     const res = await get("/api/v1/health");
     expect(res.statusCode).toBe(200);
     const h = HealthSchema.parse(res.json());
-    expect(h.db).toMatchObject({ ready: true, schemaVersion: 13, driver: "better-sqlite3", jsonSupport: true });
+    expect(h.db).toMatchObject({ ready: true, schemaVersion: 19, driver: "better-sqlite3", jsonSupport: true });
     expect(h.db.pragmas).toEqual({ journal_mode: "wal", foreign_keys: 1, busy_timeout: 5000, synchronous: 2 });
     expect(h.instanceId).toBe("inst-1");
     expect(h.node.version).toBe(process.version);
@@ -44,8 +44,12 @@ describe("GET /api/v1/health and /capabilities", () => {
     const c = CapabilitiesSchema.parse((await get("/api/v1/capabilities")).json());
     expect(c.ai).toEqual({ ollama: "not_implemented", nimble: "not_implemented", qwen: "not_implemented" });
     expect(c.stt.status).toBe("not_implemented");
-    expect(c.versions.schema).toBe(13);
+    expect(c.versions.schema).toBe(19);
     expect(JSON.stringify(c)).not.toMatch(/token|secret|[A-Z]:\\/i); // no secrets, no paths
+  });
+
+  it("counts the open pages of the tab link (npm start reuses an open tab instead of opening another)", async () => {
+    expect((await get("/api/v1/ui/clients")).json()).toEqual({ open: 0 });
   });
 
   it("sets hardening headers and no-store on API responses", async () => {

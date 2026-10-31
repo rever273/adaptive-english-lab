@@ -10,6 +10,19 @@ interface SlotRow {
   inputPreference: "text" | "voice";
   readingGroupId: string | null;
   questionId: string | null;
+  cohort: string | null;
+}
+
+/** a vocabulary repeat slot (D64) carries `repeat: true` in cohort_json; it reserves only the units never exposed before (the rest of its sentences are already in the ledger) */
+export function repeatOf(cohortJson: string | null): { reason: "missed" | "assisted" | "review"; repeatOfSlotId: string | null } | null {
+  if (!cohortJson) return null;
+  try {
+    const c = JSON.parse(cohortJson) as { repeat?: unknown; reason?: string; repeatOfSlotId?: string };
+    if (c.repeat !== true) return null;
+    return { reason: c.reason === "missed" || c.reason === "assisted" ? c.reason : "review", repeatOfSlotId: c.repeatOfSlotId ?? null };
+  } catch {
+    return null;
+  }
 }
 
 /** Derived per-slot state: what the stored events say, never a UI guess (reload restores exactly this). */
@@ -21,7 +34,7 @@ export function getSnapshot(db: Db, sessionId: string): SessionSnapshot {
   const slots = db
     .prepare(
       `SELECT ss.id AS slotId, ss.ordinal AS ordinal, er.type AS format, er.dimension AS dimension, ss.input_preference AS inputPreference,
-              ss.reading_group_id AS readingGroupId, ss.question_id AS questionId
+              ss.reading_group_id AS readingGroupId, ss.question_id AS questionId, ss.cohort_json AS cohort
          FROM session_slots ss JOIN exercise_revisions er ON er.id = ss.exercise_revision_id
         WHERE ss.session_id = ? ORDER BY ss.ordinal`,
     )
@@ -58,12 +71,28 @@ export function getSnapshot(db: Db, sessionId: string): SessionSnapshot {
           )
           .get(slot.slotId, att.last) as { verdict: string; confirmation: string } | undefined) ?? null;
     }
-    return { ...slot, state, attempts: att?.n ?? 0, latest };
+    const { cohort, ...rest } = slot;
+    const rep = repeatOf(cohort);
+    return { ...rest, state, attempts: att?.n ?? 0, latest, ...(rep ? { repeat: { reason: rep.reason } } : {}) };
   });
-  return { sessionId: s.id, status: s.status, purpose: s.purpose, taskCount: slots.length, timezone: s.timezone, createdAt: s.createdAt, endedAt: s.endedAt, progress: { closed, total: slots.length }, slots: out };
+  return { sessionId: s.id, status: s.status, purpose: s.purpose, taskCount: slots.length, timezone: s.timezone, createdAt: s.createdAt, endedAt: s.endedAt, progress: { closed, total: slots.length }, slots: out, category: sessionCategory(db, s.id) };
 }
 
-export function currentSessionId(db: Db): string | null {
-  const r = db.prepare("SELECT id FROM sessions WHERE status = 'active' ORDER BY created_at DESC, rowid DESC LIMIT 1").get() as { id: string } | undefined;
+export type SessionCategory = "grammar" | "vocabulary";
+/** every session without a vocabulary_sessions row is a grammar session (older sessions included) */
+export const sessionCategory = (db: Db, sessionId: string): SessionCategory => (db.prepare("SELECT 1 FROM vocabulary_sessions WHERE session_id = ?").get(sessionId) ? "vocabulary" : "grammar");
+
+const CATEGORY_SQL = "(CASE WHEN EXISTS (SELECT 1 FROM vocabulary_sessions v WHERE v.session_id = sessions.id) THEN 'vocabulary' ELSE 'grammar' END)";
+
+/** the active session; with a category, only one of that kind (Grammar Practice never resumes a vocabulary session, and back) */
+export function currentSessionId(db: Db, category?: SessionCategory): string | null {
+  const r = (category
+    ? db.prepare(`SELECT id FROM sessions WHERE status = 'active' AND ${CATEGORY_SQL} = ? ORDER BY created_at DESC, rowid DESC LIMIT 1`).get(category)
+    : db.prepare("SELECT id FROM sessions WHERE status = 'active' ORDER BY created_at DESC, rowid DESC LIMIT 1").get()) as { id: string } | undefined;
   return r?.id ?? null;
+}
+
+/** the last finished session of a category */
+export function recentSessionId(db: Db, category: SessionCategory): { id: string; status: "completed" | "ended_early" } | null {
+  return (db.prepare(`SELECT id, status FROM sessions WHERE status IN ('completed','ended_early') AND ${CATEGORY_SQL} = ? ORDER BY ended_at DESC, rowid DESC LIMIT 1`).get(category) as { id: string; status: "completed" | "ended_early" } | undefined) ?? null;
 }

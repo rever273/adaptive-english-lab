@@ -12,7 +12,8 @@ export const AUTO_STOP_SECONDS = 20; // a short sentence; the server accepts up 
 export type VoiceState =
   | { phase: "idle" }
   | { phase: "preparing" }
-  | { phase: "recording"; seconds: number }
+  /** level: loudness of the last audio chunk, 0..1, so the learner can see the microphone hears them */
+  | { phase: "recording"; seconds: number; level: number }
   | { phase: "transcribing" }
   | { phase: "draft"; draftId: string; text: string }
   | { phase: "unavailable"; message: string };
@@ -40,7 +41,7 @@ export function toPcm16k(chunks: Float32Array[], sourceRate: number): Int16Array
 interface Capture {
   stop: () => Promise<Int16Array>;
 }
-async function startCapture(onTick: (seconds: number) => void): Promise<Capture> {
+async function startCapture(onTick: (seconds: number, level: number) => void): Promise<Capture> {
   const stream = await navigator.mediaDevices.getUserMedia({ audio: { channelCount: 1, echoCancellation: true, noiseSuppression: true } });
   let ctx: AudioContext | undefined;
   try {
@@ -58,7 +59,10 @@ async function startCapture(onTick: (seconds: number) => void): Promise<Capture>
   node.port.onmessage = (e: MessageEvent<Float32Array>) => {
     chunks.push(e.data);
     samples += e.data.length;
-    onTick(samples / ctx.sampleRate);
+    let sum = 0;
+    for (let i = 0; i < e.data.length; i++) sum += e.data[i]! * e.data[i]!;
+    // RMS mapped so that normal speech fills most of the meter
+    onTick(samples / ctx.sampleRate, Math.min(1, Math.sqrt(sum / Math.max(1, e.data.length)) * 6));
   };
   src.connect(node);
   return {
@@ -79,9 +83,19 @@ export interface VoiceController {
   readonly streamId: string | null;
   record: () => Promise<void>;
   stopRecording: () => Promise<void>;
+  /** hold-to-talk (key M): press starts a fresh recording, release stops it and starts the transcription; a new press rewrites the text */
+  holdStart: () => void;
+  holdEnd: () => void;
+  /** start speech recognition in the background (a voice task is on screen), so recording starts at once */
+  prepare: () => void;
   /** discard the draft and go back to typing */
   clear: () => void;
 }
+
+/** the card may still be busy with a background model for a few seconds: these answers mean "wait", not "failed" */
+const WAIT_CODES = new Set(["STT_PREPARING", "STT_BUSY"]);
+const WAIT_LIMIT_MS = 60_000;
+const pause = (ms: number) => new Promise((r) => setTimeout(r, ms));
 
 const friendly = (e: unknown): string => {
   if (e instanceof ApiRequestError) return e.message;
@@ -94,6 +108,10 @@ export function useVoice(sessionId: string | null, tabId: string, enabled: boole
   const stream = useRef<string | null>(null);
   const capture = useRef<Capture | null>(null);
   const generation = useRef(0);
+  const stateRef = useRef(state);
+  stateRef.current = state;
+  /** the key was released before the microphone was ready: stop as soon as it is */
+  const released = useRef(false);
   const sessionRef = useRef(sessionId);
   sessionRef.current = sessionId;
 
@@ -123,6 +141,10 @@ export function useVoice(sessionId: string | null, tabId: string, enabled: boole
     try {
       const pcm = await cap.stop();
       if (!id || current !== generation.current) return;
+      if (pcm.length < TARGET_RATE * 0.35) {
+        setState({ phase: "unavailable", message: "That was too short. Hold the key (or the button) while you speak, then let go." });
+        return;
+      }
       const r = await sttAudio(id, pcm);
       if (current !== generation.current) return;
       setState({ phase: "draft", draftId: r.draftId, text: r.text });
@@ -133,22 +155,49 @@ export function useVoice(sessionId: string | null, tabId: string, enabled: boole
     }
   }, [release]);
 
+  /** opens the server-side voice session, waiting (not failing) while the card is still being freed */
+  const opening = useRef<Promise<void> | null>(null);
+  const open = useCallback(async (current: number) => {
+    if (stream.current) return;
+    if (opening.current) return opening.current;
+    opening.current = (async () => {
+      const deadline = Date.now() + WAIT_LIMIT_MS;
+      for (;;) {
+        try {
+          const id = (await sttStart(sessionRef.current!, tabId)).streamId;
+          if (current !== generation.current) {
+            void sttStop(id).catch(() => undefined);
+            return;
+          }
+          stream.current = id;
+          return;
+        } catch (e) {
+          if (!(e instanceof ApiRequestError && WAIT_CODES.has(e.code)) || Date.now() > deadline || current !== generation.current) throw e;
+          await pause(1500);
+        }
+      }
+    })().finally(() => {
+      opening.current = null;
+    });
+    return opening.current;
+  }, [tabId]);
+
+  const prepare = useCallback(() => {
+    if (!enabled || !sessionRef.current || stream.current) return;
+    void open(generation.current).catch(() => undefined); // a failure shows when the learner presses the button
+  }, [enabled, open]);
+
   const record = useCallback(async () => {
     if (!enabled || !sessionRef.current) return;
     const current = generation.current;
+    released.current = false; // a key released before this point is recorded by holdEnd after the call
     setState({ phase: "preparing" });
     try {
-      if (!stream.current) {
-        const id = (await sttStart(sessionRef.current, tabId)).streamId;
-        if (current !== generation.current) {
-          void sttStop(id).catch(() => undefined);
-          return;
-        }
-        stream.current = id;
-      }
-      const cap = await startCapture((seconds) => {
+      await open(current);
+      if (current !== generation.current || !stream.current) return;
+      const cap = await startCapture((seconds, level) => {
         if (current !== generation.current) return;
-        setState({ phase: "recording", seconds });
+        setState({ phase: "recording", seconds, level });
         if (seconds >= AUTO_STOP_SECONDS) void finish();
       });
       if (current !== generation.current) {
@@ -156,14 +205,15 @@ export function useVoice(sessionId: string | null, tabId: string, enabled: boole
         return;
       }
       capture.current = cap;
-      setState({ phase: "recording", seconds: 0 });
+      setState({ phase: "recording", seconds: 0, level: 0 });
+      if (released.current) void finish(); // let go while the microphone was starting
     } catch (e) {
       if (current !== generation.current) return;
       capture.current = null;
       release();
       setState({ phase: "unavailable", message: friendly(e) });
     }
-  }, [enabled, tabId, finish, release]);
+  }, [enabled, open, finish, release]);
 
   return {
     state,
@@ -171,7 +221,17 @@ export function useVoice(sessionId: string | null, tabId: string, enabled: boole
       return stream.current;
     },
     record,
+    holdStart: () => {
+      const phase = stateRef.current.phase;
+      if (phase === "preparing" || phase === "recording" || phase === "transcribing") return; // one recording at a time
+      void record();
+    },
+    holdEnd: () => {
+      released.current = true;
+      if (capture.current) void finish();
+    },
     stopRecording: finish,
+    prepare,
     clear: () => setState({ phase: "idle" }),
   };
 }

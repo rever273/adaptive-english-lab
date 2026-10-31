@@ -110,7 +110,7 @@ export function revealSlot(db: Db, deps: SessionDeps, sessionId: string, slotId:
 
       const already = db.prepare("SELECT 1 FROM session_events WHERE slot_id = ? AND event_type = 'reveal'").get(slotId) !== undefined;
       if (!already) {
-        recheckDiscovery(db, deps, sessionId, slot);
+        if (!db.prepare("SELECT 1 FROM vocabulary_sessions WHERE session_id = ?").get(sessionId)) recheckDiscovery(db, deps, sessionId, slot);
         slot = loadSlot(db, slotId); // the slot may have been replaced
         const group = slot.readingGroupId
           ? (db.prepare("SELECT id FROM session_slots WHERE session_id = ? AND reading_group_id = ? ORDER BY ordinal").all(sessionId, slot.readingGroupId) as Array<{ id: string }>).map((r) => r.id)

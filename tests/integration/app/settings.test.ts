@@ -2,7 +2,7 @@
 import type { FastifyInstance } from "fastify";
 import { randomUUID } from "node:crypto";
 import { afterEach, describe, expect, it } from "vitest";
-import { SessionBootstrapSchema } from "../../../packages/contracts/src/index.js";
+import { SessionBootstrapSchema, vocabularyNewWordsPerSession, vocabularyTaskCount } from "../../../packages/contracts/src/index.js";
 import { buildApp } from "../../../apps/server/src/app.js";
 import { freePort, testConfig } from "../helpers.js";
 import { makeEnv, rows, type Env } from "../attempts/fixtures.js";
@@ -30,6 +30,7 @@ describe("settings over HTTP", () => {
     const first = (await call("GET")).json();
     expect(first.revision).toBe(1);
     expect(first.values).toMatchObject({ taskCount: 18, weakRatio: 0.65, voiceTarget: 2 });
+    expect(vocabularyTaskCount(first.values)).toBe(8);
 
     const saved = await call("POST", { taskCount: 12, voiceTarget: 1 });
     expect(saved.statusCode).toBe(200);
@@ -43,5 +44,21 @@ describe("settings over HTTP", () => {
     const revs = rows<{ revision: number; v: string }>(env.db, "SELECT revision, values_json AS v FROM settings_revisions ORDER BY revision");
     expect(revs.map((r) => r.revision)).toEqual([1, 2]);
     expect(JSON.parse(revs[0]!.v).taskCount).toBe(18); // the first revision is untouched
+    expect(JSON.parse(revs[0]!.v).vocabularyTaskCount).toBeUndefined();
+    expect((await call("POST", { vocabularyTaskCount: 4 })).statusCode).toBe(400);
+    expect((await call("POST", { vocabularyTaskCount: 11 })).statusCode).toBe(400);
+    const vocabularySaved = await call("POST", { vocabularyTaskCount: 5 });
+    expect(vocabularySaved.statusCode).toBe(200);
+    expect(vocabularySaved.json().values.vocabularyTaskCount).toBe(5);
+    expect((await call("POST", { vocabularyTaskCount: 10 })).json().values.vocabularyTaskCount).toBe(10);
+    // TASK_020: new words per vocabulary session, optional, 1..10, default 4; older revisions do not have it
+    expect(vocabularyNewWordsPerSession(first.values)).toBe(4);
+    expect(JSON.parse(revs[0]!.v).vocabularyNewWordsPerSession).toBeUndefined();
+    expect((await call("POST", { vocabularyNewWordsPerSession: 0 })).statusCode).toBe(400);
+    expect((await call("POST", { vocabularyNewWordsPerSession: 11 })).statusCode).toBe(400);
+    const newWords = await call("POST", { vocabularyNewWordsPerSession: 2 });
+    expect(newWords.statusCode).toBe(200);
+    expect(newWords.json().values.vocabularyNewWordsPerSession).toBe(2);
+    expect(vocabularyNewWordsPerSession((await call("GET")).json().values)).toBe(2);
   });
 });

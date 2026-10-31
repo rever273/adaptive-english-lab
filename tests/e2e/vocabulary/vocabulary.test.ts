@@ -56,7 +56,7 @@ describe("vocabulary in a browser", () => {
 
     // select the first long-enough word inside the exercise, as a learner would with the mouse
     const word = await page.evaluate(() => {
-      const root = document.querySelector('[data-testid="slot"]')!;
+      const root = document.querySelector('[data-testid="slot"] [data-word-area]')!;
       const walker = document.createTreeWalker(root, NodeFilter.SHOW_TEXT);
       for (let n = walker.nextNode(); n; n = walker.nextNode()) {
         const m = /[A-Za-z]{6,}/.exec(n.textContent ?? "");

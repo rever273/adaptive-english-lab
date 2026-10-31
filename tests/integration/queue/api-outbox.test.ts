@@ -91,6 +91,13 @@ describe("jobs / gpu / actions / events API", () => {
     const list = (await get("/api/v1/jobs")).json() as { jobs: Array<{ id: string; kind: string; state: string; progress: { done: number; total: number } | null; hasResult: boolean }> };
     expect(list.jobs).toHaveLength(1);
     expect(list.jobs[0]).toMatchObject({ id: j.id, kind: "generation", state: "queued", progress: { done: 3, total: 10 }, hasResult: false });
+    // the whole queue is counted and the list can be paged (the page loads more as it is scrolled)
+    enqueue(env.db, deps(), { kind: "generation", payload: {}, idempotencyKey: "g2" });
+    enqueue(env.db, deps(), { kind: "generation", payload: {}, idempotencyKey: "g3" });
+    const paged = (await get("/api/v1/jobs?limit=2&offset=1")).json() as { jobs: unknown[]; counts: Record<string, number>; total: number };
+    expect(paged).toMatchObject({ counts: { queued: 3 }, total: 3 });
+    expect(paged.jobs).toHaveLength(2);
+    expect(((await get("/api/v1/jobs?limit=2&offset=2")).json() as { jobs: unknown[] }).jobs).toHaveLength(1);
     expect((await get("/api/v1/jobs?state=nonsense")).statusCode).toBe(400);
     expect(((await get("/api/v1/jobs?state=completed")).json() as { jobs: unknown[] }).jobs).toEqual([]);
 

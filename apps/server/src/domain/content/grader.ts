@@ -24,6 +24,46 @@ export function normalizeAnswerText(text: string): string {
 /** What is actually compared: the normalised text, case-folded (D62: capital letters never decide correctness). */
 export const answerKey = (text: string): string => normalizeAnswerText(text).toLocaleLowerCase("en");
 
+/**
+ * D64 "near match": the answer is word for word an approved alternative except for one or two NAMES or NUMBERS (a city, a person, a
+ * year), e.g. "...moving to Brisbane" for "...moving to Melbourne". The construction the task tests is then shown to be right, and the
+ * different detail is a content slip, not a grammar error. Deliberately narrow: the same number of words, every other word identical
+ * (case-insensitive), the replaced approved word is a capitalised non-initial name (or a number) and is not part of a target marker, and the
+ * learner's word is a capitalised name (or a number). Anything else stays pending exactly as before.
+ */
+export interface NearMatch {
+  approved: string;
+  /** the learner's words, with the differing ones marked */
+  tokens: Array<{ text: string; differs: boolean }>;
+  /** what the approved sentence has in those places */
+  expected: string[];
+}
+const NAME = /^\p{Lu}[\p{L}'’-]*$/u;
+const NUMBER = /^\d+(?:[.,]\d+)?$/;
+const bare = (t: string) => t.replace(/^[^\p{L}\p{N}]+|[^\p{L}\p{N}]+$/gu, "");
+
+export function nearMatch(text: string, accepted: readonly string[], targetMarkers: readonly string[] = []): NearMatch | null {
+  const given = normalizeAnswerText(text).split(" ").filter(Boolean);
+  const markers = targetMarkers.map((m) => m.toLocaleLowerCase("en"));
+  for (const a of accepted) {
+    const want = normalizeAnswerText(a).split(" ").filter(Boolean);
+    if (want.length !== given.length || want.length < 3) continue;
+    const diff: number[] = [];
+    for (let i = 0; i < want.length; i++) if (bare(want[i]!).toLocaleLowerCase("en") !== bare(given[i]!).toLocaleLowerCase("en")) diff.push(i);
+    if (diff.length === 0 || diff.length > 2) continue;
+    const ok = diff.every((i) => {
+      const w = bare(want[i]!);
+      const g = bare(given[i]!);
+      const names = i > 0 && NAME.test(w) && NAME.test(g);
+      const numbers = NUMBER.test(w) && NUMBER.test(g);
+      return (names || numbers) && !markers.some((m) => m.split(/\s+/).includes(w.toLocaleLowerCase("en")));
+    });
+    if (!ok) continue;
+    return { approved: a, tokens: given.map((t, i) => ({ text: t, differs: diff.includes(i) })), expected: diff.map((i) => bare(want[i]!)) };
+  }
+  return null;
+}
+
 const setKey = (ids: readonly string[]): string => [...new Set(ids)].sort().join("\u0000");
 const confirmed = (verdict: "correct" | "incorrect", rationale: string): AssessmentDecision => ({ verdict, confirmation: "confirmed", source: "deterministic", rationale });
 
@@ -72,6 +112,11 @@ export const ClosedFormAssessor: Assessor = {
         const given = answerKey(raw.text);
         const accepted = (content.payload.accepted_answers as string[]).map(answerKey);
         if (given.length > 0 && accepted.includes(given)) return confirmed("correct", "Exact match with an approved alternative.");
+        // vocabulary guided recall (one word or a short expression): the reviewed alternatives are the complete list, so anything else is a
+        // confirmed miss - no model is asked and a wrong inflection is never accepted (vocabulary TZ, stage A)
+        if ((content as { vocabulary?: { family?: string } }).vocabulary?.family === "guided_recall") return confirmed("incorrect", "Not one of the reviewed answers for this gap.");
+        const near = nearMatch(raw.text, content.payload.accepted_answers as string[], ((content.payload.rubric as { target_markers?: string[] } | undefined)?.target_markers) ?? []);
+        if (near) return confirmed("correct", nearMatchRationale(near));
         return {
           verdict: "pending",
           confirmation: "tentative",
@@ -85,6 +130,9 @@ export const ClosedFormAssessor: Assessor = {
     }
   },
 };
+
+export const nearMatchRationale = (n: NearMatch): string =>
+  `Near match (D64): the construction matches the approved sentence "${n.approved}"; only a name or number differs (${n.tokens.filter((t) => t.differs).map((t) => bare(t.text)).join(", ")} instead of ${n.expected.join(", ")}). Counted for the construction; the different detail is shown to the learner.`;
 
 function needOptions(raw: { kind: string; optionIds?: string[] }): string[] {
   if (raw.kind !== "options" || !raw.optionIds) throw new ApiError(422, "ANSWER_SHAPE_INVALID", "This format needs a selection of option IDs");

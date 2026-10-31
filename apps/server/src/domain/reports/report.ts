@@ -37,7 +37,7 @@ interface Deps {
 }
 
 function progressOf(db: Db): { sessionId: string | null; closed: number; total: number; completedBlueprints: number; publishedBlueprints: number } {
-  const s = (db.prepare("SELECT id FROM sessions WHERE status = 'active' ORDER BY created_at DESC LIMIT 1").get() ?? db.prepare("SELECT id FROM sessions ORDER BY created_at DESC, rowid DESC LIMIT 1").get()) as { id: string } | undefined;
+  const s = (db.prepare("SELECT id FROM sessions s WHERE status = 'active' AND NOT EXISTS (SELECT 1 FROM vocabulary_sessions v WHERE v.session_id = s.id) ORDER BY created_at DESC LIMIT 1").get() ?? db.prepare("SELECT id FROM sessions s WHERE NOT EXISTS (SELECT 1 FROM vocabulary_sessions v WHERE v.session_id = s.id) ORDER BY created_at DESC, rowid DESC LIMIT 1").get()) as { id: string } | undefined;
   let closed = 0;
   let total = 0;
   if (s) {

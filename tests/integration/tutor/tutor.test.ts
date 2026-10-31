@@ -57,14 +57,27 @@ describe("asking the tutor", () => {
     const { sessionId, slots } = await practised();
     const slot = slots[0]!;
     const rule = (JSON.parse(one<{ c: string }>(env!.db, "SELECT content_json AS c FROM exercise_revisions WHERE id = ?", slot.revision).c) as { explanation_ru: string }).explanation_ru;
-    for (const kind of ["why", "explain_ru"] as const) {
-      const r = askTutor(env!.db, sessionDeps(env!), { sessionId, slotId: slot.id, kind });
+    for (let i = 0; i < 2; i++) {
+      const r = askTutor(env!.db, sessionDeps(env!), { sessionId, slotId: slot.id, kind: "why" });
       expect(r.jobId).toBeNull();
       const last = r.messages[r.messages.length - 1]!;
       expect(last).toMatchObject({ role: "assistant", source: "approved_exercise", status: "approved", text: rule });
     }
     expect(rows(env!.db, "SELECT id FROM jobs WHERE kind = 'tutor'")).toEqual([]);
     expect(getThread(env!.db, slot.id).messages.map((m) => m.role)).toEqual(["user", "assistant", "user", "assistant"]);
+  });
+
+  it("D64: 'Explain in Russian' is a longer AI explanation (a queued job), and pressing it again while it waits queues nothing new", async () => {
+    const { sessionId, slots } = await practised();
+    const slot = slots[0]!;
+    const first = askTutor(env!.db, sessionDeps(env!), { sessionId, slotId: slot.id, kind: "explain_ru" });
+    expect(first.jobId).not.toBeNull();
+    const again = askTutor(env!.db, sessionDeps(env!), { sessionId, slotId: slot.id, kind: "explain_ru" });
+    expect(again.jobId).toBe(first.jobId);
+    const more = askTutor(env!.db, sessionDeps(env!), { sessionId, slotId: slot.id, kind: "more_examples" });
+    expect(askTutor(env!.db, sessionDeps(env!), { sessionId, slotId: slot.id, kind: "more_examples" }).jobId).toBe(more.jobId);
+    expect(rows(env!.db, "SELECT id FROM jobs WHERE kind = 'tutor'")).toHaveLength(2);
+    expect(getThread(env!.db, slot.id).messages.filter((m) => m.role === "user")).toHaveLength(2);
   });
 
   it("opens only after the answer: an unanswered slot, a foreign slot, bad input and closed diagnostic blocks are refused", async () => {

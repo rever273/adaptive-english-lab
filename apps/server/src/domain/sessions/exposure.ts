@@ -8,6 +8,7 @@ type Group = "shown" | "answer";
  * BEFORE the learner is sent the slot; `answer` = accepted-answer sentences, written before feedback/show-answer is sent
  * (spec/04). A unit already exposed is left alone: the global ledger never duplicates and never forgets.
  * Returns how many NEW units were exposed.
+ * A vocabulary repeat slot (D64) reserves only the units of its revision that were never exposed, so this works for it unchanged.
  */
 export function exposeUnits(db: Db, deps: SessionDeps, slotId: string, revisionId: string, group: Group): number {
   const roles = group === "shown" ? ["prompt", "option", "passage"] : ["answer"];

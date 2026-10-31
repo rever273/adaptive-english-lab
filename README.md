@@ -44,10 +44,13 @@ Legend: **Working** = implemented and covered by automated tests · **Partial** 
 | First ten lessons | Working | 306 exercises: 10 lessons (three with reading passages), a diagnostic and held-out checks. Written by one AI model and reviewed item by item by another. Loaded with `npm run first10:seed`. |
 | Diagnostics and delayed checks | Working | Optional three-block starting diagnostic without hints; skills you miss there get more room in the lessons. Held-out checks on new sentences at least 7 days after practice. |
 | Local speech-to-text | Working | `faster-whisper` on the GPU; audio stays in memory, the transcript is editable before sending. Tested with synthetic speech only. |
-| Analytics and export | Working | Reports computed by code from raw attempts (first-attempt accuracy, Wilson intervals, series kept apart), CSV/JSON export, external assessment import. |
-| Vocabulary | Working | Save a word from any exercise; the local model drafts a translation, your own edits are never overwritten. No flashcards. |
+| Analytics and export | Working | Reports computed by code from raw attempts (first-attempt accuracy, Wilson intervals, series kept apart), CSV/JSON export, external assessment import. A separate Vocabulary view shows recognition, recall and collocation accuracy with sample sizes, XP by day and words that need another look. |
+| Vocabulary | Working | Save a word from any exercise; the local model drafts a translation and a CEFR level, your own edits are never overwritten. No flashcards. |
+| Vocabulary Practice | Working | Optional short sessions (5–10 tasks, default 8) with your saved words in new sentences: word in context, recall from a clue, collocations. Graded by code; kept apart from grammar Mastery. |
+| Keyboard | Working | Enter answers and continues, 1–9 pick an option, I / H / A / S act, hold M to speak (release to transcribe), Alt+1…7 switch tabs. The key is shown on a small badge on each button. |
+| Levels and XP | Working | Two independent tracks in the header, Grammar and Vocabulary: 10 XP per finished task, a level every 100 XP, tier badges. Activity, not a grade. |
 | Tutor | Working | Explains an answered task (approved rule first, AI drafts labelled as drafts); "Copy Agent Task" for an external coding agent. |
-| Content Studio | Working, gated | Draft generation by a local model with per-item review before publication. The local model has not passed the quality gate yet. |
+| Content Studio | Working, reviewed | Grammar and dictionary-based vocabulary batches (default 50), stock warnings, and one copied agent task to review, repair and publish. Every final revision needs an individual review; corrections need an independent reviewer. |
 | GPU-aware task scheduler | Working | One GPU dispatcher; speech has top priority and pauses background AI work. |
 | Local AI answer analysis (Ollama) | Partial | Versioned prompts and schema-validated output. **Models are not qualified**: AI findings stay tentative and never confirm a grade or change Mastery. |
 
@@ -118,6 +121,10 @@ The Practice page has a **Work with your coding agent** card with two buttons. E
 
 - **Review my results** — the agent reads your recent sessions with read-only exports, checks that every exercise and every grade was right, fixes wrong exercises as new revisions and reports your weak and recurring skills.
 - **Create new lessons** — the agent writes a content pack in `content/packs/<name>/` aimed at your weak skills, checks it with `npm run pack -- check <name>`, has a different model review every item, and publishes only the approved ones with `npm run pack -- publish <name> --review <file>`.
+
+For routine replenishment, open **Content Studio**, choose **Grammar exercises** or **Vocabulary exercises**, and press **Start batch** (50 by default). The local model writes drafts through the shared GPU queue. When generation finishes, press **Copy** under **Task for the reviewing agent** and give the task to your coding agent. It reviews every item, corrects suitable drafts, obtains independent review of final content and publishes accepted exercises. The batch and coverage update automatically; there is no JSON to paste back or manual publishing step. Stock warnings count unused, approved, released exercises and appear before the supply runs out.
+
+The reusable instructions are in `content/agent-workflows/grammar.md` and `vocabulary.md`. `npm run content:agent -- prepare <batch-id>` prepares a compact local packet; `check` validates final candidates and supplies relevant duplicate/held-out comparisons without changing the database; `finalize` applies the complete reviewed result through the running local service in one transaction. Work files stay under git-ignored `var/agent-batches/`. An identical retry returns the saved result, and corrected content preserves the original revision and attempt history. Legacy content packs remain supported.
 
 The agent never edits the database directly; all changes go through the same validation, no-repeat check and per-item review as the built-in lessons.
 

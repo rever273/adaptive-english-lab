@@ -1,5 +1,6 @@
 import { randomUUID } from "node:crypto";
-import { EXERCISE_TYPES, TRIAL_PER_TYPE, TRIAL_SIZE, type CreateBatchRequest } from "@english-lab/contracts";
+import { CreateBatchRequestSchema, EXERCISE_TYPES, TRIAL_PER_TYPE, TRIAL_SIZE } from "@english-lab/contracts";
+import type { z } from "zod";
 import type { Db } from "../../../db/open.js";
 import { ApiError } from "../../../errors.js";
 import { enqueue } from "../../../queue/jobs.js";
@@ -7,8 +8,12 @@ import { ensurePromptVersion } from "../../ai/prompts.js";
 import { draftFormatsText } from "./draftFormats.js";
 import { groupUnits, planBatch, type ItemPlan } from "./plan.js";
 import { taxonomyForNewRevisions } from "../repository.js";
+import { exportVocabulary } from "../../vocabulary/practice.js";
+import { loadBlockedFingerprints, loadCandidates } from "../../sessions/bank.js";
+import { loadBlueprint } from "../../sessions/policy.js";
+import { vocabularyFormat } from "./vocabularyDrafts.js";
 
-export const GENERATION_PROMPT = "generation-v4";
+export const GENERATION_PROMPT = "generation-v5";
 /** a skill is "covered" when it has this many released (selectable) exercises; below it the coverage view reports a deficit (D46) */
 export const TARGET_SELECTABLE_PER_SKILL = 12;
 
@@ -41,22 +46,28 @@ interface ItemRow {
   content_hash: string | null;
   released: number;
   reviews: number;
+  outcome: string | null;
+  job_state: string | null;
 }
 
 const ITEM_SQL = `
-  SELECT bi.id, bi.ordinal, bi.state, bi.plan_json, bi.revision_id, bi.job_id, bi.error_json,
+  SELECT bi.id, bi.ordinal, bi.state, bi.plan_json, COALESCE(bo.final_revision_id, bi.revision_id) AS revision_id, bi.job_id, bi.error_json, bo.action AS outcome, j.state AS job_state,
          s.status AS content_status, er.content_hash AS content_hash,
-         EXISTS (SELECT 1 FROM selectable_revisions sr WHERE sr.revision_id = bi.revision_id) AS released,
-         (SELECT COUNT(*) FROM content_reviews cr WHERE cr.revision_id = bi.revision_id) AS reviews
+         EXISTS (SELECT 1 FROM selectable_revisions sr WHERE sr.revision_id = COALESCE(bo.final_revision_id, bi.revision_id)) AS released,
+         (SELECT COUNT(*) FROM content_reviews cr WHERE cr.revision_id = COALESCE(bo.final_revision_id, bi.revision_id)) AS reviews
     FROM batch_items bi
-    LEFT JOIN latest_content_state s ON s.revision_id = bi.revision_id
-    LEFT JOIN exercise_revisions er ON er.id = bi.revision_id
+    LEFT JOIN jobs j ON j.id = bi.job_id
+    LEFT JOIN batch_outcomes bo ON bo.batch_id = bi.batch_id AND bo.ordinal = bi.ordinal
+    LEFT JOIN latest_content_state s ON s.revision_id = COALESCE(bo.final_revision_id, bi.revision_id)
+    LEFT JOIN exercise_revisions er ON er.id = COALESCE(bo.final_revision_id, bi.revision_id)
    WHERE bi.batch_id = ?
    ORDER BY bi.ordinal`;
 
 function statusOf(r: ItemRow): ItemStatus {
-  if (r.state === "queued") return "queued";
-  if (r.state === "invalid") return "invalid";
+  if (r.outcome === "reject") return "rejected";
+  if (!r.outcome && r.state === "queued" && (r.job_state === "failed" || r.job_state === "cancelled")) return "invalid";
+  if (r.state === "queued" && !r.outcome) return "queued";
+  if (r.state === "invalid" && !r.outcome) return "invalid";
   switch (r.content_status) {
     case "pending_review":
       return "ready_for_review";
@@ -76,11 +87,13 @@ export interface BatchView {
   createdAt: string;
   mode: string;
   purpose: "trial" | "scale";
+  category: "grammar" | "vocabulary";
+  completion: { accepted: number; corrected: number; rejected: number; flagged: number; total: number } | null;
   requestedCount: number;
   promptVersion: string;
   /** actual row counts per reported status; they always sum to requestedCount */
   counts: Record<ItemStatus, number>;
-  /** items that have at least one individual review record */
+  /** items with an individual review or a recorded final agent disposition */
   reviewedItems: number;
   /** nothing is queued: every item has either produced a draft or been quarantined as invalid */
   generationDone: boolean;
@@ -90,7 +103,7 @@ export interface BatchView {
 }
 
 export function getBatch(db: Db, id: string, withItems = true): BatchView {
-  const b = db.prepare("SELECT id, created_at, mode, purpose, requested_count, prompt_version_id FROM batches WHERE id = ?").get(id) as { id: string; created_at: string; mode: string; purpose: "trial" | "scale"; requested_count: number; prompt_version_id: string } | undefined;
+  const b = db.prepare("SELECT id, created_at, mode, purpose, requested_count, prompt_version_id, spec_json FROM batches WHERE id = ?").get(id) as { id: string; created_at: string; mode: string; purpose: "trial" | "scale"; requested_count: number; prompt_version_id: string; spec_json: string } | undefined;
   if (!b) throw new ApiError(404, "BATCH_NOT_FOUND", "Unknown batch");
   const rows = db.prepare(ITEM_SQL).all(id) as ItemRow[];
   const counts = Object.fromEntries(STATUSES.map((s) => [s, 0])) as Record<ItemStatus, number>;
@@ -99,7 +112,7 @@ export function getBatch(db: Db, id: string, withItems = true): BatchView {
   for (const r of rows) {
     const st = statusOf(r);
     counts[st]++;
-    if (r.reviews > 0) reviewed++;
+    if (r.reviews > 0 || r.outcome) reviewed++;
     if (!(st === "invalid" || (r.reviews > 0 && (st === "approved" || st === "released" || st === "flagged" || st === "rejected")))) resolved = false;
   }
   const view: BatchView = {
@@ -107,12 +120,14 @@ export function getBatch(db: Db, id: string, withItems = true): BatchView {
     createdAt: b.created_at,
     mode: b.mode,
     purpose: b.purpose,
+    category: (JSON.parse(b.spec_json) as { category?: "grammar" | "vocabulary" }).category ?? "grammar",
+    completion: (() => { const r = db.prepare("SELECT result_json AS r FROM batch_completions WHERE batch_id = ?").get(id) as { r: string } | undefined; return r ? JSON.parse(r.r) : null; })(),
     requestedCount: b.requested_count,
     promptVersion: b.prompt_version_id,
     counts,
     reviewedItems: reviewed,
     generationDone: counts.queued === 0,
-    resolved,
+    resolved: !!db.prepare("SELECT 1 FROM batch_completions WHERE batch_id = ?").get(id) || resolved,
   };
   if (withItems) {
     view.items = rows.map((r) => ({ ordinal: r.ordinal, status: statusOf(r), plan: JSON.parse(r.plan_json) as ItemPlan, revisionId: r.revision_id, contentHash: r.content_hash, reviews: r.reviews, jobId: r.job_id, error: r.error_json ? JSON.parse(r.error_json) : null, advisory: advisoryOf(db, r.revision_id) }));
@@ -173,29 +188,45 @@ export interface CreatedBatch {
  * Stores the request, its items and one queued job per inference unit in ONE transaction. No model is called here; the dispatcher
  * runs the units later, so closing the browser or restarting the server never loses the batch.
  */
-export function createBatch(db: Db, deps: BatchDeps, request: CreateBatchRequest): CreatedBatch {
+export function createBatch(db: Db, deps: BatchDeps, input: z.input<typeof CreateBatchRequestSchema>): CreatedBatch {
+  const request = CreateBatchRequestSchema.parse(input);
   const purpose: "trial" | "scale" = request.trial ? "trial" : "scale";
   return db
     .transaction((): CreatedBatch => {
-      if (purpose === "scale") {
-        const gate = trialGate(db);
-        if (!gate.passed) throw new ApiError(409, "TRIAL_REQUIRED", `A larger batch needs a fully reviewed 24-draft trial first: ${gate.reason}`, gate);
-      }
+      // Regular replenishment is protected by per-revision independent review, not a trial approval percentage.
       const tax = taxonomyForNewRevisions(db);
       const coverage = new Map<string, number>();
-      for (const r of db.prepare(
-        `SELECT sr.skill_id AS skill, COUNT(*) AS n FROM exercise_skills es
-           JOIN skill_revisions sr ON sr.id = es.skill_revision_id
-           JOIN latest_content_state s ON s.revision_id = es.revision_id AND s.status <> 'rejected'
-          WHERE es.role = 'target' GROUP BY sr.skill_id`,
-      ).all() as Array<{ skill: string; n: number }>) coverage.set(r.skill, r.n);
+      const blocked = loadBlockedFingerprints(db);
+      for (const c of loadCandidates(db, "practice")) {
+        if (c.unitFingerprints.length && c.unitFingerprints.every(f => !blocked.has(f))) coverage.set(c.skillId, (coverage.get(c.skillId) ?? 0) + 1);
+      }
 
       const batchId = deps.newId();
-      const plans = planBatch({ request, taxonomySkills: [...tax.skills], coverage, tag: batchId.slice(0, 8) });
-      const promptVersionId = ensurePromptVersion(db, GENERATION_PROMPT, draftFormatsText());
+      let plans: ItemPlan[];
+      if (request.category === "vocabulary") {
+        if (request.trial) throw new ApiError(422, "NO_VOCABULARY_TRIAL", "Vocabulary replenishment uses regular batches");
+        const words = (exportVocabulary(db).json as { words: Array<{ lemma: string; translationRu: string | null; learned: boolean; newExercises: number }> }).words;
+        if (!words.length) throw new ApiError(409, "DICTIONARY_EMPTY", "Save words in your dictionary before creating vocabulary exercises");
+        words.sort((a, b) => Number(a.learned) - Number(b.learned) || a.newExercises - b.newExercises || a.lemma.localeCompare(b.lemma));
+        plans = Array.from({ length: request.count }, (_, ordinal) => {
+          const word = words[ordinal % words.length]!;
+          const family = (["recognition", "guided_recall", "recognition", "collocation", "guided_recall"] as const)[Math.floor(ordinal / words.length) % 5]!;
+          const type = family === "guided_recall" ? "guided_short_answer" : family === "collocation" ? "choose_form" : "choose_missing_fragment";
+          return { ordinal, type, dimension: family === "guided_recall" ? "production" : "recognition", target_skill: "collocations.natural_phrases", topic: "everyday", context_id: `vocab-${batchId.slice(0, 8)}-${ordinal}`, vocabulary: { lemma: word.lemma, translationRu: word.translationRu, family } };
+        });
+      } else {
+        // Replenish the current lesson's skill pool without changing session selection or its weakness algorithm.
+        const last = db.prepare("SELECT blueprint_revision_id AS id FROM sessions WHERE purpose = 'practice' AND blueprint_revision_id IS NOT NULL ORDER BY created_at DESC, rowid DESC LIMIT 1").get() as { id: string } | undefined;
+        const policy = !request.skills?.length && !request.trial && last ? loadBlueprint(db, last.id).policy : null;
+        const pool = policy?.skillPool ?? [];
+        const lessonTypes = policy ? EXERCISE_TYPES.filter(t => t === "context_reading" ? policy.readingBlocks > 0 && (!pool.length || pool.some(s => /^linking\./.test(s))) : policy.quotas[t] > 0 && (t !== "choose_missing_fragment" || !pool.length || pool.some(s => /^(prepositions|articles|countability|linking|verb_patterns)\./.test(s)))) : undefined;
+        const scoped = { ...request, ...(pool.length ? { skills: pool } : {}), ...(!request.types && lessonTypes?.length ? { types: lessonTypes } : {}) };
+        plans = planBatch({ request: scoped, taxonomySkills: [...tax.skills], coverage, tag: batchId.slice(0, 8) });
+      }
+      const promptVersionId = ensurePromptVersion(db, request.category === "vocabulary" ? "vocabulary-generation-v2" : GENERATION_PROMPT, request.category === "vocabulary" ? JSON.stringify(vocabularyFormat(2)) : draftFormatsText());
       const now = deps.now().toISOString();
       const count = purpose === "trial" ? TRIAL_SIZE : request.count;
-      db.prepare("INSERT INTO batches(id, requested_count, mode, purpose, prompt_version_id, spec_json, created_at) VALUES (?,?,?,?,?,?,?)").run(batchId, count, request.mode, purpose, promptVersionId, JSON.stringify({ skills: request.skills ?? null, types: purpose === "trial" ? [...EXERCISE_TYPES] : (request.types ?? null), perTypeTrial: TRIAL_PER_TYPE }), now);
+      db.prepare("INSERT INTO batches(id, requested_count, mode, purpose, prompt_version_id, spec_json, created_at) VALUES (?,?,?,?,?,?,?)").run(batchId, count, request.mode, purpose, promptVersionId, JSON.stringify({ category: request.category, skills: request.skills ?? null, types: purpose === "trial" ? [...EXERCISE_TYPES] : (request.types ?? null), perTypeTrial: TRIAL_PER_TYPE }), now);
       const insItem = db.prepare("INSERT INTO batch_items(id, batch_id, ordinal, plan_json, state, updated_at) VALUES (?,?,?,?,?,?)");
       for (const p of plans) insItem.run(deps.newId(), batchId, p.ordinal, JSON.stringify(p), "queued", now);
 
@@ -229,7 +260,7 @@ export function coverage(db: Db): CoverageView {
        JOIN skill_revisions sr ON sr.id = es.skill_revision_id
        JOIN exercise_revisions er ON er.id = es.revision_id
        JOIN latest_content_state s ON s.revision_id = er.id
-      WHERE es.role = 'target'`,
+      WHERE es.role = 'target' AND er.bank_role = 'practice' AND json_type(er.content_json, '$.vocabulary') IS NULL`,
   ).all() as Array<{ skill: string; status: string; type: string; released: number }>;
   const skills = new Map([...tax.skills].sort().map((k) => [k, { skill: k, released: 0, approvedUnreleased: 0, inReview: 0, draft: 0, flagged: 0, rejected: 0, deficit: 0 }]));
   const byType: CoverageView["byType"] = {};

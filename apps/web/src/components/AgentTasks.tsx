@@ -24,14 +24,14 @@ export function AgentTasks() {
 
   return (
     <div className="card" data-testid="agent-tasks">
-      <h3>Work with your coding agent</h3>
+      <h3><i className="pi pi-sparkles" aria-hidden="true" /> Work with your coding agent</h3>
       <p className="small muted">Copies a complete task for your agent (for example in VS Code). It contains session IDs and commands only; the agent reads the details itself and has new lessons reviewed by a second model before they are published.</p>
       <div className="actions">
         <button className="btn" onClick={() => void copy("progress")} data-testid="copy-progress">
-          Copy task: review my results
+          <i className="pi pi-check-square" aria-hidden="true" /> Copy task: review my results
         </button>
         <button className="btn" onClick={() => void copy("lessons")} data-testid="copy-lessons">
-          Copy task: create new lessons
+          <i className="pi pi-plus-circle" aria-hidden="true" /> Copy task: create new lessons
         </button>
       </div>
       {error && (

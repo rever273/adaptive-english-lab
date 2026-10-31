@@ -1,5 +1,5 @@
 import { createHash } from "node:crypto";
-import type { CreateSessionRequest, CreateSessionResponse } from "@english-lab/contracts";
+import { voiceTaskCount, type CreateSessionRequest, type CreateSessionResponse } from "@english-lab/contracts";
 import {
   DEFAULT_QUOTAS,
   DISCOVERY_V1,
@@ -44,7 +44,7 @@ export function ensureSelectionVersion(db: Db, deps: SessionDeps, discovery: Dis
 export function solveForBank(args: {
   n: number;
   weakRatio: number;
-  voiceTarget: 0 | 1 | 2;
+  voiceTarget: number;
   policy: BlueprintPolicy;
   seed: string;
   candidates: readonly Candidate[];
@@ -112,7 +112,7 @@ export function createPracticeSession(db: Db, deps: SessionDeps, req: CreateSess
         solveForBank({
           n,
           weakRatio: settings.values.weakRatio,
-          voiceTarget: settings.values.voiceTarget,
+          voiceTarget: voiceTaskCount(settings.values),
           policy: blueprint.policy,
           seed,
           candidates,
@@ -188,7 +188,7 @@ export function createPracticeSession(db: Db, deps: SessionDeps, req: CreateSess
           seed,
           asOf: nowIso,
           quotas,
-          settings: { revision: settings.revision, taskCount: n, weakRatio: settings.values.weakRatio, voiceTarget: settings.values.voiceTarget },
+          settings: { revision: settings.revision, taskCount: n, weakRatio: settings.values.weakRatio, voiceTarget: voiceTaskCount(settings.values) },
           plan: { id: plan.id, revision: plan.revision },
           blueprint: { revisionId: blueprint.id, key: blueprint.key },
           stats: result.stats,
@@ -209,7 +209,7 @@ export function createPracticeSession(db: Db, deps: SessionDeps, req: CreateSess
         JSON.stringify({
           soft: {
             weakRatio: { target: result.stats.weakTarget, actual: result.stats.weakActual },
-            voice: { target: settings.values.voiceTarget, actual: result.stats.voiceActual },
+            voice: { target: voiceTaskCount(settings.values), actual: result.stats.voiceActual },
             vocabularyShare: "not tracked: the exercise schema has no vocabulary flag yet",
             aiItShare: "not tracked: the exercise schema has no topic-domain flag yet",
             sameSessionRemediation: "not applied: the snapshot is fixed at creation; failures are picked up by the next session",

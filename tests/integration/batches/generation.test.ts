@@ -27,7 +27,7 @@ describe("planning and queuing", () => {
     expect(jobs.every((j) => j.kind === "generation" && j.state === "queued" && j.priority === 3 && j.batch_id === c.batchId)).toBe(true);
     expect(jobs.every((j) => (JSON.parse(j.payload_json) as { ordinals: number[] }).ordinals.length <= 2)).toBe(true);
     expect(r.model.calls).toBe(0);
-    expect(one<{ prompt_version_id: string }>(r.env.db, "SELECT prompt_version_id FROM batches").prompt_version_id).toBe("generation-v4");
+    expect(one<{ prompt_version_id: string }>(r.env.db, "SELECT prompt_version_id FROM batches").prompt_version_id).toBe("generation-v5");
   });
 
   it("is deterministic, covers the thinnest skills first in adaptive mode and refuses unknown skills", async () => {
@@ -58,7 +58,7 @@ describe("generation through the dispatcher produces DRAFTS only", () => {
     expect(one<{ n: number }>(r.env.db, "SELECT COUNT(*) AS n FROM content_reviews").n).toBe(0);
     // provenance is written by the server from the pinned model, and the exercise belongs to the batch
     const content = JSON.parse(one<{ c: string }>(r.env.db, "SELECT content_json AS c FROM exercise_revisions WHERE id = ?", rev).c) as { provenance: { origin: string; model_tag: string; model_digest: string; prompt_version: string }; status: string; bank_role: string };
-    expect(content).toMatchObject({ status: "draft", bank_role: "practice", provenance: { origin: "qwen", model_tag: "qwen3:8b", prompt_version: "generation-v4" } });
+    expect(content).toMatchObject({ status: "draft", bank_role: "practice", provenance: { origin: "qwen", model_tag: "qwen3:8b", prompt_version: "generation-v5" } });
     expect(content.provenance.model_digest).toMatch(/^[0-9a-f]{64}$/);
     expect(one<{ n: number }>(r.env.db, "SELECT COUNT(*) AS n FROM exercises WHERE source_batch_id = ?", batchId).n).toBe(24);
     expect(r.model.calls).toBe(14);
@@ -117,21 +117,20 @@ describe("generation through the dispatcher produces DRAFTS only", () => {
     await run(r, batchId);
     const b = getBatch(r.env.db, batchId);
     expect(b.counts.invalid).toBe(24);
-    expect(r.model.calls).toBe(28); // 14 units x (first attempt + exactly one repair)
+    expect(r.model.calls).toBe(76); // initial unit attempts and bounded individual retries
     expect(rows(r.env.db, "SELECT state FROM jobs WHERE state <> 'completed'")).toHaveLength(0);
     expect(one<{ n: number }>(r.env.db, "SELECT COUNT(*) AS n FROM exercise_revisions").n).toBe(0);
     expect(JSON.stringify(b.items![0]!.error)).toContain("NOT_JSON");
   });
 
-  it("fewer drafts than requested: ambiguous units are quarantined instead of assigning the wrong ordinal", async () => {
+  it("fewer drafts than requested: retries ambiguous units individually without guessing ordinals", async () => {
     const r = await makeRig();
     const { batchId } = trial(r);
     r.model.behave = (_c, u) => JSON.stringify({ drafts: [goodDraft(u.format, u.items[0]!)] });
     await run(r, batchId);
     const b = getBatch(r.env.db, batchId);
-    expect(b.counts.ready_for_review).toBe(4);
-    expect(b.counts.invalid).toBe(20);
-    expect(JSON.stringify(b.items!.find((i) => i.status === "invalid")!.error)).toContain("MISSING_OUTPUT");
+    expect(b.counts.ready_for_review).toBe(24);
+    expect(b.counts.invalid).toBe(0);
   });
 
   it("a repair that succeeds is accepted", async () => {
@@ -169,8 +168,8 @@ describe("crash, retry and duplicate delivery", () => {
     expect(JSON.parse(failed[0]!.payload_json)).toMatchObject({ ordinals: [8, 9] });
     let b = getBatch(r.env.db, batchId);
     expect(b.counts.ready_for_review).toBe(22); // the other thirteen units are done and intact
-    expect(b.counts.queued).toBe(2); // the failed unit's ordinals are still honestly "queued", not invented
-    expect(b.generationDone).toBe(false);
+    expect(b.counts.invalid).toBe(2); // terminal generation failures are available for agent repair or explicit retry
+    expect(b.generationDone).toBe(true);
 
     failing = false;
     const before = rows<{ revision_id: string }>(r.env.db, "SELECT revision_id FROM batch_items WHERE revision_id IS NOT NULL").map((x) => x.revision_id).sort();
@@ -199,26 +198,26 @@ describe("crash, retry and duplicate delivery", () => {
     expect(getBatch(r.env.db, batchId).counts.ready_for_review).toBe(24);
   });
 
-  it("a drifted model digest stops generation before any model call; items stay queued", async () => {
+  it("a drifted model digest stops generation before any model call; failures are exposed for repair", async () => {
     const r = await makeRig();
     const { batchId } = trial(r);
     r.digest.current = "sha256-other";
     await run(r, batchId);
     expect(r.model.calls).toBe(0);
-    expect(getBatch(r.env.db, batchId).counts.queued).toBe(24);
+    expect(getBatch(r.env.db, batchId).counts.invalid).toBe(24);
     expect(rows<{ error_code: string }>(r.env.db, "SELECT DISTINCT error_code FROM jobs").map((j) => j.error_code)).toEqual(["model_digest_mismatch"]);
   });
 });
 
-describe("the Trial24 gate", () => {
-  it("a larger batch is refused until a fully reviewed trial exists", async () => {
+describe("legacy trial diagnostics and regular replenishment", () => {
+  it("allows regular batches without a trial, retaining historical trial diagnostics", async () => {
     const r = await makeRig();
-    expect(() => createBatch(r.env.db, r.deps, { count: 50, mode: "balanced", trial: false })).toThrow(/trial/i);
+    expect(createBatch(r.env.db, r.deps, { count: 50, mode: "balanced", trial: false }).items).toBe(50);
     const { batchId } = trial(r);
     expect(trialGate(r.env.db).passed).toBe(false);
     await run(r, batchId);
     expect(trialGate(r.env.db).passed).toBe(false); // generated, but not reviewed
-    expect(() => createBatch(r.env.db, r.deps, { count: 50, mode: "balanced", trial: false })).toThrow(/reviewed/);
+    expect(createBatch(r.env.db, r.deps, { count: 50, mode: "balanced", trial: false }).items).toBe(50);
     expect(() => createBatch(r.env.db, r.deps, { count: 20, mode: "balanced", trial: true })).toThrow(/CHECK|24|trial/i);
   });
 });

@@ -28,6 +28,8 @@ export class RunnerError extends Error {
     readonly code: string,
     message: string,
     readonly transient = false,
+    /** Machine-readable validation categories only; never model output or learner text. */
+    readonly diagnosticCodes: readonly string[] = [],
   ) {
     super(message);
   }

@@ -94,13 +94,13 @@ export const getJob = (db: Db, id: string): Job | undefined => {
   return r && toJob(r);
 };
 
-export function listJobs(db: Db, filter: { state?: JobState; kind?: JobKind; limit?: number } = {}): Job[] {
+export function listJobs(db: Db, filter: { state?: JobState; kind?: JobKind; limit?: number; offset?: number } = {}): Job[] {
   const where: string[] = [];
   const params: unknown[] = [];
   if (filter.state) (where.push("state = ?"), params.push(filter.state));
   if (filter.kind) (where.push("kind = ?"), params.push(filter.kind));
-  const sql = `SELECT * FROM jobs ${where.length ? `WHERE ${where.join(" AND ")}` : ""} ORDER BY created_at DESC, rowid DESC LIMIT ?`;
-  return (db.prepare(sql).all(...params, Math.min(filter.limit ?? 100, 100)) as Row[]).map(toJob);
+  const sql = `SELECT * FROM jobs ${where.length ? `WHERE ${where.join(" AND ")}` : ""} ORDER BY created_at DESC, rowid DESC LIMIT ? OFFSET ?`;
+  return (db.prepare(sql).all(...params, Math.min(filter.limit ?? 100, 500), Math.max(0, filter.offset ?? 0)) as Row[]).map(toJob);
 }
 
 /** Append-only job event; the job row mirrors the latest state. Must run inside the caller's transaction. */
@@ -158,7 +158,7 @@ export const iso = (d: Date): string => d.toISOString();
 
 export type JobAction = "pause" | "resume" | "retry" | "cancel";
 
-export function applyAction(db: Db, deps: QueueDeps, id: string, action: JobAction): Job {
+export function applyAction(db: Db, deps: QueueDeps, id: string, action: JobAction, retryReason: "retry_by_user" | "retry_legacy_validation" = "retry_by_user"): Job {
   return db
     .transaction((): Job => {
       const job = getJob(db, id);
@@ -183,7 +183,7 @@ export function applyAction(db: Db, deps: QueueDeps, id: string, action: JobActi
         }
         case "retry": {
           if (job.state !== "failed") throw new ApiError(409, "ILLEGAL_TRANSITION", `Only a failed job can be retried (now ${job.state})`);
-          setState(db, deps, id, "queued", "retry_by_user", { available_at: now, error_code: null, finished_at: null, lease_token: null, heartbeat_at: null, retry_count: 0 });
+          setState(db, deps, id, "queued", retryReason, { available_at: now, error_code: null, finished_at: null, lease_token: null, heartbeat_at: null, retry_count: 0 });
           break;
         }
         case "cancel": {
@@ -274,7 +274,7 @@ export function completeJob(db: Db, deps: QueueDeps, id: string, token: number, 
         iso(deps.now()),
       );
       res.alsoCommit?.(db);
-      setState(db, deps, id, "completed", "result_committed", { finished_at: iso(deps.now()), lease_token: token });
+      setState(db, deps, id, "completed", "result_committed", { finished_at: iso(deps.now()), lease_token: token, error_code: null });
       return { duplicate: false };
     })
     .immediate();
@@ -291,17 +291,19 @@ export const MAX_RETRIES = 3;
 /** Transient retry delays (spec/06: 2 s then 5 s, then the limit is reached). Deterministic: no random jitter, so it is testable. */
 export const RETRY_DELAYS_MS = [2000, 5000, 10000];
 
-export function failOrRetry(db: Db, deps: QueueDeps, id: string, token: number, error: { code: string; transient: boolean }): "queued" | "failed" {
+export function failOrRetry(db: Db, deps: QueueDeps, id: string, token: number, error: { code: string; transient: boolean; diagnosticCodes?: readonly string[] }): "queued" | "failed" {
   return db
     .transaction((): "queued" | "failed" => {
       assertToken(db, id, token);
       const j = getJob(db, id)!;
+      const codes = [...new Set(error.diagnosticCodes ?? [])].filter(c => /^[A-Z][A-Z0-9_]{0,39}$/.test(c)).slice(0, 8);
+      const detail = codes.length ? `|${codes.join(",")}` : "";
       if (error.transient && j.retryCount < MAX_RETRIES) {
         const delay = RETRY_DELAYS_MS[Math.min(j.retryCount, RETRY_DELAYS_MS.length - 1)]!;
-        setState(db, deps, id, "queued", `retry:${error.code}`, { retry_count: j.retryCount + 1, available_at: iso(new Date(deps.now().getTime() + delay)), error_code: error.code, lease_token: null, heartbeat_at: null });
+        setState(db, deps, id, "queued", `retry:${error.code}${detail}`, { retry_count: j.retryCount + 1, available_at: iso(new Date(deps.now().getTime() + delay)), error_code: error.code, lease_token: null, heartbeat_at: null });
         return "queued";
       }
-      setState(db, deps, id, "failed", `failed:${error.code}`, { error_code: error.code, finished_at: iso(deps.now()), lease_token: null, heartbeat_at: null });
+      setState(db, deps, id, "failed", `failed:${error.code}${detail}`, { error_code: error.code, finished_at: iso(deps.now()), lease_token: null, heartbeat_at: null });
       return "failed";
     })
     .immediate();

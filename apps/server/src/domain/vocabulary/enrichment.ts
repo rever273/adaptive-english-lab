@@ -5,7 +5,7 @@ import { RunnerError, type JobRunner, type RunnerContext, type RunnerOutput } fr
 import { upsertModelVersion } from "../attempts/transcripts.js";
 import type { ChatClient } from "../ai/clients.js";
 import { AI_CONFIG_V2, MEASURED_ADDITIONAL_PEAK_MIB, configHashOf } from "../ai/config.js";
-import { VOCABULARY_SYSTEM_V1, ensurePromptVersion } from "../ai/prompts.js";
+import { VOCABULARY_SYSTEM_V3, ensurePromptVersion } from "../ai/prompts.js";
 import { runStructured } from "../ai/structured.js";
 import { MAX_OUTPUT_BYTES, schemaVariant, type Validated, type ValidationIssue } from "../ai/validate.js";
 import { POS_VALUES, VOCAB_PROMPT } from "./repository.js";
@@ -15,12 +15,15 @@ export interface VocabularyPayload {
   entryId: string;
   /** the entry's user_revision when the job was queued */
   expectedUserRevision: number;
+  /** D64: the word already has a draft; only its CEFR level is missing */
+  levelOnly?: boolean;
 }
 export interface VocabularyDraft {
-  schema_version: "vocabulary-v1";
+  schema_version: "vocabulary-v2";
   entry_id: string;
   translation_ru: string;
   part_of_speech: string;
+  cefr_level: "A1" | "A2" | "B1" | "B2" | "C1" | "C2";
   example_en: string;
   collocations: string[];
 }
@@ -29,7 +32,7 @@ export const VOCAB_PARAMS = { numCtx: 4096, temperature: 0.2, seed: 42, numPredi
 const CYRILLIC = /[Ѐ-ӿ]/;
 
 let compiled: ValidateFunction | null = null;
-const validator = (): ValidateFunction => (compiled ??= new Ajv2020({ allErrors: true, strict: true }).compile(schemaVariant("vocabulary-v1")));
+const validator = (): ValidateFunction => (compiled ??= new Ajv2020({ allErrors: true, strict: true }).compile(schemaVariant("vocabulary-v2")));
 
 /** Strict and boring: one JSON document, the schema, the right entry, Russian where Russian belongs, English where English belongs. */
 export function validateVocabularyOutput(text: string, check: { entryId: string; forms: readonly string[] }): Validated<VocabularyDraft> {
@@ -88,7 +91,7 @@ export class VocabularyJobRunner implements JobRunner<VocabularyPayload> {
         .prepare("INSERT OR IGNORE INTO gpu_profiles(id, model_version_id, config_hash, measured_peak_mib, timings_json, validated_at) VALUES (?,?,?,?,?,?)")
         .run((this.o.deps.newId ?? randomUUID)(), id, configHashOf(VOCAB_PARAMS), peak, JSON.stringify({ source: "TASK_002/TASK_008 real measurements (ctx 4096)", note: "additional peak above the desktop baseline" }), this.o.deps.now().toISOString());
     }
-    ensurePromptVersion(this.o.db, VOCAB_PROMPT, JSON.stringify(schemaVariant("vocabulary-v1")));
+    ensurePromptVersion(this.o.db, VOCAB_PROMPT, JSON.stringify(schemaVariant("vocabulary-v2")));
     this.modelVersionId = id;
     return { ok: true };
   }
@@ -107,40 +110,62 @@ export class VocabularyJobRunner implements JobRunner<VocabularyPayload> {
     if (installed !== m.digest) throw new RunnerError("model_digest_mismatch", `installed digest of ${m.tag} differs from the pinned one`, false);
     const e = this.o.db.prepare("SELECT id, lemma, surface_forms_json AS forms FROM vocabulary_entries WHERE id = ?").get(entryId) as { id: string; lemma: string; forms: string } | undefined;
     if (!e) throw new RunnerError("entry_missing", "unknown word", false);
-    if (this.o.db.prepare("SELECT 1 FROM vocabulary_revisions WHERE entry_id = ? AND source = 'model' AND based_on_user_rev = ?").get(entryId, expectedUserRevision)) {
-      return { schemaVersion: "vocabulary-v1", output: { entryId, skipped: "already_drafted" }, metrics: { calls: 0 } };
+    const drafted = this.o.db.prepare("SELECT 1 FROM vocabulary_revisions WHERE entry_id = ? AND source = 'model' AND based_on_user_rev = ?").get(entryId, expectedUserRevision) !== undefined;
+    const hasLevel = this.o.db.prepare("SELECT 1 FROM vocabulary_levels WHERE entry_id = ?").get(entryId) !== undefined;
+    if ((drafted || ctx.job.payload.levelOnly) && hasLevel) {
+      return { schemaVersion: "vocabulary-v2", output: { entryId, skipped: "already_drafted" }, metrics: { calls: 0 } };
     }
+    const writeRevision = !drafted && !ctx.job.payload.levelOnly; // a level-only job never adds a second text draft
     const surface = JSON.parse(e.forms) as string[];
     const forms = matchForms(e.lemma, surface);
-    // up to three real sentences from the approved bank that contain the word (data, never instructions)
+    // up to three real sentences that contain the word (data, never instructions): FIRST the task where the learner met it (D63), then the bank
     const context: string[] = [];
-    for (const r of this.o.db.prepare("SELECT er.type AS type, er.content_json AS c FROM vocabulary_encounters ve JOIN exercise_revisions er ON er.id = ve.revision_id WHERE ve.entry_id = ? AND ve.kind = 'bank' GROUP BY ve.revision_id LIMIT 6").all(entryId) as Array<{ type: string; c: string }>) {
+    for (const r of this.o.db
+      .prepare(
+        "SELECT er.type AS type, er.content_json AS c FROM vocabulary_encounters ve JOIN exercise_revisions er ON er.id = ve.revision_id WHERE ve.entry_id = ? GROUP BY ve.revision_id ORDER BY MAX(ve.kind = 'displayed') DESC, MAX(ve.created_at) DESC LIMIT 6",
+      )
+      .all(entryId) as Array<{ type: string; c: string }>) {
       for (const t of bankTexts(JSON.parse(r.c) as { prompt_en: string; payload: Record<string, any> }, r.type)) {
         if (context.length < 3 && countOccurrences(t, forms) > 0 && t.length <= 240) context.push(t);
       }
     }
-    const user = JSON.stringify({ entry_id: entryId, word: e.lemma, selected_forms: surface, context_sentences: context, allowed_parts_of_speech: POS_VALUES });
+    const user = JSON.stringify({ entry_id: entryId, word: e.lemma, selected_forms: surface, met_in_sentence: context[0] ?? null, context_sentences: context, allowed_parts_of_speech: POS_VALUES });
     const result = await runStructured<VocabularyDraft>({
       client: this.o.chat,
       model: m.tag,
       messages: [
-        { role: "system", content: VOCABULARY_SYSTEM_V1 },
+        { role: "system", content: VOCABULARY_SYSTEM_V3 },
         { role: "user", content: user },
       ],
-      format: schemaVariant("vocabulary-v1"),
-      options: { num_ctx: VOCAB_PARAMS.numCtx, num_predict: VOCAB_PARAMS.numPredict, temperature: VOCAB_PARAMS.temperature, seed: VOCAB_PARAMS.seed },
+      format: schemaVariant("vocabulary-v2"),
+      options: { num_ctx: VOCAB_PARAMS.numCtx, num_predict: VOCAB_PARAMS.numPredict, temperature: VOCAB_PARAMS.temperature, seed: VOCAB_PARAMS.seed + ctx.job.retryCount },
       validate: (text) => validateVocabularyOutput(text, { entryId, forms }),
       signal: ctx.signal,
       sleep: this.o.sleep,
     });
-    if (!result.ok) throw new RunnerError(result.code, result.issues.map((i) => `${i.code}: ${i.message}`).join("; ").slice(0, 400), result.code === "transport_failed");
-    const d = result.value;
+    let d: VocabularyDraft;
+    let exampleOmitted = false;
+    if (!result.ok) {
+      // The response has passed the complete schema and every check except example use of the target word.
+      // Keep the independently validated fields as an explicitly partial draft; never show the invalid example.
+      const raw = result.usage.rawOutputs.at(-1);
+      const checked = raw ? validateVocabularyOutput(raw, { entryId, forms }) : null;
+      if (result.code === "failed_validation" && checked && !checked.ok && checked.issues.length === 1 && checked.issues[0]!.code === "EXAMPLE_WITHOUT_WORD") {
+        const candidate = JSON.parse(raw!) as VocabularyDraft;
+        d = { ...candidate, part_of_speech: candidate.part_of_speech.toLowerCase(), example_en: "" };
+        exampleOmitted = true;
+      } else {
+        throw new RunnerError(result.code, result.issues.map((i) => `${i.code}: ${i.message}`).join("; ").slice(0, 400), result.code === "transport_failed" || result.code === "failed_validation", result.issues.map(i => i.code));
+      }
+    } else d = result.value;
     return {
-      schemaVersion: "vocabulary-v1",
-      output: d,
-      metrics: { calls: result.usage.calls, repaired: result.usage.repaired, stats: result.usage.stats },
+      schemaVersion: exampleOmitted ? "vocabulary-partial-v1" : "vocabulary-v2",
+      output: exampleOmitted ? { ...d, schema_version: "vocabulary-partial-v1", incomplete_fields: ["example_en"], issue_codes: ["EXAMPLE_WITHOUT_WORD"] } : d,
+      metrics: { calls: result.usage.calls, repaired: result.usage.repaired, seed: VOCAB_PARAMS.seed + ctx.job.retryCount, stats: result.usage.stats },
       alsoCommit: (db) => {
         const jr = db.prepare("SELECT id FROM job_results WHERE job_id = ?").get(ctx.job.id) as { id: string };
+        if (!db.prepare("SELECT 1 FROM vocabulary_levels WHERE entry_id = ?").get(entryId)) db.prepare("INSERT INTO vocabulary_levels(id, entry_id, level, source, status, job_result_id, created_at) VALUES (?,?,?,?,?,?,?)").run((this.o.deps.newId ?? randomUUID)(), entryId, d.cefr_level, "model", "draft", jr.id, this.o.deps.now().toISOString());
+        if (!writeRevision) return;
         const next = (db.prepare("SELECT COALESCE(MAX(revision), 0) + 1 AS n FROM vocabulary_revisions WHERE entry_id = ?").get(entryId) as { n: number }).n;
         db.prepare(
           "INSERT INTO vocabulary_revisions(id, entry_id, revision, translation_ru, part_of_speech, example_en, collocations_json, source, status, user_edited, based_on_user_rev, job_result_id, created_at) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?)",

@@ -49,7 +49,7 @@ export interface Candidate {
 export interface SelectionInput {
   n: number;
   weakRatio: number;
-  voiceTarget: 0 | 1 | 2;
+  voiceTarget: number;
   seed: string;
   /** per-format counts for non-reading slots; a reading block replaces recognition slots (see `readingBlocks`) */
   quotas: Readonly<Record<NonReadingFormat, number>>;

@@ -20,7 +20,7 @@ export function loadCandidates(db: Db, bankRole: "practice" | "diagnostic" | "he
          JOIN exercise_revisions er ON er.id = s.revision_id
          JOIN exercise_skills es ON es.revision_id = er.id AND es.role = 'target'
          JOIN skill_revisions sr ON sr.id = es.skill_revision_id
-        WHERE er.bank_role = ?
+        WHERE er.bank_role = ? AND json_type(er.content_json, '$.vocabulary') IS NULL
         ORDER BY er.id`,
     )
     .all(bankRole) as Array<{

@@ -188,7 +188,7 @@ describe("early UX checkpoint (non-release vertical slice) - real browser, real 
     const seen = new Set<string>();
     let idkDone = false, hintDone = false, showDone = false, skipDone = false, pendingDone = false, noMistakeDone = false;
     for (let guard = 0; guard < 18; guard++) {
-      if (await page.getByTestId("all-closed").isVisible().catch(() => false)) break;
+      if (await page.getByTestId("summary").isVisible().catch(() => false)) break;
       const s = await openSlot();
       if (!s) break;
       const first = !seen.has(s.type);
@@ -250,17 +250,15 @@ describe("early UX checkpoint (non-release vertical slice) - real browser, real 
   it("finishes: the summary separates confirmed, IDK, assisted, pending and skipped, and matches the database", async () => {
     // answer anything still open, correctly
     for (let guard = 0; guard < 18; guard++) {
-      if (await page.getByTestId("all-closed").isVisible().catch(() => false)) break;
+      if (await page.getByTestId("summary").isVisible().catch(() => false)) break;
       const s = await openSlot();
       if (!s) break;
       await answerCorrectly(s);
       await visible(page.getByTestId("feedback"));
       await page.getByTestId("continue").click();
     }
-    await visible(page.getByTestId("all-closed"));
+    await visible(page.getByTestId("summary")); // the results open by themselves after the last task
     await shot(page, "09-all-done");
-    await page.getByRole("button", { name: "Finish and see summary" }).click();
-    await visible(page.getByTestId("summary"));
     await shot(page, "10-summary");
     const ui = {
       correct: Number(await page.getByTestId("count-correct").innerText()),
@@ -327,10 +325,9 @@ describe("early UX checkpoint (non-release vertical slice) - real browser, real 
   it("shows the exact shortage when the bank is used up (dashboard payload), with Start disabled", async () => {
     // spend the second session quickly: skip everything, finish
     for (let guard = 0; guard < 18; guard++) {
-      if (await page.getByTestId("all-closed").isVisible().catch(() => false)) break;
+      if (await page.getByTestId("summary").isVisible().catch(() => false)) break;
       await page.getByTestId("skip").click();
     }
-    await page.getByRole("button", { name: "Finish and see summary" }).click();
     await visible(page.getByTestId("summary"));
     await page.getByTestId("done").click();
     await visible(page.getByTestId("shortage"));

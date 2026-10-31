@@ -35,7 +35,7 @@ describe("migration 002 on an existing 001 database", () => {
       appVersion: "t",
       backup: () => createBackup(db!, { backupsDir, kind: "premigration", schemaVersion: currentSchemaVersion(db!), appVersion: "t" }),
     });
-    expect(r).toMatchObject({ applied: [2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13], fromVersion: 1, toVersion: 13 });
+    expect(r).toMatchObject({ applied: [2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16, 17, 18, 19], fromVersion: 1, toVersion: 19 });
     expect(r.premigrationBackup?.schemaVersion).toBe(1);
     const [b] = listBackups(backupsDir);
     expect(verifyBackup(backupsDir, b!)).toEqual({ checksumOk: true, integrity: "ok", foreignKeyViolations: 0 });

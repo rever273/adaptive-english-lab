@@ -46,6 +46,14 @@ export function extractUnits(ex: Exercise): PromptUnitFingerprint[] {
     }
     case "guided_short_answer":
     case "russian_to_english_short": {
+      // a gap-fill prompt (vocabulary guided recall): the prompt with its blank and the sentence restored with every accepted word are units,
+      // so the same sentence can never come back with the gap moved or filled
+      // (only an explicit ___ gap: "starting with: The employee stopped..." stays a free answer)
+      if (/_{2,}/.test(ex.prompt_en)) {
+        add("prompt", ex.prompt_en);
+        for (const a of (p.accepted_answers as string[]) ?? []) add("answer", ex.prompt_en.replace(/_{2,}/, a));
+        break;
+      }
       for (const a of (p.accepted_answers as string[]) ?? []) add("answer", a);
       break;
     }

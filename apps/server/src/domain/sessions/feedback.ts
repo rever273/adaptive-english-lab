@@ -4,6 +4,10 @@ import { ApiError } from "../../errors.js";
 import { exposeUnits } from "./exposure.js";
 import type { SessionDeps } from "./policy.js";
 import type { AnalysisV2 } from "../ai/validate.js";
+import { NO_MISTAKE_ID, answerKey, nearMatch } from "../content/grader.js";
+import { VocabularyPracticeMetadataSchema } from "@english-lab/contracts";
+import { buildPrompt } from "./reveal.js";
+import { lookupWord } from "../vocabulary/repository.js";
 
 type Payload = Record<string, any>;
 
@@ -37,7 +41,55 @@ export function getFeedback(db: Db, deps: SessionDeps, sessionId: string, slotId
   const c = JSON.parse(row.c) as { prompt_en: string; payload: Payload };
   const p = c.payload;
   const prompt = p.questions ? ((p.questions as Array<{ id: string; prompt: string }>).find((x) => x.id === row.q)?.prompt ?? null) : p.sentence ?? p.cue_ru ?? c.prompt_en;
-  return { ...f, prompt };
+  const detail = f.state === "confirmed" && f.verdict === "correct" ? nearMatchOfFirst(db, slotId) : null;
+  const vocabulary = f.state === "closed" || f.state === "skipped" ? null : vocabularyFeedback(db, slotId, c as { vocabulary?: unknown; payload: Payload });
+  return { ...f, prompt, ...(f.state === "closed" ? {} : { yourAnswer: firstAnswerText(db, slotId) }), ...(detail ? { detail } : {}), ...(vocabulary ? { vocabulary } : {}) };
+}
+
+/** vocabulary exercise: the tested word and the reviewed reason for every option (why the right one fits, why each other one does not) */
+function vocabularyFeedback(db: Db, slotId: string, c: { vocabulary?: unknown; payload: Payload }): FeedbackResponse["vocabulary"] | null {
+  const m = VocabularyPracticeMetadataSchema.safeParse(c.vocabulary);
+  if (!m.success) return null;
+  const v = m.data;
+  const first = db.prepare("SELECT raw_answer_json AS raw FROM attempts WHERE slot_id = ? AND attempt_no = 1").get(slotId) as { raw: string | null } | undefined;
+  const chosen = new Set((JSON.parse(first?.raw ?? "null") as { optionIds?: string[] } | null)?.optionIds ?? []);
+  const options = v.family === "guided_recall" ? [] : v.options.map((o) => ({ text: o.text, rationaleRu: o.rationaleRu, correct: o.id === v.acceptedOptionId, chosen: chosen.has(o.id) }));
+  const entry = lookupWord(db, v.target.lemma);
+  const own = entry?.translation.text ? { text: entry.translation.text, source: entry.translation.source === "user" ? ("user" as const) : ("ai_draft" as const) } : v.wordRu ? { text: v.wordRu, source: "exercise" as const } : null;
+  // the sentence as it reads once the gap is filled with the right word
+  const prompt = (c as { prompt_en?: string }).prompt_en ?? "";
+  const filled = v.family === "guided_recall" ? v.acceptedAnswers[0]! : (v.options.find((o) => o.id === v.acceptedOptionId)?.text ?? "");
+  const gap = /_{2,}/.exec(prompt);
+  const sentence = gap ? { before: prompt.slice(0, gap.index), filled, after: prompt.slice(gap.index + gap[0].length), form: v.target.surfaceForm } : null;
+  return { lemma: v.target.lemma, family: v.family, partOfSpeech: v.target.partOfSpeech, translationRu: own?.text ?? null, translationSource: own?.source ?? null, sentence, sentenceRu: v.sentenceRu ?? null, wordRu: v.wordRu ?? null, options };
+}
+
+/** D64: the first written answer is a near match (right construction, a different name/number); null for an exact match or any other format */
+export function nearMatchOfFirst(db: Db, slotId: string) {
+  const a = db.prepare("SELECT t.raw_answer_json AS raw, er.type AS type, er.content_json AS c FROM attempts t JOIN session_slots ss ON ss.id = t.slot_id JOIN exercise_revisions er ON er.id = ss.exercise_revision_id WHERE t.slot_id = ? AND t.attempt_no = 1 AND t.idk = 0").get(slotId) as { raw: string | null; type: string; c: string } | undefined;
+  if (!a || (a.type !== "guided_short_answer" && a.type !== "russian_to_english_short")) return null;
+  const raw = JSON.parse(a.raw ?? "null") as { kind?: string; text?: string } | null;
+  if (raw?.kind !== "text" || typeof raw.text !== "string") return null;
+  const p = (JSON.parse(a.c) as { payload: { accepted_answers: string[]; rubric?: { target_markers?: string[] } } }).payload;
+  if (p.accepted_answers.map(answerKey).includes(answerKey(raw.text))) return null;
+  return nearMatch(raw.text, p.accepted_answers, p.rubric?.target_markers ?? []);
+}
+
+/** The first answer as the learner gave it, in words: option or segment texts as shown, the typed text, "No mistake" or "I don't know". */
+function firstAnswerText(db: Db, slotId: string): string | null {
+  const a = db.prepare("SELECT idk, raw_answer_json AS raw FROM attempts WHERE slot_id = ? ORDER BY attempt_no ASC LIMIT 1").get(slotId) as { idk: number; raw: string | null } | undefined;
+  if (!a) return null;
+  if (a.idk) return "I don't know";
+  const raw = JSON.parse(a.raw ?? "null") as { kind: string; text?: string; optionIds?: string[] } | null;
+  if (!raw) return null;
+  if (raw.kind === "text") return raw.text ?? null;
+  const ids = raw.optionIds ?? [];
+  if (ids.length === 1 && ids[0] === NO_MISTAKE_ID) return "No mistake";
+  const s = db.prepare("SELECT er.type AS format, er.content_json AS c, ss.question_id AS q FROM session_slots ss JOIN exercise_revisions er ON er.id = ss.exercise_revision_id WHERE ss.id = ?").get(slotId) as { format: string; c: string; q: string | null };
+  const shown = buildPrompt(s.format, s.c, s.q, slotId);
+  const items: Array<{ id: string; text: string }> = shown.kind === "choice" ? shown.options : shown.kind === "segments" ? shown.segments : shown.kind === "reading" ? shown.question.options : [];
+  const texts = ids.map((id) => items.find((x) => x.id === id)?.text.trim()).filter((t): t is string => Boolean(t));
+  return texts.length ? texts.join(" / ") : null;
 }
 
 function feedbackCore(db: Db, deps: SessionDeps, sessionId: string, slotId: string): FeedbackResponse {
