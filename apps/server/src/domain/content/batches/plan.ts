@@ -1,5 +1,6 @@
 import { DIMENSION_BY_TYPE, EXERCISE_TYPES, TRIAL_PER_TYPE, TRIAL_SIZE, type CreateBatchRequest, type ExerciseType } from "@english-lab/contracts";
 import { ApiError } from "../../../errors.js";
+import type { CourseMissing } from "./coursePlanning.js";
 
 /** One requested draft: what the generator is asked for. The server, not the model, decides all of these fields. */
 export interface ItemPlan {
@@ -24,6 +25,16 @@ export const TOPICS = ["workplace", "travel", "health", "services", "education",
  * fit the 2048-token output cap (every call was cut off mid-JSON): 2 per call, and 1 for the long reading passages (D47).
  */
 export const unitSizeFor = (type: ExerciseType): number => (type === "context_reading" ? 1 : 2);
+
+/** Generate the actual simulated gaps first, then cycle them for the review margin. */
+export function planCourseMissing(missing: readonly CourseMissing[], count: number, tag: string): ItemPlan[] {
+  if (!missing.length) return [];
+  return Array.from({ length: count }, (_, ordinal) => {
+    const item = missing[ordinal % missing.length]!;
+    const topic = TOPICS[ordinal % TOPICS.length]!;
+    return { ordinal, type: item.type, dimension: DIMENSION_BY_TYPE[item.type], target_skill: item.skill, topic, context_id: `${topic}-${tag}-${ordinal}`, lesson: item.lesson, ...(item.noMistake ? { noMistake: true } : {}) };
+  });
+}
 
 export interface PlanInput {
   request: CreateBatchRequest;

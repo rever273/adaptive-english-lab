@@ -7,6 +7,7 @@ import { NO_MISTAKE_ID } from "../../../apps/server/src/domain/content/grader.js
 import { lessonPlanView } from "../../../apps/server/src/domain/content/batches/lessonNeeds.js";
 import { createBatch } from "../../../apps/server/src/domain/content/batches/repository.js";
 import { replenishmentStock } from "../../../apps/server/src/domain/content/batches/stock.js";
+import { calculateCoursePlan } from "../../../apps/server/src/domain/content/batches/coursePlanning.js";
 import { createPracticeSession } from "../../../apps/server/src/domain/sessions/create.js";
 import { getFeedback } from "../../../apps/server/src/domain/sessions/feedback.js";
 import { finishSession } from "../../../apps/server/src/domain/sessions/finish.js";
@@ -102,7 +103,7 @@ describe("a missed grammar exercise comes back once as a labelled repeat (D68)",
     }
     // the decision record carries the repeat information and the new algorithm id
     const decision = one<{ algorithm_id: string; choices_json: string }>("SELECT algorithm_id, choices_json FROM scheduling_decisions WHERE session_id = ?", second.sessionId);
-    expect(decision.algorithm_id).toBe("grammar-selection-v3");
+    expect(decision.algorithm_id).toBe("grammar-selection-v4");
     expect((JSON.parse(decision.choices_json).slots as Array<{ repeat: unknown }>).filter((x) => x.repeat).length).toBe(repeatSlots.length);
 
     // strict no-repeat for everything that is not a labelled repeat
@@ -194,6 +195,29 @@ describe("a missed grammar exercise comes back once as a labelled repeat (D68)",
 });
 
 describe("replenishment is planned from the next lesson's deficits (D68)", () => {
+  it("counts remaining sessions in course order and consumes shared stock only once without writing", () => {
+    env = openSliceCopy();
+    const first = begin(env, "first");
+    play(first.sessionId, () => "ok");
+    const before = calculateCoursePlan(env.db, env.deps.now());
+    expect(before.sessions).toBe(1);
+    expect(before.missing).toHaveLength(0);
+    const remaining = createPracticeSession(env.db, env.deps, { purpose: "practice", blueprintRevisionId: env.blueprintRevisionId, seed: "remaining", timezone: "Australia/Brisbane" }, { enforceStock: true });
+    expect(remaining.snapshot.taskCount).toBe(18);
+    finishSession(env.db, env.deps, remaining.sessionId, "ended_early");
+    const original = one<{ policy: string }>("SELECT policy_json AS policy FROM blueprint_revisions WHERE id = ?", env.blueprintRevisionId);
+    const bp = randomUUID();
+    env.db.prepare("INSERT INTO blueprints(id, stable_key) VALUES (?,?)").run(bp, "slice-second-l02");
+    env.db.prepare("INSERT INTO blueprint_revisions(id, blueprint_id, revision, policy_json, status, created_at) VALUES (?,?,1,?,'published',?)").run(randomUUID(), bp, original.policy, env.deps.now().toISOString());
+    const changes = one<{ n: number }>("SELECT total_changes() AS n").n;
+    const after = calculateCoursePlan(env.db, env.deps.now());
+    expect(one<{ n: number }>("SELECT total_changes() AS n").n).toBe(changes);
+    expect(after.sessions).toBe(3);
+    expect(after.first).not.toBe(after.last);
+    expect(after.deficit).toBeGreaterThan(before.deficit);
+    expect(after.recommended).toBe(Math.ceil(after.deficit * 1.2));
+    expect(after.missing.some(m => m.lesson === "slice-second-l02")).toBe(true);
+  }, 120_000);
   it("a learner with no practice session gets the first lesson, with numbers per format and the +20% recommendation", () => {
     env = openSliceCopy();
     expect(count("sessions")).toBe(0);
@@ -203,15 +227,16 @@ describe("replenishment is planned from the next lesson's deficits (D68)", () =>
     const view = lessonPlanView(env.db, env.deps.now())!;
     const next = view.lessons[view.nextIndex]!;
     expect(next.key).toBe(key);
-    expect(stock.grammar).toMatchObject({ course: { lessons: view.lessons.length, deficit: view.lessons.reduce((sum, l) => sum + l.deficit, 0), recommended: view.lessons.reduce((sum, l) => sum + l.recommended, 0), sessionsPerLesson: 2 } });
+    const course = calculateCoursePlan(env.db, env.deps.now());
+    expect(stock.grammar).toMatchObject({ course: { lessons: course.lessons, sessions: course.sessions, deficit: course.deficit, recommended: course.recommended, sessionsPerLesson: 2 } });
     const formatSum = next.formats.reduce((a, f) => a + f.deficit, 0);
-    expect((stock.grammar as { recommended: number }).recommended).toBe(Math.ceil(next.deficit * 1.2));
+    const nextMissing = course.missing.filter(item => item.lesson === next.key).length;
+    expect((stock.grammar as { recommended: number }).recommended).toBe(Math.ceil(nextMissing * 1.2));
     expect(next.deficit).toBeGreaterThanOrEqual(formatSum);
     if (stock.grammar.low) {
       const msg = (stock.grammar as { message: string }).message;
-      expect(msg).toContain("needs:");
+      expect(msg).toContain("needs an estimated");
       expect(msg).not.toContain("warning below");
-      for (const f of next.formats.filter((x) => x.deficit > 0)) expect(msg).toContain(`${f.format} ${f.deficit}`);
     }
   });
 

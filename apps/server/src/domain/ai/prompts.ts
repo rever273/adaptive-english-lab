@@ -64,6 +64,16 @@ Additional grammatical policy (apply generally, not as string matching):
 - When repairing invalid JSON, re-evaluate contradictory findings too. Never return an unchanged original as its correction.
 Do not make style-only corrections. Use a specific skill_id that actually describes the grammatical issue.`;
 
+/** v4: a translation or guided answer must also say what the task says; approved_answers give the intended wording (a grammatical sentence with a wrong content word was accepted). */
+export const ANALYSIS_SYSTEM_V4 = ANALYSIS_SYSTEM_V3 + `
+
+Meaning check (only when approved_answers is not empty): after the grammar decision, compare submitted_text with meaning and approved_answers.
+If a content word (noun, verb, adjective, number, place or time) is replaced by a different word so that the sentence no longer says what meaning says,
+the answer is NOT acceptable even when it is grammatical: use incorrect_candidate, reason_code=grammar_violation, with one grammar finding that quotes
+the wrong word and suggests the matching word from approved_answers; explanation_ru says plainly that it is the wrong word for this task.
+(Generic illustration: for a task "I need to renew my licence", the answer "I need to cancel my licence" is incorrect_candidate.)
+Synonyms and other wording that keep the meaning stay acceptable: never reject an answer only because it differs from approved_answers.`;
+
 /**
  * draft-screen-v1 (D49): Nimble reads ONE sentence and says whether it looks wrong. Used only to attach hints to stored drafts for the human
  * reviewer: a key that looks wrong, or a "wrong" option that reads fine. The cut-offs are part of the prompt version; they are not calibrated
@@ -96,7 +106,7 @@ export const NIMBLE_TRIAGE_V2 = {
   reviewThreshold: 0.12,
 } as const;
 
-import { GENERATION_SYSTEM_V2, GENERATION_SYSTEM_V3, GENERATION_SYSTEM_V4, GENERATION_SYSTEM_V5, GENERATION_SYSTEM_V6 } from "../content/batches/draftFormats.js";
+import { GENERATION_SYSTEM_V2, GENERATION_SYSTEM_V3, GENERATION_SYSTEM_V4, GENERATION_SYSTEM_V5, GENERATION_SYSTEM_V6, GENERATION_SYSTEM_V7, GENERATION_SYSTEM_V8, GENERATION_SYSTEM_V9 } from "../content/batches/draftFormats.js";
 import { VOCABULARY_SYSTEM, VOCABULARY_SYSTEM_V2 as VOCABULARY_GENERATION_SYSTEM_V2, VOCABULARY_SYSTEM_V3 as VOCABULARY_GENERATION_SYSTEM_V3, VOCABULARY_SYSTEM_V4 as VOCABULARY_GENERATION_SYSTEM_V4 } from "../content/batches/vocabularyDrafts.js";
 
 export interface PromptDef {
@@ -155,12 +165,16 @@ export const PROMPTS: Record<string, PromptDef> = {
   "generation-v4": { id: "generation-v4", purpose: "generation", template: GENERATION_SYSTEM_V4 },
   "generation-v5": { id: "generation-v5", purpose: "generation", template: GENERATION_SYSTEM_V5 },
   "generation-v6": { id: "generation-v6", purpose: "generation", template: GENERATION_SYSTEM_V6 },
+  "generation-v7": { id: "generation-v7", purpose: "generation", template: GENERATION_SYSTEM_V7 },
+  "generation-v8": { id: "generation-v8", purpose: "generation", template: GENERATION_SYSTEM_V8 },
+  "generation-v9": { id: "generation-v9", purpose: "generation", template: GENERATION_SYSTEM_V9 },
   "draft-screen-v1": { id: "draft-screen-v1", purpose: "triage", template: JSON.stringify(DRAFT_SCREEN_V1) },
   "generation-v3": { id: "generation-v3", purpose: "generation", template: GENERATION_SYSTEM_V3 },
   "generation-v2": { id: "generation-v2", purpose: "generation", template: GENERATION_SYSTEM_V2 },
   "generation-v1": { id: "generation-v1", purpose: "generation", template: GENERATION_SYSTEM_V1 },
   "analysis-v1": { id: "analysis-v1", purpose: "analysis", template: ANALYSIS_SYSTEM_V1 },
   "analysis-v2": { id: "analysis-v2", purpose: "analysis", template: ANALYSIS_SYSTEM_V2 },
+  "analysis-v4": { id: "analysis-v4", purpose: "analysis", template: ANALYSIS_SYSTEM_V4 },
   "analysis-v3": { id: "analysis-v3", purpose: "analysis", template: ANALYSIS_SYSTEM_V3 },
   "triage-v1": { id: "triage-v1", purpose: "triage", template: TRIAGE_SYSTEM_V1 },
   "triage-v2": { id: "triage-v2", purpose: "triage", template: JSON.stringify(NIMBLE_TRIAGE_V2) },
@@ -188,6 +202,8 @@ export interface AnalysisContext {
   /** exercise prompt (English) and the intended meaning (Russian rubric text) */
   prompt: string;
   meaning: string;
+  /** the approved English answers of a translation or guided task (empty for tasks without them) */
+  approvedAnswers?: string[];
   rubric: { target_markers: string[]; acceptable_variation_ru: string; reject_conditions_ru: string };
   submittedText: string;
   targetSkill: string;
@@ -209,6 +225,7 @@ export function buildAnalysisUserMessage(ctx: AnalysisContext): string {
       exercise_revision: { id: ctx.exerciseRevisionId, hash: ctx.contentHash },
       prompt: ctx.prompt,
       meaning: ctx.meaning,
+      ...(ctx.approvedAnswers && ctx.approvedAnswers.length > 0 ? { approved_answers: ctx.approvedAnswers } : {}),
       rubric: ctx.rubric,
       target_skill: ctx.targetSkill,
       additional_skills: ctx.additionalSkills,

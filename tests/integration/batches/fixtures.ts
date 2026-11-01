@@ -45,12 +45,12 @@ export function goodDraft(format: string, item: UnitRequest["items"][number]): R
       return { sentence: `${tag} organiser asked us to listen ___ the safety announcement.`, options: ["to", "for", "at"], correct_index: 0, ...RU_OK };
     case "detect_error":
       return item.sentence_must_be?.startsWith("fully correct")
-        ? { sentence: `${tag} Could you tell me where the nearest tram stop is?`, error_segment: "", correction: "", ...RU_OK }
-        : { sentence: `${tag} He suggested to go to the beach after work.`, error_segment: "to go", correction: `${tag} He suggested going to the beach after work.`, ...RU_OK };
+        ? { sentence: `${tag} Could you tell me where the nearest tram stop is?`, error_words: "", fix_words: "", ...RU_OK }
+        : { sentence: `${tag} He suggested to go to the beach after work.`, error_words: "to go", fix_words: "going", ...RU_OK };
     case "guided_short_answer":
       return { cue_ru: "Сотрудник перестал проверять почту после смены. Начни: The employee stopped…", starter_en: "The employee stopped", accepted_answers: [`The employee stopped checking ${tag} emails after the shift.`, `The employee stopped checking ${tag} email after work.`], meaning_ru: "Сотрудник прекратил проверять почту.", marker_ru: "stop + -ing", reject_ru: "Форма stopped to check не принимается.", ...RU_OK };
     case "russian_to_english_short":
-      return { cue_ru: "Не могли бы вы сказать, когда закрывается библиотека?", accepted_answers: [`Could you tell me when the ${tag} library closes?`], meaning_ru: "Вежливая просьба сообщить время закрытия.", marker_ru: "прямой порядок слов", reject_ru: "Вопросительный порядок внутри придаточной части не принимается.", ...RU_OK };
+      return { cue_ru: "Не могли бы вы сказать, когда закрывается библиотека?", accepted_answers: [`Could you tell me when the ${tag} library closes?`], meaning_ru: "Вежливая просьба сообщить время закрытия.", marker_ru: "прямой порядок слов", reject_ru: "Вопросительный порядок внутри придаточной части не принимается.", ...RU_OK, word_hint_ru: "library — библиотека; closes — закрывается" };
     default:
       // reading passages are long, so tag-prefixed copies of one text are (rightly) rejected as near-duplicates: write genuinely different text
       return {

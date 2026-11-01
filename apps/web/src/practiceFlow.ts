@@ -30,13 +30,14 @@ export function noSpeechLeft(slots: readonly SlotLike[]): boolean {
 }
 
 /**
- * T2: after Enter, a plainly correct answer needs no Continue click. Anything the learner must read keeps the button: a mistake, a detail slip,
- * an unconfirmed/pending verdict, a closed (diagnostic) result, a hint or shown answer, and every vocabulary result (its sentence and translation are the point).
+ * T2 (revised): a correct answer no longer moves on by itself: the learner reads the whole result (explanation, rule, examples) and presses
+ * Continue or Enter when ready. The decision stays in one place in case a timed advance is wanted again.
  */
-export function shouldAutoAdvance(feedback: Pick<FeedbackResponse, "state" | "verdict" | "confirmation" | "detail" | "vocabulary">, opts: { hintUsed: boolean; vocabulary: boolean }): boolean {
-  if (opts.hintUsed || opts.vocabulary) return false;
-  return feedback.state === "confirmed" && feedback.verdict === "correct" && feedback.confirmation === "confirmed" && !feedback.detail && !feedback.vocabulary;
+export function shouldAutoAdvance(_feedback: Pick<FeedbackResponse, "state" | "verdict" | "confirmation" | "detail" | "vocabulary">, _opts: { hintUsed: boolean; vocabulary: boolean }): boolean {
+  return false;
 }
+/** how long an answer waits for the local AI verdict before it is shown as "checked later" (seconds) */
+export const AI_CHECK_WAIT_S = 45;
 /** how long the "Correct" confirmation stays visible before the next exercise opens */
 export const AUTO_ADVANCE_MS = 600;
 

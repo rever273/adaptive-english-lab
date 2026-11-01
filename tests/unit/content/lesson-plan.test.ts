@@ -1,12 +1,20 @@
 import { describe, expect, it } from "vitest";
-import { groupUnits, planFromDeficits, type LessonDemand } from "../../../apps/server/src/domain/content/batches/plan.js";
-import { lessonLabel, rangeLabel, withMargin } from "../../../apps/server/src/domain/content/batches/lessonNeeds.js";
+import { groupUnits, planCourseMissing, planFromDeficits, type LessonDemand } from "../../../apps/server/src/domain/content/batches/plan.js";
+import { lessonLabel, nextUnfinishedLessonIndex, rangeLabel, withMargin } from "../../../apps/server/src/domain/content/batches/lessonNeeds.js";
 
 const L = (key: string, formatDeficit: LessonDemand["formatDeficit"], capacity: number, skills = [`prepositions.${key}`, `articles.${key}`, `agreement.${key}`]): LessonDemand => ({ key, formatDeficit, skills, capacity });
 const byLesson = (items: ReturnType<typeof planFromDeficits>) => items.reduce<Record<string, number>>((m, i) => ({ ...m, [i.lesson!]: (m[i.lesson!] ?? 0) + 1 }), {});
 const byType = (items: ReturnType<typeof planFromDeficits>) => items.reduce<Record<string, number>>((m, i) => ({ ...m, [i.type]: (m[i.type] ?? 0) + 1 }), {});
 
 describe("replenishment sizing (D68)", () => {
+  it("preserves each simulated format, skill and no-mistake requirement before adding margin", () => {
+    const missing = [{ lesson: "l02", type: "detect_error" as const, skill: "articles.zero_general", noMistake: true }, { lesson: "l03", type: "choose_form" as const, skill: "questions.embedded_order", noMistake: false }];
+    const planned = planCourseMissing(missing, 3, "test");
+    expect(planned.map(p => [p.lesson, p.type, p.target_skill, !!p.noMistake])).toEqual([["l02", "detect_error", "articles.zero_general", true], ["l03", "choose_form", "questions.embedded_order", false], ["l02", "detect_error", "articles.zero_general", true]]);
+  });
+  it("plans the remaining second session before a later unstarted lesson", () => {
+    expect(nextUnfinishedLessonIndex([{ unlocked: true, completed: 2 }, { unlocked: true, completed: 1 }, { unlocked: true, completed: 0 }, { unlocked: false, completed: 0 }])).toBe(1);
+  });
   it("the recommended size is the deficit plus 20%, rounded up; nothing missing recommends nothing", () => {
     expect(withMargin(10)).toBe(12);
     expect(withMargin(11)).toBe(14); // 13.2

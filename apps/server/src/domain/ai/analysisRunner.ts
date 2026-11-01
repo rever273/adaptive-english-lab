@@ -10,7 +10,7 @@ import { upsertModelVersion } from "../attempts/transcripts.js";
 import { AI_CONFIG_V3, MEASURED_ADDITIONAL_PEAK_MIB, configHashOf, type AiConfig } from "./config.js";
 import type { ChatClient } from "./clients.js";
 import { TransportError } from "./clients.js";
-import { buildAnalysisUserMessageV2, ANALYSIS_SYSTEM_V3, ensurePromptVersion, type AnalysisContext } from "./prompts.js";
+import { buildAnalysisUserMessageV2, ANALYSIS_SYSTEM_V4, ensurePromptVersion, type AnalysisContext } from "./prompts.js";
 import { runStructured } from "./structured.js";
 import { schemaVariant, validateAiOutput, isSchemaValidOutput, type AnalysisV2 } from "./validate.js";
 
@@ -60,7 +60,7 @@ export class AnalysisJobRunner implements JobRunner<AnalysisPayload> {
         .prepare("INSERT OR IGNORE INTO gpu_profiles(id, model_version_id, config_hash, measured_peak_mib, timings_json, validated_at) VALUES (?,?,?,?,?,?)")
         .run(this.o.deps.newId(), id, configHashOf({ numCtx: m.numCtx, numPredict: m.numPredict }), peak, JSON.stringify({ source: "TASK_023 nvidia-smi measurement of gemma4:12b at num_ctx 8192 (gemma4:12b entry in MEASURED_ADDITIONAL_PEAK_MIB)", note: "additional peak above the desktop baseline" }), this.o.deps.now().toISOString());
     }
-    ensurePromptVersion(this.o.db, "analysis-v3", JSON.stringify(schemaVariant("analysis-v2")));
+    ensurePromptVersion(this.o.db, "analysis-v4", JSON.stringify(schemaVariant("analysis-v2")));
     this.modelVersionId = id;
     return { ok: true };
   }
@@ -82,7 +82,7 @@ export class AnalysisJobRunner implements JobRunner<AnalysisPayload> {
       client: this.o.chat,
       model: m.tag,
       messages: [
-        { role: "system", content: ANALYSIS_SYSTEM_V3 },
+        { role: "system", content: ANALYSIS_SYSTEM_V4 },
         { role: "user", content: buildAnalysisUserMessageV2(input) },
       ],
       format: schemaVariant("analysis-v2"),
@@ -161,7 +161,7 @@ export class AnalysisJobRunner implements JobRunner<AnalysisPayload> {
     const raw = JSON.parse(a.raw) as { kind: string; text?: string };
     if (raw.kind !== "text" || typeof raw.text !== "string") throw new RunnerError("answer_not_text", "only written answers are analysed", false);
     const slot = loadSlotContext(db, a.slot_id);
-    const c = JSON.parse(slot.contentJson) as { id: string; prompt_en: string; additional_skills: string[]; payload: { rubric?: { meaning_ru: string; target_markers: string[]; acceptable_variation_ru: string; reject_conditions_ru: string }; cue_ru?: string } };
+    const c = JSON.parse(slot.contentJson) as { id: string; prompt_en: string; additional_skills: string[]; payload: { accepted_answers?: string[]; rubric?: { meaning_ru: string; target_markers: string[]; acceptable_variation_ru: string; reject_conditions_ru: string }; cue_ru?: string } };
     const rubric = c.payload.rubric;
     if (!rubric) throw new RunnerError("no_rubric", "the exercise has no rubric to analyse against", false);
     const hash = (db.prepare("SELECT content_hash AS h FROM exercise_revisions WHERE id = ?").get(slot.exerciseRevisionId) as { h: string }).h;
@@ -173,6 +173,7 @@ export class AnalysisJobRunner implements JobRunner<AnalysisPayload> {
       contentHash: hash,
       prompt: c.prompt_en,
       meaning: rubric.meaning_ru,
+      approvedAnswers: Array.isArray(c.payload.accepted_answers) ? c.payload.accepted_answers : [],
       rubric: { target_markers: rubric.target_markers, acceptable_variation_ru: rubric.acceptable_variation_ru, reject_conditions_ru: rubric.reject_conditions_ru },
       submittedText: raw.text,
       targetSkill: resolveTargetSkillKey(slot),

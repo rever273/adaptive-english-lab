@@ -8,7 +8,7 @@ import { PromptView } from "../components/PromptView";
 import { useVoice } from "../voice";
 import { Kbd, isPressable, isTextField, useKeys } from "../components/hotkeys";
 import { AgentTasks } from "../components/AgentTasks";
-import { AUTO_ADVANCE_MS, diagnosticFinished, isShortFormat, noSpeechLeft, shouldAutoAdvance, shouldPreloadSpeech, unconfirmedLabel } from "../practiceFlow";
+import { AI_CHECK_WAIT_S, AUTO_ADVANCE_MS, diagnosticFinished, isShortFormat, noSpeechLeft, shouldAutoAdvance, shouldPreloadSpeech, unconfirmedLabel } from "../practiceFlow";
 
 /** One tab id per browser tab, kept across reloads, so a reload resumes the same practice lease instead of waiting 90 s. */
 function tabId(): string {
@@ -38,9 +38,11 @@ type SlotUi = {
   /** the attempt id of a submission that has not been confirmed yet; reused on retry so it never double-counts */
   pendingSubmission: { id: string; answer?: string | string[]; idk?: boolean; transcriptId?: string } | null;
   busy: boolean;
+  /** the answer is saved and the local AI is judging it: the verdict is awaited here instead of being shown as "later" */
+  checking: boolean;
   error: string | null;
 };
-const emptySlot: SlotUi = { reveal: null, feedback: null, hint: null, translation: null, letters: null, pendingSubmission: null, busy: false, error: null };
+const emptySlot: SlotUi = { reveal: null, feedback: null, hint: null, translation: null, letters: null, pendingSubmission: null, busy: false, checking: false, error: null };
 
 /**
  * The practice screen for both journeys. `grammar` (default) is the lesson dashboard and its sessions; `vocabulary` runs one vocabulary
@@ -210,6 +212,8 @@ export function Practice({ category = "grammar", onExit, onNavigate }: { categor
 
   async function submit(answer: string | string[] | undefined, idk: boolean, voiceDraftId?: string) {
     if (!sessionId || !slotUi.reveal) return;
+    // the server stores a confirmed transcript trimmed and requires the submitted answer to equal it exactly
+    if (voiceDraftId && typeof answer === "string") answer = answer.trim();
     let submission = slotUi.pendingSubmission ?? { id: crypto.randomUUID(), answer, idk: idk || undefined, transcriptId: undefined as string | undefined };
     if (voiceDraftId && !submission.transcriptId && typeof answer === "string" && voice.streamId) {
       // the learner confirmed the (possibly edited) text: only now does it become a transcript, text only
@@ -223,12 +227,24 @@ export function Practice({ category = "grammar", onExit, onNavigate }: { categor
     setSlotUi((u) => ({ ...u, busy: true, error: null, pendingSubmission: submission }));
     try {
       await api.submitAttempt({ slotId: slotUi.reveal.slotId, submissionId: submission.id, ...(submission.idk ? { idk: true } : { answer: submission.answer, transcriptId: submission.transcriptId }) });
-      const feedback = await api.fetchFeedback(sessionId, slotUi.reveal.slotId);
+      const slotId = slotUi.reveal.slotId;
+      let feedback = await api.fetchFeedback(sessionId, slotId);
       await refresh();
-      setSlotUi((u) => ({ ...u, busy: false, pendingSubmission: null, feedback }));
+      // an answer the code could not judge goes to the local AI at once (speech runs in the cloud, so the card is free): wait for its verdict here
+      const undecided = (f: FeedbackResponse) => f.state === "pending" && !f.aiChecked && !f.unresolved && (f.verdict === "pending" || f.verdict === "ambiguous");
+      if (undecided(feedback)) {
+        setSlotUi((u) => ({ ...u, pendingSubmission: null, checking: true }));
+        for (let i = 0; i < AI_CHECK_WAIT_S && undecided(feedback); i++) {
+          await new Promise((r) => setTimeout(r, 1000));
+          feedback = await api.fetchFeedback(sessionId, slotId);
+        }
+      }
+      setSlotUi((u) => (u.reveal?.slotId === slotId ? { ...u, busy: false, checking: false, pendingSubmission: null, feedback } : u));
     } catch (e) {
       // not saved (yet): the same submissionId is retried, so a flaky connection can never double-count an answer
-      setSlotUi((u) => ({ ...u, busy: false, error: `Unsaved: ${errorText(e)} Your answer is kept here; press the button again to retry.` }));
+      // the confirmed transcript is stored trimmed: a retry with the same (untrimmed) text would fail forever, so retry with the trimmed text
+      const mismatch = e instanceof ApiRequestError && e.code === "TRANSCRIPT_MISMATCH" && typeof submission.answer === "string";
+      setSlotUi((u) => ({ ...u, busy: false, checking: false, ...(mismatch ? { pendingSubmission: { ...submission, answer: (submission.answer as string).trim() } } : {}), error: `Unsaved: ${errorText(e)} Your answer is kept here; press the button again to retry.` }));
     }
   }
 
@@ -369,9 +385,9 @@ export function Practice({ category = "grammar", onExit, onNavigate }: { categor
       ) : slotUi.reveal ? (
         <div className={`card task ${category === "vocabulary" ? `vocab-task vfmt-${slotUi.reveal.format}` : `fmt-${slotUi.reveal.format}`}`} data-testid="slot" data-format={slotUi.reveal.format} data-slot-id={slotUi.reveal.slotId}>
           <div className={category === "vocabulary" ? "vocab-task-content" : undefined}>
-          {slotUi.reveal.inputPreference === "voice" && isShortFormat(slotUi.reveal.format) && (
+          {slotUi.reveal.inputPreference === "voice" && isShortFormat(slotUi.reveal.format) && !stt.ready && (
             <p className="badge badge-info" data-testid="voice-note">
-              <i className={`pi ${stt.ready ? "pi-microphone" : "pi-ban"}`} aria-hidden="true" /> {stt.ready ? "You can speak this one: press “Speak instead”." : "Voice is not available on this computer right now. Please type your answer."}
+              <i className="pi pi-ban" aria-hidden="true" /> Voice is not available on this computer right now. Please type your answer.
             </p>
           )}
           {repeatInfo && (
@@ -398,6 +414,7 @@ export function Practice({ category = "grammar", onExit, onNavigate }: { categor
             onHint={() => void act(category === "vocabulary" ? "vocabulary_letters" : "hint")}
             onShowAnswer={() => void showAnswerAndContinue()}
           />
+          {slotUi.checking && <p className="notice notice-info small" role="status" data-testid="ai-checking"><i className="pi pi-spin pi-spinner" aria-hidden="true" /> Checking your answer…</p>}
           {slotUi.feedback && <FeedbackPanel feedback={slotUi.feedback} busy={slotUi.busy} onTryAgain={tryAgain} onContinue={goOn} autoAdvance={autoPending} onStay={() => setStay(slotUi.feedback!.slotId)} />}
           {slotUi.error && (
             <div className="notice notice-error" role="alert" data-testid="error">
@@ -544,21 +561,20 @@ function DetailDiff({ d }: { d: NonNullable<FeedbackResponse["detail"]> }) {
 
 function FeedbackPanel({ feedback, busy, onTryAgain, onContinue, autoAdvance = false, onStay }: { feedback: FeedbackResponse; busy: boolean; onTryAgain: () => void; onContinue: () => void; autoAdvance?: boolean; onStay?: () => void }) {
   const incorrect = feedback.verdict === "incorrect" || feedback.verdict === "idk";
-  const kind = feedback.state === "pending" ? "pending" : feedback.detail ? "detail" : feedback.verdict === "correct" ? "ok" : incorrect ? "again" : "info";
+  const kind = feedback.state === "pending" && feedback.aiChecked && !incorrect && feedback.verdict !== "correct" ? "pending" : feedback.state === "pending" && !feedback.aiChecked ? "pending" : feedback.detail ? "detail" : feedback.verdict === "correct" ? "ok" : incorrect ? "again" : "info";
   return (
     <div className={`feedback feedback-${kind}`} data-testid="feedback" data-state={feedback.state} data-verdict={feedback.verdict ?? ""} aria-live="polite">
       <p className="feedback-title">
-        <i className={`pi ${feedback.state === "closed" ? "pi-save" : feedback.state === "pending" ? "pi-hourglass" : feedback.verdict === "correct" ? "pi-check-circle" : feedback.verdict === "idk" ? "pi-info-circle" : feedback.verdict === "incorrect" ? "pi-times-circle" : "pi-info-circle"}`} aria-hidden="true" />{" "}
+        <i className={`pi ${feedback.state === "closed" ? "pi-save" : feedback.state === "pending" && !feedback.aiChecked ? "pi-hourglass" : feedback.verdict === "correct" ? "pi-check-circle" : feedback.verdict === "idk" ? "pi-info-circle" : feedback.verdict === "incorrect" ? "pi-times-circle" : "pi-info-circle"}`} aria-hidden="true" />{" "}
         {feedback.state === "closed" ? "Saved" : feedback.aiChecked ? `${feedback.verdict === "correct" ? "Correct" : "Incorrect"} (checked by AI)` : feedback.unresolved ? "Could not be checked automatically" : feedback.state === "pending" ? "Saved — AI review later" : feedback.detail ? "Right construction — check the detail" : feedback.verdict === "correct" ? "Correct" : feedback.verdict === "idk" ? "No problem" : feedback.verdict === "incorrect" ? "Not this time" : feedback.state === "skipped" ? "Skipped" : "Answer"}
       </p>
-      {feedback.detail ? <DetailDiff d={feedback.detail} /> : feedback.aiChecked && feedback.aiReview ? <p lang="ru" className="ru" data-testid="ai-reason">{feedback.aiReview.explanation_ru}</p> : <p>{feedback.message}</p>}
-      {feedback.aiChecked && <p className="muted small">The local AI made this call, so it counts in your progress with a lower weight until it is confirmed.</p>}
+      {feedback.detail ? <DetailDiff d={feedback.detail} /> : feedback.aiChecked && feedback.aiReview ? <p lang="ru" className="ru" data-testid="ai-reason">{feedback.aiReview.explanation_ru}</p> : (() => { const m = feedback.message.replace(/^(Correct|Not this time)\.\s*/, ""); return m ? <p>{m}</p> : null; })()}
       {feedback.correct && (
         <div data-testid="correct-answer">
           {feedback.correct.noMistake && <p>This sentence is correct: <strong>No mistake</strong>.</p>}
           {feedback.correct.options && <p>Correct: <strong>{feedback.correct.options.join(" / ")}</strong></p>}
           {feedback.correct.segments && <p>The mistake: <strong>{feedback.correct.segments.join(" / ")}</strong></p>}
-          {feedback.correct.corrections && feedback.correct.corrections.length > 0 && <p>Corrected: <strong>{feedback.correct.corrections.join(" / ")}</strong></p>}
+          {feedback.correct.fixes && feedback.correct.fixes.length > 0 ? <p>Right answer: <strong>{feedback.correct.fixes.join(" / ")}</strong></p> : feedback.correct.corrections && feedback.correct.corrections.length > 0 && <p>Right answer: <strong>{feedback.correct.corrections.join(" / ")}</strong></p>}
           {feedback.correct.answers && (
             <p>
               Approved examples: <strong>{feedback.correct.answers.join(" · ")}</strong>
@@ -630,7 +646,7 @@ function ReviewNotice({ unresolved }: { unresolved: number }) {
 function DashboardScreen({ dashboard, message, onStart, onStartCheck }: { dashboard: Dashboard; message: string | null; onStart: (blueprintRevisionId: string) => void; onStartCheck: (purpose: "diagnostic" | "heldout") => void }) {
   // lessons in course order: the first one that can still build a session is offered; the others stay one click away
   const [chosen, setChosen] = useState<string | null>(null);
-  const next = dashboard.blueprints.find((b) => b.unlocked && b.completed === 0) ?? dashboard.blueprints.find((b) => b.unlocked && b.completed < MAX_LESSON_PLAYS) ?? dashboard.blueprints.at(-1);
+  const next = dashboard.blueprints.find((b) => b.unlocked && b.completed < MAX_LESSON_PLAYS) ?? dashboard.blueprints.at(-1);
   const bp = dashboard.blueprints.find((b) => b.blueprintRevisionId === chosen) ?? next;
   const pathRef = useRef<HTMLDivElement>(null);
   const dragRef = useRef<{ x: number; left: number; moved: boolean } | null>(null);
@@ -675,8 +691,8 @@ function DashboardScreen({ dashboard, message, onStart, onStartCheck }: { dashbo
               {dashboard.blueprints.map((lesson, i) => (
                 <div className="lesson-path-stop" key={lesson.blueprintRevisionId} data-lesson-id={lesson.blueprintRevisionId}>
                   <span className="lesson-path-scenery" aria-hidden="true">{i % 2 === 0 ? "🌳" : "🏠"}</span>
-                  <button className={`lesson-path-node${bp?.blueprintRevisionId === lesson.blueprintRevisionId ? " selected" : ""}`} disabled={!lesson.unlocked} onClick={() => setChosen(lesson.blueprintRevisionId)} aria-label={`${lesson.title}, ${lesson.completed} of ${MAX_LESSON_PLAYS} plays${lesson.unlocked ? "" : ", locked"}`} aria-pressed={bp?.blueprintRevisionId === lesson.blueprintRevisionId}>
-                    <strong>{/l(\d+)$/i.exec(lesson.key)?.[0].toUpperCase() ?? `L${String(i + 1).padStart(2, "0")}`}</strong><small>{lesson.unlocked ? `${Math.min(lesson.completed, MAX_LESSON_PLAYS)}/${MAX_LESSON_PLAYS}` : "Locked"}</small>
+                  <button className={`lesson-path-node${lesson.completed >= MAX_LESSON_PLAYS ? " done" : ""}${bp?.blueprintRevisionId === lesson.blueprintRevisionId ? " selected" : ""}`} disabled={!lesson.unlocked} onClick={() => setChosen(lesson.blueprintRevisionId)} aria-label={`${lesson.title}, ${lesson.completed} of ${MAX_LESSON_PLAYS} plays${lesson.completed >= MAX_LESSON_PLAYS ? ", finished" : lesson.unlocked ? "" : ", locked"}`} aria-pressed={bp?.blueprintRevisionId === lesson.blueprintRevisionId}>
+                    <strong>{/l(\d+)$/i.exec(lesson.key)?.[0].toUpperCase() ?? `L${String(i + 1).padStart(2, "0")}`}</strong><small>{lesson.unlocked ? `${lesson.completed >= MAX_LESSON_PLAYS ? "✓ " : ""}${Math.min(lesson.completed, MAX_LESSON_PLAYS)}/${MAX_LESSON_PLAYS}` : "Locked"}</small>
                   </button>
                   <span className="lesson-path-title">{lesson.title.replace(/^L\d+\s+/i, "")}</span>
                 </div>
@@ -701,7 +717,7 @@ function DashboardScreen({ dashboard, message, onStart, onStartCheck }: { dashbo
           {bp.shortage && bp.readySessions === 0 ? (
             <div className="notice notice-warn" data-testid="shortage" role="status">
               <p>
-                <strong>Not enough approved exercises for {bp.shortage.requestedN} tasks.</strong>
+                <strong>{bp.shortage.deficits.some(d => d.kind === "search_budget") ? `Could not find a valid ${bp.shortage.requestedN}-task session within the search limit.` : `Not enough approved exercises for ${bp.shortage.requestedN} tasks.`}</strong>
               </p>
               <ul>
                 {bp.shortage.deficits.map((d, i) => (
@@ -813,7 +829,7 @@ function BlockReview({ sessionId }: { sessionId: string }) {
             {f.detail ? <DetailDiff d={f.detail} /> : f.yourAnswer && <p className="small">Your answer: <strong>{f.yourAnswer}</strong></p>}
             {f.correct?.noMistake && <p className="small">Right answer: <strong>No mistake</strong> — the sentence is correct.</p>}
             {f.correct?.options && <p className="small">Right answer: <strong>{f.correct.options.join(" / ")}</strong></p>}
-            {f.correct?.segments && <p className="small">The mistake: <strong>{f.correct.segments.join(" / ")}</strong>{f.correct.corrections && f.correct.corrections.length > 0 ? <> → <strong>{f.correct.corrections.join(" / ")}</strong></> : null}</p>}
+            {f.correct?.segments && <><p className="small">The mistake: <strong>{f.correct.segments.join(" / ")}</strong></p>{(f.correct.fixes?.length ? f.correct.fixes : f.correct.corrections)?.length ? <p className="small">Right answer: <strong>{(f.correct.fixes?.length ? f.correct.fixes : f.correct.corrections)!.join(" / ")}</strong></p> : null}</>}
             {f.correct?.answers && <p className="small">Approved sentences: <strong>{f.correct.answers.join(" · ")}</strong></p>}
             {f.explanation_ru && <p lang="ru" className="ru small">{f.explanation_ru}</p>}
             {f.vocabulary && <VocabWhy v={f.vocabulary} compact />}
@@ -846,6 +862,16 @@ function SummaryScreen({ summary: first, onDone, onNavigate }: { summary: Sessio
   return (
     <section aria-labelledby="sum-h" data-testid="summary">
       <h2 id="sum-h">{vocab ? "Vocabulary session " : "Session "}{summary.status === "completed" ? "complete" : "ended early"}</h2>
+      <div className="actions">
+        <button className="btn btn-primary" onClick={onDone} data-testid="done">
+          <i className={`pi ${vocab ? "pi-bookmark" : "pi-home"}`} aria-hidden="true" /> {vocab ? "Back to Vocabulary" : "Back to start"}
+        </button>
+        {vocab && onNavigate && (
+          <button className="btn" onClick={() => onNavigate("analytics")}>
+            <i className="pi pi-chart-line" aria-hidden="true" /> Vocabulary analytics
+          </button>
+        )}
+      </div>
       {(summary.xpEarned ?? 0) > 0 && (
         <p className={`xp-earned xp-earned-${vocab ? "vocabulary" : "grammar"}`} data-testid="xp-earned">
           <i className={`pi ${vocab ? "pi-bookmark-fill" : "pi-pencil"}`} aria-hidden="true" /> +{summary.xpEarned} {vocab ? "Vocabulary" : "Grammar"} XP
@@ -860,8 +886,8 @@ function SummaryScreen({ summary: first, onDone, onNavigate }: { summary: Sessio
         <Stat cls="idk" icon="pi-question-circle" label="“I don’t know”" value={c.idk} id="count-idk" />
         <Stat cls="info" icon="pi-lightbulb" label="With a hint or answer shown" value={c.assisted} id="count-assisted" />
         {waitingForAi > 0 && <Stat cls="wait" icon="pi-spin pi-spinner" label="AI check in progress" value={waitingForAi} id="count-ai-waiting" />}
-        {ai > 0 && <Stat cls="info" icon="pi-sparkles" label="Counted, checked by AI (lower weight)" value={ai} id="count-ai-checked" />}
-        {(summary.unresolved ?? 0) > 0 && <Stat cls="wait" icon="pi-hourglass" label="Waiting for review (not checked automatically, or AI-incorrect)" value={summary.unresolved ?? 0} id="count-unresolved" />}
+        {ai > 0 && <Stat cls="info" icon="pi-sparkles" label="Decided by the local AI (correct ones count at lower weight)" value={ai} id="count-ai-checked" />}
+        {(summary.unresolved ?? 0) > 0 && <Stat cls="wait" icon="pi-hourglass" label="Not counted until your agent review (AI said incorrect, or no AI verdict)" value={summary.unresolved ?? 0} id="count-unresolved" />}
         <Stat cls="wait" icon="pi-hourglass" label="Not counted yet" value={c.pending} id="count-pending" />
         <Stat cls="skip" icon="pi-forward" label="Skipped" value={c.skipped} id="count-skipped" />
         {c.unanswered > 0 && <Stat cls="skip" icon="pi-minus-circle" label="Not reached" value={c.unanswered} id="count-unanswered" />}
@@ -881,16 +907,6 @@ function SummaryScreen({ summary: first, onDone, onNavigate }: { summary: Sessio
         </p>
       )}
       <BlockReview sessionId={summary.sessionId} />
-      <div className="actions">
-        <button className="btn btn-primary" onClick={onDone} data-testid="done">
-          <i className={`pi ${vocab ? "pi-bookmark" : "pi-home"}`} aria-hidden="true" /> {vocab ? "Back to Vocabulary" : "Back to start"}
-        </button>
-        {vocab && onNavigate && (
-          <button className="btn" onClick={() => onNavigate("analytics")}>
-            <i className="pi pi-chart-line" aria-hidden="true" /> Vocabulary analytics
-          </button>
-        )}
-      </div>
     </section>
   );
 }

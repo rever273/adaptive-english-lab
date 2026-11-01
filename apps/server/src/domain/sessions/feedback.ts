@@ -12,16 +12,36 @@ import { lookupWord } from "../vocabulary/repository.js";
 
 type Payload = Record<string, any>;
 
+/** a correction is either the corrected segment or the whole corrected sentence; the second is cut back to the segment by removing the unchanged text around it */
+export function segmentFixes(segs: Array<{ id: string; text: string }>, wrongId: string, corrections: string[]): string[] {
+  const i = segs.findIndex((s) => s.id === wrongId);
+  const pre = segs.slice(0, i).map((s) => s.text).join("");
+  const post = segs.slice(i + 1).map((s) => s.text).join("");
+  const out = corrections.map((c) => (c.startsWith(pre) && c.endsWith(post) && c.length > pre.length + post.length ? c.slice(pre.length, c.length - post.length).trim() : c.trim()));
+  return out.filter((x) => x.length > 0);
+}
+
+/** the model sometimes answers an empty explanation with the literal word "null": show a plain sentence instead */
+export function aiExplanation(judgement: string, text: string | null | undefined): string {
+  const t = (text ?? "").trim();
+  if (t.length >= 8 && !/^(null|none|n\/a|undefined|нет|-)\.?$/i.test(t)) return t;
+  return judgement === "acceptable" ? "Предложение грамматически верно и передаёт смысл задания." : "Локальная модель сочла этот ответ неверным.";
+}
+
 function correctAnswer(format: string, content: { payload: Payload }, questionId: string | null): NonNullable<FeedbackResponse["correct"]> {
   const p = content.payload;
   switch (format) {
     case "choose_form":
     case "choose_missing_fragment":
       return { options: (p.options as Array<{ id: string; text: string }>).filter((o) => (p.accepted_option_ids as string[]).includes(o.id)).map((o) => o.text) };
-    case "detect_error":
-      return p.no_mistake
-        ? { noMistake: true }
-        : { segments: (p.segments as Array<{ id: string; text: string }>).filter((s) => (p.accepted_segment_ids as string[]).includes(s.id)).map((s) => s.text), corrections: p.corrections as string[] };
+    case "detect_error": {
+      if (p.no_mistake) return { noMistake: true };
+      const segs = p.segments as Array<{ id: string; text: string }>;
+      const wrong = segs.filter((s) => (p.accepted_segment_ids as string[]).includes(s.id));
+      const corrections = p.corrections as string[];
+      if (p.accept_any) return { segments: [wrong.map((s) => s.text).join("").trim()], corrections, ...((p.fixes as string[] | undefined)?.length ? { fixes: p.fixes as string[] } : {}) };
+      return { segments: wrong.map((s) => s.text), corrections, ...(wrong.length === 1 ? { fixes: segmentFixes(segs, wrong[0]!.id, corrections) } : {}) };
+    }
     case "context_reading": {
       const q = (p.questions as Array<{ id: string; options: Array<{ id: string; text: string }>; accepted_option_ids: string[] }>).find((x) => x.id === questionId)!;
       return { options: q.options.filter((o) => q.accepted_option_ids.includes(o.id)).map((o) => o.text) };
@@ -129,7 +149,7 @@ function feedbackCore(db: Db, deps: SessionDeps, sessionId: string, slotId: stri
       let aiReview: FeedbackResponse["aiReview"];
       if (annotation) {
         const output = (JSON.parse(annotation.value) as { output: AnalysisV2 }).output;
-        if (output?.schema_version === "analysis-v2") aiReview = { judgement: output.judgement, explanation_ru: output.explanation_ru, findings: output.findings.map((f) => ({ original: f.original, suggestion: f.suggestion, explanation_ru: f.explanation_ru })) };
+        if (output?.schema_version === "analysis-v2") aiReview = { judgement: output.judgement, explanation_ru: aiExplanation(output.judgement, output.explanation_ru), findings: output.findings.map((f) => ({ original: f.original, suggestion: f.suggestion, explanation_ru: f.explanation_ru })) };
       }
 
       if (a && (a.verdict === "pending" || a.verdict === "ambiguous")) {

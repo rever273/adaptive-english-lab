@@ -139,8 +139,13 @@ function needOf(db: Db, lesson: { id: string; key: string; completed: number }, 
 export interface LessonPlanView {
   /** every playable lesson in course order with its needs */
   lessons: LessonNeed[];
-  /** index of the lesson the app offers next: the first lesson without a completed practice session (all done: the least practised, then course order) */
+  /** first unlocked lesson with a remaining practice session, in course order */
   nextIndex: number;
+}
+
+export function nextUnfinishedLessonIndex(lessons: ReadonlyArray<{ unlocked: boolean; completed: number }>): number {
+  const index = lessons.findIndex((lesson) => lesson.unlocked && lesson.completed < MAX_LESSON_PLAYS);
+  return index < 0 ? lessons.length - 1 : index;
 }
 
 /** null when the profile has no playable lesson (then callers fall back to the whole bank) */
@@ -149,9 +154,7 @@ export function lessonPlanView(db: Db, now: Date = new Date()): LessonPlanView |
   if (lessons.length === 0) return null;
   const settings = loadSettings(db).values;
   const blocked = loadBlockedFingerprints(db);
-  let nextIndex = lessons.findIndex((l) => l.unlocked && l.completed === 0);
-  if (nextIndex < 0) nextIndex = lessons.findIndex((l) => l.unlocked && l.completed < MAX_LESSON_PLAYS);
-  if (nextIndex < 0) nextIndex = lessons.length - 1;
+  const nextIndex = nextUnfinishedLessonIndex(lessons);
   return { lessons: lessons.map((l) => needOf(db, l, now, settings, blocked)), nextIndex };
 }
 

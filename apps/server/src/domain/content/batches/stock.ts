@@ -5,7 +5,8 @@ import { vocabularyReplenishment } from "./vocabularyPlan.js";
 import { vocabularyPracticeStatus } from "../../vocabulary/practice.js";
 import { difficultyLevels } from "@english-lab/contracts";
 import { scaleQuotas, DEFAULT_QUOTAS } from "@english-lab/learning";
-import { lessonPlanView, needMessage } from "./lessonNeeds.js";
+import { lessonPlanView } from "./lessonNeeds.js";
+import { calculateCoursePlan } from "./coursePlanning.js";
 
 /**
  * Read-only stock warning before exhaustion. Availability never counts drafts, used sentences or reservations.
@@ -18,22 +19,21 @@ export function replenishmentStock(db: Db, now: Date = new Date()) {
   const vocabPlan = { words: vocabularyDemand.words.length, deficit: vocabularyDemand.deficit, recommended: vocabularyDemand.recommended, targetPerWord: vocabularyDemand.targetPerWord };
   if (plan) {
     const next = plan.lessons[plan.nextIndex]!;
-    // Per-lesson estimates share the same bank, so this is a planning estimate, not a guarantee.
-    const upcoming = [...plan.lessons.slice(plan.nextIndex), ...plan.lessons.slice(0, plan.nextIndex)];
-    const courseDeficit = upcoming.reduce((sum, lesson) => sum + lesson.deficit, 0);
-    const courseRecommended = upcoming.reduce((sum, lesson) => sum + lesson.recommended, 0);
+    const course = calculateCoursePlan(db, now);
     const vocab = vocabularyPracticeStatus(db);
-    const low = next.deficit > 0;
+    const nextMissing = course.missing.filter(item => item.lesson === next.key);
+    const low = nextMissing.length > 0;
+    const formatDeficits = [...new Set(nextMissing.map(item => item.type))].map(type => ({ kind: "format" as const, name: type, need: nextMissing.filter(item => item.type === type).length, have: 0, deficit: nextMissing.filter(item => item.type === type).length }));
     const grammar = {
       available: next.available,
       threshold: next.taskCount * next.sessions,
       low,
       scope: "next lesson",
       lesson: { key: next.key, label: next.label, title: next.title, range: next.range, sessions: next.sessions, fresh: next.fresh, reusable: next.reusable },
-      deficits: [...next.formats.filter((f) => f.deficit > 0).map((f) => ({ kind: "format" as const, name: f.format, need: f.need, have: f.have, deficit: f.deficit })), ...next.skills.filter((k) => k.deficit > 0).map((k) => ({ kind: "skill" as const, name: k.skill, need: k.target, have: k.have, deficit: k.deficit }))],
-      recommended: next.recommended,
-      course: { lessons: upcoming.length, deficit: courseDeficit, recommended: courseRecommended, sessionsPerLesson: next.sessions },
-      message: low ? needMessage(next) : `Lesson ${next.label} at ${next.range} has enough exercises for the next ${next.sessions} sessions (${next.available} usable).`,
+      deficits: formatDeficits,
+      recommended: Math.ceil(nextMissing.length * 1.2),
+      course: { lessons: course.lessons, sessions: course.sessions, first: course.first, last: course.last, deficit: course.deficit, recommended: course.recommended, sessionsPerLesson: 2 },
+      message: low ? `Lesson ${next.label} at ${next.range} needs an estimated ${nextMissing.length} approved exercises for its remaining ${next.sessions} session${next.sessions === 1 ? "" : "s"}.` : `Lesson ${next.label} at ${next.range} has enough exercises for the next ${next.sessions} session${next.sessions === 1 ? "" : "s"} (${next.available} usable).`,
       bySkill: next.skills.map((k) => ({ skill: k.skill, available: k.have })),
     };
     return { grammar, vocabulary: { available: vocab.freshAvailable, threshold: vocab.taskCount * 2, low: vocab.words > 0 && vocab.freshAvailable < vocab.taskCount * 2, plan: vocabPlan } };

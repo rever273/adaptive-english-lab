@@ -11,8 +11,8 @@ const correct = { state: "confirmed", verdict: "correct", confirmation: "confirm
 const plain = { hintUsed: false, vocabulary: false };
 
 describe("T2 auto-advance after a correct answer", () => {
-  it("advances only for a plainly correct, confirmed answer", () => {
-    expect(shouldAutoAdvance(correct, plain)).toBe(true);
+  it("never advances by itself, even for a plainly correct, confirmed answer: the learner presses Continue or Enter", () => {
+    expect(shouldAutoAdvance(correct, plain)).toBe(false);
     expect(AUTO_ADVANCE_MS).toBeLessThanOrEqual(1000);
   });
   it("keeps Continue whenever there is something to read", () => {

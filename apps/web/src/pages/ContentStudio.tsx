@@ -63,7 +63,7 @@ function BatchStudio({ category, onCategoryChange }: { category: "grammar" | "vo
       if (!estimate) { setNote("No available lessons to plan."); return; }
       setCountTouched(true);
       if (estimate.recommended > 0) setCount(Math.min(500, estimate.recommended));
-      setNote(estimate.recommended === 0 ? "No estimated deficit for the lessons." : `Estimated ${estimate.recommended} drafts for ${estimate.lessons} lessons, including 20% margin.${estimate.recommended > 500 ? " One batch can contain up to 500; create another after review and recalculate." : ""}`);
+      setNote(estimate.recommended === 0 ? `No missing exercises found for ${estimate.sessions} remaining sessions.` : `Estimated ${estimate.deficit} approved exercises missing for ${estimate.sessions} remaining sessions; ${estimate.recommended} drafts include a 20% review margin.${estimate.recommended > 500 ? " One batch can contain up to 500; create another after review and recalculate." : ""}`);
     } catch (e) { setError(errorText(e)); } finally { setBusy(false); }
   };
   const vocabularyPlan = category === "vocabulary" ? stock?.vocabulary.plan : undefined;
@@ -107,7 +107,7 @@ function BatchStudio({ category, onCategoryChange }: { category: "grammar" | "vo
     <section className="card"><h2>Coverage</h2>
       {low && <p className={`notice ${low.low ? "notice-error" : "notice-info"}`} role="status">{low.message ?? `${low.available} new approved exercises available.${low.low ? ` Stock is running low (warning below ${low.threshold}). Create a new batch.` : ""}`}{low.recommended ? ` Suggested batch size: ${low.recommended} (deficit + 20%).` : ""}</p>}
       {vocabularyPlan && <p className="small" role="status">{vocabularyPlan.words} words: {vocabularyPlan.deficit} contexts missing; {vocabularyPlan.recommended} drafts suggested with 20% margin. Target: {vocabularyPlan.targetPerWord} approved contexts per word (2 recognition, 2 recall, 1 collocation). Previously seen contexts count as reusable; drafts do not count until approved. Recalculate after review.</p>}
-      {course && <p className="small" role="status">All lessons: estimated {course.deficit} exercises short; {course.recommended} drafts suggested with 20% margin for {course.sessionsPerLesson} sessions per lesson. Based on approved stock only; pending drafts may be rejected. Shared exercises and future repeats make this an estimate, not a guarantee. Recalculate after review.</p>}
+      {course && <p className="small" role="status">Remaining lessons: {course.sessions} sessions across {course.lessons} lessons; estimated {course.deficit} exercises short, {course.recommended} drafts suggested with 20% review margin. Shared stock is allocated once; future repeats are not assumed. This is an estimate: recalculate after review and practice.</p>}
       {category === "vocabulary" ? <VocabularyStudio /> : coverage && <><p>{coverage.totals.releasedExercises} published grammar exercises in total. Used sentences are excluded from available stock.</p><details><summary>Coverage by skill</summary><ul className="small">{coverage.skills.map(s => <li key={s.skill}><code>{s.skill}</code>: {s.released} published, {s.inReview} awaiting agent</li>)}</ul></details></>}
     </section>
   </>;

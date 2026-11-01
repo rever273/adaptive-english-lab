@@ -625,6 +625,17 @@
             },
             "optional_correction": {
               "type": "boolean"
+            },
+            "fixes": {
+              "type": "array",
+              "minItems": 1,
+              "items": {
+                "type": "string",
+                "minLength": 1
+              }
+            },
+            "accept_any": {
+              "type": "boolean"
             }
           },
           "required": [

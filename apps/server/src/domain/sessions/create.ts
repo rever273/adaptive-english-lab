@@ -4,7 +4,7 @@ import {
   DEFAULT_QUOTAS,
   DISCOVERY_V1,
   GRAMMAR_REPEAT_CONFIG,
-  GRAMMAR_SELECTION_V3,
+  GRAMMAR_SELECTION_V4,
   SELECTION_VERSION,
   canonicalJson,
   clampMultiplier,
@@ -19,7 +19,7 @@ import {
 import type { Db } from "../../db/open.js";
 import { ApiError } from "../../errors.js";
 import { MAX_LESSON_PLAYS } from "@english-lab/contracts";
-import { lessonNeedFor, needMessage } from "../content/batches/lessonNeeds.js";
+import { calculateCoursePlan } from "../content/batches/coursePlanning.js";
 import { runDiscovery } from "../analytics/discoveryAdapter.js";
 import { localDateIn } from "../attempts/canonical.js";
 import { loadBlockedFingerprints, loadCandidates, type BankCandidate } from "./bank.js";
@@ -38,15 +38,15 @@ export interface CreateOptions {
   enforceStock?: boolean;
 }
 
-/** D68: sessions use grammar-selection-v3; earlier algorithm records remain unchanged */
+/** Version the expanded search separately; earlier session records remain unchanged. */
 export function ensureSelectionVersion(db: Db, deps: SessionDeps, discovery: DiscoveryConfig): string {
-  const cfg = { version: GRAMMAR_SELECTION_V3, base: SELECTION_VERSION, defaultQuotas: DEFAULT_QUOTAS, familyCap: 0.35, formatCap: 0.4, discovery: discovery.version, repeats: GRAMMAR_REPEAT_CONFIG };
+  const cfg = { version: GRAMMAR_SELECTION_V4, base: SELECTION_VERSION, defaultQuotas: DEFAULT_QUOTAS, familyCap: 0.35, formatCap: 0.4, discovery: discovery.version, repeats: GRAMMAR_REPEAT_CONFIG };
   const json = canonicalJson(cfg);
   const hash = sha256(json);
-  const row = db.prepare("SELECT config_hash AS h FROM algorithm_versions WHERE id = ?").get(GRAMMAR_SELECTION_V3) as { h: string } | undefined;
-  if (row) return GRAMMAR_SELECTION_V3; // the shape of the config is fixed per version id; a different shape needs a new id
-  db.prepare("INSERT INTO algorithm_versions(id, config_json, config_hash, source_version, created_at) VALUES (?,?,?,?,?)").run(GRAMMAR_SELECTION_V3, json, hash, "packages/learning@0.1.0", deps.now().toISOString());
-  return GRAMMAR_SELECTION_V3;
+  const row = db.prepare("SELECT config_hash AS h FROM algorithm_versions WHERE id = ?").get(GRAMMAR_SELECTION_V4) as { h: string } | undefined;
+  if (row) return GRAMMAR_SELECTION_V4;
+  db.prepare("INSERT INTO algorithm_versions(id, config_json, config_hash, source_version, created_at) VALUES (?,?,?,?,?)").run(GRAMMAR_SELECTION_V4, json, hash, "packages/learning@0.1.0", deps.now().toISOString());
+  return GRAMMAR_SELECTION_V4;
 }
 
 /** What the allocator needs from the bank, reused by readiness simulation. */
@@ -148,12 +148,14 @@ export function createPracticeSession(db: Db, deps: SessionDeps, req: CreateSess
         ({ result, quotas } = solveWith({}));
       }
       if (!result.feasible) {
-        throw new ApiError(409, "CONTENT_SHORTAGE", `Not enough approved exercises for ${n} tasks`, { deficits: result.deficits, largestFeasibleN: result.largestFeasibleN, requestedN: n });
+        const exhausted = result.deficits.some(d => d.kind === "search_budget");
+        throw new ApiError(409, "CONTENT_SHORTAGE", exhausted ? `Could not find a valid ${n}-task session within the search limit` : `Not enough approved exercises for ${n} tasks`, { deficits: result.deficits, largestFeasibleN: result.largestFeasibleN, requestedN: n });
       }
       if (opts.enforceStock) {
-        const need = lessonNeedFor(db, blueprint.id, deps.now());
-        if (need && need.deficit > 0) {
-          throw new ApiError(409, "LESSON_STOCK_LOW", `${needMessage(need)} Create a new batch in Content Studio (suggested size ${need.recommended}).`, { lesson: need.label, deficit: need.deficit, recommended: need.recommended });
+        const missing = calculateCoursePlan(db, deps.now()).missing.filter(item => item.lesson === lessonRow.key);
+        if (missing.length > 0) {
+          const recommended = Math.ceil(missing.length * 1.2);
+          throw new ApiError(409, "LESSON_STOCK_LOW", `Lesson ${lessonRow.key} needs an estimated ${missing.length} approved exercises for its remaining sessions. Create a new batch in Content Studio (suggested size ${recommended}).`, { lesson: lessonRow.key, deficit: missing.length, recommended });
         }
       }
       const byId = new Map<string, Candidate>(candidates.map((c) => [c.revisionId, c]));

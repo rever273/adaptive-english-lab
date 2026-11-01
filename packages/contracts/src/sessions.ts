@@ -124,6 +124,8 @@ export const FeedbackResponseSchema = z
         segments: z.array(z.string()).optional(),
         noMistake: z.boolean().optional(),
         corrections: z.array(z.string()).optional(),
+        /** the corrected wording of the faulty segment alone (derived from a full-sentence correction), when it can be told */
+        fixes: z.array(z.string()).optional(),
         answers: z.array(z.string()).optional(),
       })
       .nullable(),

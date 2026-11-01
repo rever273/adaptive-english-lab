@@ -7,6 +7,7 @@ import {
   RevealRequestSchema,
   type CreateSessionResponse,
   type Dashboard,
+  MAX_LESSON_PLAYS,
   type FeedbackResponse,
   type RevealResponse,
   type SessionSnapshot,
@@ -127,7 +128,8 @@ export function registerSessionRoutes(app: FastifyInstance, db: Db, deps: Sessio
     const blueprints = rows
       .map((r) => {
         const bp = loadBlueprint(db, r.id);
-        const ready = computeReadiness(db, deps, r.id);
+        // locked or fully played lessons cannot be started, so the costly simulation is skipped for them
+        const ready = r.unlocked && r.completed < MAX_LESSON_PLAYS ? computeReadiness(db, deps, r.id) : { readySessions: 0, shortage: null };
         return { blueprintRevisionId: r.id, key: r.key, title: bp.policy.title, status: r.status, completed: r.completed, unlocked: r.unlocked, readySessions: ready.readySessions, shortage: ready.shortage };
       });
     return { activeSessionId: currentSessionId(db, "grammar"), taskCount: settings.values.taskCount, blueprints, banner: opts.banner ?? null, diagnostic: diagnosticStatus(db, deps), review: reviewStatus(db), heldout: heldoutStatus(db, deps) };

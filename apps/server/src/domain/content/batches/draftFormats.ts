@@ -33,11 +33,22 @@ export function skillCards(): Record<string, SkillCard> {
   return cards;
 }
 const CYRILLIC = /[Ѐ-ӿ]/;
+/** an option that is only an article or a determiner (such an item is capped at three options) */
+const DETERMINER_OPTION = /^(a|an|the|some|any|no article|no|every|each|this|that|these|those|many|much|few|little|several|another|other)$/;
 const LATIN_WORD = /[A-Za-z]{2,}/;
 
 const str = (min = 1) => ({ type: "string", minLength: min, maxLength: 600 });
 const opts = (min: number, max: number) => ({ type: "array", minItems: min, maxItems: max, items: str() });
 const common = { explanation_ru: str(MIN_EXPLANATION), hint_ru: str(5) };
+
+/** which draft shapes a generation prompt version uses: v7 adds the key words of a translation, v8 marks an error by its exact words */
+export const flagsFor = (version: string): { wordHint: boolean; wordErrors: boolean } => ({ wordHint: version === "generation-v7" || version === "generation-v8" || version === "generation-v9", wordErrors: version === "generation-v8" || version === "generation-v9" });
+
+/** generation-v8: an error is given as its exact words and their corrected wording; the code builds the word segments and the corrected sentence */
+const DETECT_WORDS_PROPS = { ...({ explanation_ru: str(MIN_EXPLANATION), hint_ru: str(5) }), sentence: str(10), error_words: { type: "string", maxLength: 100 }, fix_words: { type: "string", maxLength: 100 } };
+
+/** generation-v7: a translation draft also carries the key words the Hint button reveals after the grammar hint */
+const WORD_HINT_PROPS = { word_hint_ru: str(5) };
 
 const DRAFT_PROPS: Record<ExerciseType, Record<string, unknown>> = {
   choose_form: { ...common, sentence: str(10), options: opts(3, 4), correct_index: { type: "integer", minimum: 0, maximum: 3 } },
@@ -53,16 +64,19 @@ const DRAFT_PROPS: Record<ExerciseType, Record<string, unknown>> = {
 };
 
 /** JSON schema of one inference unit for a format: {drafts:[...<= count]} - also the `format` handed to the model. */
-export function draftFormat(type: ExerciseType, count: number): object {
-  const props = DRAFT_PROPS[type];
+export function draftFormat(type: ExerciseType, count: number, version = ""): object {
+  const { wordHint, wordErrors } = flagsFor(version);
+  const props = wordErrors && type === "detect_error" ? DETECT_WORDS_PROPS : wordHint && type === "russian_to_english_short" ? { ...DRAFT_PROPS[type], ...WORD_HINT_PROPS } : DRAFT_PROPS[type];
   return { type: "object", additionalProperties: false, required: ["drafts"], properties: { drafts: { type: "array", minItems: 1, maxItems: count, items: { type: "object", additionalProperties: false, required: Object.keys(props), properties: props } } } };
 }
 
 /** Hash input of the prompt version: all schemas + the examples (so changing any of them needs a new version id). */
-export function draftFormatsText(): string {
+export function draftFormatsText(version = ""): string {
   skillCards();
-  return JSON.stringify({ formats: Object.fromEntries((Object.keys(DRAFT_PROPS) as ExerciseType[]).map((t) => [t, draftFormat(t, 2)])), examples: EXAMPLES, cards: cardsText });
+  return JSON.stringify({ formats: Object.fromEntries((Object.keys(DRAFT_PROPS) as ExerciseType[]).map((t) => [t, draftFormat(t, 2, version)])), examples: EXAMPLES, cards: cardsText });
 }
+
+const DETECT_WORDS_RULES = "One natural sentence. If it contains ONE clear mistake: error_words are the exact faulty words (one to three consecutive words) copied from the sentence, fix_words is their corrected wording. If it is fully correct: error_words and fix_words are empty strings. Do not invent errors in correct sentences.";
 
 export const EXAMPLES: Record<ExerciseType, object> = {
   choose_form: { sentence: "The council ___ the revised timetable yesterday.", options: ["published", "has published", "publish"], correct_index: 0, hint_ru: "Обратите внимание на слово yesterday.", explanation_ru: "Слово yesterday указывает на завершённый момент в прошлом, поэтому нужен Past Simple (published), а не Present Perfect." },
@@ -110,6 +124,17 @@ export const GENERATION_SYSTEM_V6 = `${GENERATION_SYSTEM_V5}
 For every multiple-choice item, replace only the gap with each complete option, without changing or deleting any other word. Read every resulting complete sentence: the keyed answer must be grammatical and natural, with no duplicated words; all other options must be ungrammatical or incompatible with explicit context. If more than one can work, rewrite the context or options. State enough time and meaning context to distinguish habitual from past actions.
 For error detection, a less common formal or standard Australian/British variant is not an error. For example, formal ?persons? can be correct; do not mark it wrong merely because ?people? is more common. Choose an unmistakable rule violation instead.`;
 
+export const GENERATION_SYSTEM_V7 = `${GENERATION_SYSTEM_V6}
+For russian_to_english_short also give word_hint_ru: two to four key content words (nouns, verbs, adjectives) from accepted_answers that a learner may not know, each as "english word or phrase — русский перевод", separated by "; ". Choose words that carry the situation, never the grammatical structure being tested, and never a whole clause or a complete answer.
+For an article or determiner gap offer at most three options. Offer both an indefinite article (a/an) and "the" only when the sentence itself settles definiteness (the noun was already mentioned, a unique or superlative referent, "which one", "the only"); when it does not, the other options must be forms that cannot fit (no article, a quantifier) so that exactly one reading is possible.
+Self-check every draft before returning it, as a careful teacher would: (1) put each option and each accepted answer into the sentence and read the whole result: no doubled or leftover word next to the gap, a/an agrees with the next word, Australian spelling; (2) only the keyed option works under any reasonable reading of the sentence, so add the context that rules the others out; (3) a hint names the rule or the idea but never the answer, and never points at a different option than the key; (4) Russian text is plain correct Russian with no invented words, agrees with the key, and the explanation says why the key is right; (5) for written answers list every natural word order and contraction in accepted_answers, and write rubric markers and reject conditions that describe the rule instead of repeating the cue; (6) vary subject, situation and sentence frame from item to item.`;
+
+export const GENERATION_SYSTEM_V8 = `${GENERATION_SYSTEM_V7}
+For detect_error the learner taps single words, so mark the error exactly: error_words is the one to three consecutive faulty words copied exactly from the sentence (for an agreement error both words, as they stand), fix_words is how those same words must read instead. The code builds the segments and the corrected sentence from them. For a fully correct sentence leave both empty. Do not choose a long phrase: the error is the smallest wording that is wrong.`;
+
+/** V9 allows reading questions to target any lesson skill while preserving prior prompt hashes. */
+export const GENERATION_SYSTEM_V9 = GENERATION_SYSTEM_V8.replace("target linking rule", "target rule");
+
 export const GENERATION_SYSTEM_V2 = `You write practice items for ONE adult learner of Australian English (level B2). You output JSON only, in the requested shape.
 Rules: natural adult topics (work, services, travel, community, health, technology), no personal-life questions, no listening. Sentences 8-20 words.
 Every item must test exactly the TARGET SKILL given for it. Russian text (hint_ru, explanation_ru, cue_ru, meaning_ru, marker_ru, reject_ru) must be correct Russian; English text must be correct, natural Australian English.
@@ -132,9 +157,10 @@ export function buildGenerationUser(batchId: string, items: ItemPlan[]): string 
 }
 
 /** V4 has no unrelated worked example: the exact output shape is supplied by the JSON schema. */
-export function buildGenerationUserV4(batchId: string, items: ItemPlan[]): string {
+export function buildGenerationUserV4(batchId: string, items: ItemPlan[], version = ""): string {
   const request = JSON.parse(buildGenerationUser(batchId, items)) as Record<string, unknown>;
   delete request.example_of_one_draft;
+  if (flagsFor(version).wordErrors && items[0]?.type === "detect_error") request.format_rules = DETECT_WORDS_RULES;
   return JSON.stringify(request);
 }
 
@@ -183,7 +209,10 @@ export function assembleExercise(raw: unknown, plan: ItemPlan, ctx: { exerciseId
   if (typeof raw !== "object" || raw === null || Array.isArray(raw)) return { ok: false, issues: [issue("NOT_AN_OBJECT", "", "a draft must be a JSON object")] };
   const d = australianDeep(raw as Record<string, unknown>);
   const type = plan.type as ExerciseType;
-  const allowed = new Set(Object.keys(DRAFT_PROPS[type]));
+  const flags = flagsFor(ctx.promptVersion);
+  const wordHint = flags.wordHint && type === "russian_to_english_short";
+  const wordErrors = flags.wordErrors && type === "detect_error";
+  const allowed = new Set(wordErrors ? Object.keys(DETECT_WORDS_PROPS) : [...Object.keys(DRAFT_PROPS[type]), ...(wordHint ? Object.keys(WORD_HINT_PROPS) : [])]);
   const issues: ValidationIssue[] = [];
   for (const k of Object.keys(d)) {
     if (allowed.has(k)) continue;
@@ -212,11 +241,40 @@ export function assembleExercise(raw: unknown, plan: ItemPlan, ctx: { exerciseId
       if (!Number.isInteger(ci) || ci < 0 || ci >= options.length) issues.push(issue("KEY_OUT_OF_RANGE", "/correct_index", "correct_index must point at one of the options"));
       const article = articleMismatch(sentence.split(GAP)[0] ?? "", options);
       if (article) issues.push(issue("ARTICLE_GIVES_ANSWER", "/sentence", `the article "${article}" before the gap must fit every option, otherwise it gives the answer away`));
+      if (options.length > 3 && options.every((o) => DETERMINER_OPTION.test(norm(o)))) issues.push(issue("ARTICLE_OPTIONS_MAX3", "/options", "an article or determiner item offers at most three options"));
       promptEn = sentence.replace(GAP, "___");
       payload = { options: options.map((text, i) => ({ id: ids[i]!, text })), accepted_option_ids: [ids[ci] ?? "a"], multiple: false };
       break;
     }
     case "detect_error": {
+      if (wordErrors) {
+        const sentence = String(d.sentence ?? "").trim();
+        const seg = String(d.error_words ?? "").trim();
+        const fix = String(d.fix_words ?? "").trim();
+        checkEnglish("sentence", sentence, issues);
+        if (words(sentence) < 4) issues.push(issue("TOO_SHORT", "/sentence", "the sentence is too short"));
+        const tokens = [...sentence.matchAll(/\S+\s*/g)].map((m) => ({ text: m[0], start: m.index!, end: m.index! + m[0].length }));
+        const segments = tokens.map((t, i) => ({ id: `w${i + 1}`, text: t.text }));
+        if (!plan.noMistake) {
+          const at = sentence.indexOf(seg);
+          if (seg === "" || at < 0) issues.push(issue("SEGMENT_NOT_IN_SENTENCE", "/error_words", "error_words must be copied exactly from the sentence"));
+          else if (sentence.indexOf(seg, at + 1) >= 0) issues.push(issue("SEGMENT_AMBIGUOUS", "/error_words", "error_words occurs more than once"));
+          else if ((at > 0 && !/\s/.test(sentence[at - 1]!)) || (at + seg.length < sentence.length && /[A-Za-z0-9']/.test(sentence[at + seg.length]!))) issues.push(issue("SEGMENT_NOT_WORDS", "/error_words", "error_words must be whole words"));
+          if (seg !== "" && words(seg) > 3) issues.push(issue("SEGMENT_TOO_LONG", "/error_words", "mark the smallest wrong wording: at most three words"));
+          if (fix === "" || norm(fix) === norm(seg)) issues.push(issue("NO_CORRECTION", "/fix_words", "fix_words must differ from error_words"));
+          if (issues.length === 0) {
+            const corrected = sentence.slice(0, at) + fix + sentence.slice(at + seg.length);
+            const accepted = tokens.map((t, i) => (t.start < at + seg.length && t.end > at ? segments[i]!.id : null)).filter((x): x is string => x !== null);
+            if (norm(corrected) === norm(sentence)) issues.push(issue("NO_CORRECTION", "/fix_words", "the correction must change the sentence"));
+            else payload = { sentence, segments, accepted_segment_ids: accepted, no_mistake: false, corrections: [corrected], optional_correction: true, fixes: [fix], accept_any: true };
+          }
+        } else {
+          if (seg !== "" || fix !== "") issues.push(issue("EXPECTED_NO_MISTAKE", "/error_words", "this item must be a fully correct sentence: leave error_words and fix_words empty"));
+          else payload = { sentence, segments, accepted_segment_ids: [], no_mistake: true, corrections: [], optional_correction: false };
+        }
+        promptEn = "Find the word that is wrong, or choose No mistake.";
+        break;
+      }
       const sentence = String(d.sentence ?? "").trim();
       const seg = String(d.error_segment ?? "");
       const correction = String(d.correction ?? "").trim();
@@ -267,6 +325,13 @@ export function assembleExercise(raw: unknown, plan: ItemPlan, ctx: { exerciseId
       for (const [i, a] of answers.entries()) checkEnglish(`accepted_answers/${i}`, a, issues);
       if (new Set(answers.map(norm)).size !== answers.length) issues.push(issue("ANSWERS_NOT_DISTINCT", "/accepted_answers", "accepted answers must differ"));
       promptEn = "Translate the idea into natural English.";
+      if (wordHint) {
+        const wh = String(d.word_hint_ru ?? "");
+        checkRussian("word_hint_ru", wh, issues);
+        if (!/[—–-]/.test(wh) || !LATIN_WORD.test(wh)) issues.push(issue("WORD_HINT_SHAPE", "/word_hint_ru", 'word_hint_ru must list English words with their Russian translation ("english — русский")'));
+        if (wh.length > 160) issues.push(issue("WORD_HINT_LONG", "/word_hint_ru", "word_hint_ru is too long: two to four key words only"));
+        if (answers.some((a) => norm(wh).includes(norm(a)))) issues.push(issue("WORD_HINT_LEAKS", "/word_hint_ru", "word_hint_ru must not contain a complete accepted answer"));
+      }
       payload = rubricPayload(d, answers, Math.max(...answers.map(words)) + 5);
       break;
     }
@@ -313,7 +378,7 @@ export function assembleExercise(raw: unknown, plan: ItemPlan, ctx: { exerciseId
     template_cluster: `gen-${type}-${plan.target_skill}-${fingerprint}`,
     bank_role: "practice",
     prompt_en: promptEn,
-    hints_ru: [String(d.hint_ru).trim()],
+    hints_ru: wordHint ? [String(d.hint_ru).trim(), `Слова: ${String(d.word_hint_ru).trim()}`] : [String(d.hint_ru).trim()],
     explanation_ru: String(d.explanation_ru).trim(),
     sources: [],
     provenance: { origin: "qwen", model_tag: ctx.model.tag, model_digest: ctx.model.digest, prompt_version: ctx.promptVersion },

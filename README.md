@@ -23,11 +23,15 @@ The app interface is in English; harder explanations and translations are intend
 
 ## Screenshots
 
-These are real screenshots of an early practice slice, running on a small non-release bank of hand-written exercises. The current interface has more screens than shown here.
+Real screenshots of the running app (dark theme), taken on the small non-release demo profile (`npm run slice`) with fictional, hand-written sentences. No personal data is shown.
 
-| Exercise | Feedback with an optional retry | Session summary |
+| Start page | Exercise | Feedback with an optional retry |
 |---|---|---|
-| ![Choose-the-form exercise](documentation/images/practice-choose-form.png) | ![Feedback after a wrong answer](documentation/images/practice-feedback.png) | ![End-of-session summary](documentation/images/session-summary.png) |
+| ![Start page with lesson path](documentation/images/dashboard.png) | ![Choose-the-form exercise](documentation/images/practice-choose-form.png) | ![Feedback after a wrong answer](documentation/images/practice-feedback.png) |
+
+| Session summary | Analytics |
+|---|---|
+| ![Session summary with answers and AI check](documentation/images/session-summary.png) | ![Analytics from raw attempts](documentation/images/analytics.png) |
 
 ## Key features
 
@@ -72,8 +76,8 @@ Legend: **Working** = implemented and covered by automated tests · **Partial** 
 | Backend | Fastify 5, Zod, Ajv | Local HTTP API on `127.0.0.1`, validation, job queue and scheduler. |
 | Database | SQLite via `better-sqlite3` | Raw attempts, exercise revisions, analytics versions, AI annotations, jobs. |
 | Frontend | React 19, Vite | Single-page UI served by the backend. |
-| Local LLMs | [Ollama](https://ollama.com) with `qwen3:8b` and `nimble-v3` | Qwen: tentative analysis, drafts, vocabulary cards, tutor drafts. Nimble: advisory hints for the content reviewer only. |
-| Speech recognition | `faster-whisper` (Python 3.11, CUDA), or Groq Whisper | Local worker by default; setting `GROQ_API_KEY` in the environment or ignored `.env` sends audio to Groq instead. |
+| Local LLM | [Ollama](https://ollama.com) with `gemma4:12b` | The single local model: tentative answer checks, drafts, vocabulary cards, tutor drafts. |
+| Speech recognition | Groq `whisper-large-v3` (when `GROQ_API_KEY` is set), else `faster-whisper` (Python 3.11, CUDA) | Setting `GROQ_API_KEY` in the environment or the git-ignored `.env` sends audio to Groq; otherwise the local worker is used. |
 | Tests | Vitest, Playwright (core) | Unit, integration and end-to-end tests. |
 
 The repository is an npm workspace: `apps/server`, `apps/web`, `packages/contracts` (shared types), `packages/learning` (Mastery, priorities, selection), plus `migrations/`, `content/`, `scripts/` and `tests/`.
@@ -87,7 +91,7 @@ The project targets **Windows 11** (the start scripts use Windows tooling) and h
 | Requirement | Needed for | Mandatory |
 |---|---|---|
 | Node.js `>=22.17.0 <23` and npm | Everything | Yes |
-| Ollama with `qwen3:8b` (and `nimble-v3:latest`, a local model tag used by this project) | Local AI analysis, vocabulary drafts, tutor | No — practice works without it |
+| Ollama with `gemma4:12b` | Local AI analysis, vocabulary drafts, tutor | No — practice works without it |
 | NVIDIA GPU with ~16 GB VRAM | Local models | No |
 | Python 3.11 with `faster-whisper` | Speech input | No — you can always type |
 
@@ -144,7 +148,7 @@ The server never listens on anything other than loopback.
 
 ### Ollama (optional)
 
-If Ollama is running locally, the server detects it and reports model readiness on the **Status** page and at `/api/v1/capabilities`. The configured tags are `qwen3:8b` and `nimble-v3:latest`; the app does not download models. A GPU check can be run with `npm run verify:gpu`; it uses a scratch database.
+If Ollama is running locally, the server detects it and reports model readiness on the **Status** page and at `/api/v1/capabilities`. The configured model tag is `gemma4:12b`; the app does not download models. A GPU check can be run with `npm run verify:gpu`; it uses a scratch database.
 
 ### Tests
 
@@ -179,7 +183,7 @@ This repository contains **no personal learning data**. If you run the app, crea
 | Foundation | Project skeleton, migrations, backups | Done |
 | Immutable events, Mastery, content validation | Raw attempts, scoring, six exercise formats | Implemented; independent strong review pending |
 | Session allocator and practice slice | No-repeat adaptive sessions, early UI | Implemented; author's comfort verdict pending |
-| GPU queue and AI adapters | Persistent scheduler, Qwen/Nimble, benchmark | Implemented; models not qualified, strong review pending |
+| GPU queue and AI adapters | Persistent scheduler, local model adapter, benchmark | Implemented; models not qualified, strong review pending |
 | Content Studio, STT, full practice UI, settings | Tasks 010–012 | Implemented |
 | Diagnostics, analytics UI, vocabulary, tutor | Tasks 013–016 | Implemented |
 | First ten lessons, release hardening | Tasks 017–018 | Implemented; author's acceptance pending |

@@ -17,6 +17,7 @@ export const SELECTION_VERSION = "selection-v1";
  */
 export const GRAMMAR_SELECTION_V2 = "grammar-selection-v2";
 export const GRAMMAR_SELECTION_V3 = "grammar-selection-v3";
+export const GRAMMAR_SELECTION_V4 = "grammar-selection-v4";
 
 /** repeat limits of grammar-selection-v3 (stored in algorithm_versions) */
 export const GRAMMAR_REPEAT_CONFIG = {
@@ -88,6 +89,8 @@ export interface SelectionInput {
   discovery: { bonusBySkill: Readonly<Record<string, number>>; limit: number };
   /** search budget: nodes explored before the solver gives up on a feasible answer */
   maxNodes?: number;
+  /** Optional cost for stock planning; normal session selection does not use this. */
+  candidatePenalty?: (candidate: Candidate) => number;
 }
 
 export type SlotRole = "weak" | "explore" | "discovery";
@@ -207,7 +210,7 @@ export function selectSession(input: SelectionInput): SelectionResult {
 function solve(input: SelectionInput): SelectionResult {
   const { n } = input;
   const rand = rng(`${SELECTION_VERSION}|${input.seed}|${n}`);
-  const budget = input.maxNodes ?? 20000;
+  const budget = input.maxNodes ?? 100000;
   const deficits: Deficit[] = [];
   const empty = (): SelectionResult => ({
     feasible: false,
@@ -336,14 +339,15 @@ function solve(input: SelectionInput): SelectionResult {
     const j = (jitter.get(c.revisionId) ?? 0) * 1e-6;
     // fresh first: a repeat after a correct answer is the last choice, so it fills a slot only when nothing else can
     if (c.repeat?.reason === "review") return { score: -1000 + p + j, bonus: 0 };
-    if (spec.role === "weak") return { score: p + j, bonus: 0 };
+    const penalty = input.candidatePenalty?.(c) ?? 0;
+    if (spec.role === "weak") return { score: p + j - penalty, bonus: 0 };
     if (spec.role === "discovery") {
       const bonus = input.discovery.bonusBySkill[c.skillId] ?? 0; // bonus is not multiplied by the agent multiplier
-      return { score: p + bonus + j, bonus };
+      return { score: p + bonus + j - penalty, bonus };
     }
     // explore: new skill/family/context first, then the base priority as a mild tie-breaker
     const nov = (usedSkill.has(c.skillId) ? 0 : 1) + (familyCount.has(c.family) ? 0 : 0.5) + (usedContext.has(c.contextId) ? 0 : 0.1);
-    return { score: nov + 0.3 * p + (jitter.get(c.revisionId) ?? 0) * 0.05, bonus: 0 };
+    return { score: nov + 0.3 * p + (jitter.get(c.revisionId) ?? 0) * 0.05 - penalty, bonus: 0 };
   };
 
   const allowed = (spec: Spec, c: Candidate): boolean => {
@@ -385,7 +389,8 @@ function solve(input: SelectionInput): SelectionResult {
       .sort((a, b) => b.score - a.score || (a.c.revisionId < b.c.revisionId ? -1 : 1));
     // the No-mistake requirement is satisfied by the first detect_error slot that can take such a case
     const forceNoMistake = spec.format === "detect_error" && needNoMistake && spec.role !== "discovery"; // a probe may be an error item; another slot supplies the No-mistake case
-    const tries = (forceNoMistake ? options.filter((o) => o.c.noMistake) : options).slice(0, 6);
+    const eligible = forceNoMistake ? options.filter((o) => o.c.noMistake) : options;
+    const tries = eligible;
     for (const o of tries) {
       chosen.push({ spec, cand: o.c, score: o.score, bonus: o.bonus });
       if (o.c.repeat) {

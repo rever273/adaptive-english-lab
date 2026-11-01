@@ -232,7 +232,7 @@ describe("early UX checkpoint (non-release vertical slice) - real browser, real 
         continue;
       } else if (s.type === "guided_short_answer" && !pendingDone) {
         pendingDone = true;
-        await expect.poll(async () => /speak this one|Voice is not available/.test(await page.getByTestId("voice-note").innerText()), T).toBe(true); // honest about whether voice works on this computer
+        await expect.poll(async () => (await page.getByTestId("voice-note").count()) === 0 || /Voice is not available/.test(await page.getByTestId("voice-note").innerText()), T).toBe(true); // a note appears only when voice does not work on this computer
         await shot(page, "07-short-answer-prompt");
         await page.getByTestId("answer-text").fill("He quit it a while ago.");
         await page.getByTestId("submit").click();

@@ -7,7 +7,8 @@ import { enqueue } from "../../../queue/jobs.js";
 import { ensurePromptVersion } from "../../ai/prompts.js";
 import { draftFormatsText } from "./draftFormats.js";
 import { lessonPlanView } from "./lessonNeeds.js";
-import { groupUnits, planBatch, planFromDeficits, type ItemPlan, type LessonDemand } from "./plan.js";
+import { groupUnits, planBatch, planCourseMissing, planFromDeficits, type ItemPlan, type LessonDemand } from "./plan.js";
+import { calculateCoursePlan } from "./coursePlanning.js";
 import { taxonomyForNewRevisions } from "../repository.js";
 import { vocabularyPlanSlots, vocabularyReplenishment } from "./vocabularyPlan.js";
 import { loadBlockedFingerprints, loadCandidates } from "../../sessions/bank.js";
@@ -17,7 +18,7 @@ import { vocabularyFormat } from "./vocabularyDrafts.js";
 /** Setting of a vocabulary sentence: 15% IT/technology (every 7th step of a 20-cycle), the rest general adult life, varied per ordinal and per repeat of the same word. */
 const GENERAL_TOPICS = ["workplace", "travel", "health", "shopping", "family", "education", "community", "household", "sport", "food", "finance", "weather"] as const;
 export const vocabularyTopic = (ordinal: number, round: number): string => (ordinal * 7) % 20 < 3 ? "technology" : GENERAL_TOPICS[(ordinal * 5 + round * 3) % GENERAL_TOPICS.length]!;
-export const GENERATION_PROMPT = "generation-v6";
+export const GENERATION_PROMPT = "generation-v9";
 /** a skill is "covered" when it has this many released (selectable) exercises; below it the coverage view reports a deficit (D46) */
 export const TARGET_SELECTABLE_PER_SKILL = 12;
 
@@ -240,7 +241,8 @@ export function createBatch(db: Db, deps: BatchDeps, input: z.input<typeof Creat
               : [...tax.skills].sort((a, b) => (coverage.get(a) ?? 0) - (coverage.get(b) ?? 0) || (a < b ? -1 : 1)), // no skill pool: the thinnest skills of the taxonomy
             capacity: n.recommended,
           }));
-          plans = planFromDeficits({ count: request.count, lessons, ...(request.types ? { types: request.types } : {}), tag: batchId.slice(0, 8) });
+          const course = !request.types ? calculateCoursePlan(db, deps.now()) : null;
+          plans = course?.missing.length ? planCourseMissing(course.missing, request.count, batchId.slice(0, 8)) : planFromDeficits({ count: request.count, lessons, ...(request.types ? { types: request.types } : {}), tag: batchId.slice(0, 8) });
         } else {
         // Replenish the current lesson's skill pool without changing session selection or its weakness algorithm.
         const last = db.prepare("SELECT blueprint_revision_id AS id FROM sessions WHERE purpose = 'practice' AND blueprint_revision_id IS NOT NULL ORDER BY created_at DESC, rowid DESC LIMIT 1").get() as { id: string } | undefined;
@@ -254,7 +256,7 @@ export function createBatch(db: Db, deps: BatchDeps, input: z.input<typeof Creat
         const levels = difficultyLevels(loadSettings(db).values);
         if (levels) plans = plans.map((p) => ({ ...p, level: levels[p.ordinal % levels.length]! }));
       }
-      const promptVersionId = ensurePromptVersion(db, request.category === "vocabulary" ? "vocabulary-generation-v4" : GENERATION_PROMPT, request.category === "vocabulary" ? JSON.stringify(vocabularyFormat(2)) : draftFormatsText());
+      const promptVersionId = ensurePromptVersion(db, request.category === "vocabulary" ? "vocabulary-generation-v4" : GENERATION_PROMPT, request.category === "vocabulary" ? JSON.stringify(vocabularyFormat(2)) : draftFormatsText(GENERATION_PROMPT));
       const now = deps.now().toISOString();
       const count = purpose === "trial" ? TRIAL_SIZE : request.count;
       db.prepare("INSERT INTO batches(id, requested_count, mode, purpose, prompt_version_id, spec_json, created_at) VALUES (?,?,?,?,?,?,?)").run(batchId, count, request.mode, purpose, promptVersionId, JSON.stringify({ category: request.category, skills: request.skills ?? null, types: purpose === "trial" ? [...EXERCISE_TYPES] : (request.types ?? null), perTypeTrial: TRIAL_PER_TYPE }), now);

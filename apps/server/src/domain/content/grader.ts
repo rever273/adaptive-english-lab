@@ -109,13 +109,14 @@ export const ClosedFormAssessor: Assessor = {
       }
       case "detect_error": {
         const ids = needOptions(raw);
-        const p = content.payload as { no_mistake: boolean; accepted_segment_ids: string[]; segments: Array<{ id: string }> };
+        const p = content.payload as { no_mistake: boolean; accepted_segment_ids: string[]; segments: Array<{ id: string }>; accept_any?: boolean };
         if (ids.length === 1 && ids[0] === NO_MISTAKE_ID) {
           return confirmed(p.no_mistake ? "correct" : "incorrect", p.no_mistake ? "Correctly identified a sentence with no mistake." : "The sentence does contain a mistake.");
         }
         if (ids.includes(NO_MISTAKE_ID)) throw new ApiError(422, "ANSWER_SHAPE_INVALID", "\"No mistake\" cannot be combined with a segment");
         const segs = new Set(p.segments.map((s) => s.id));
-        const ok = !p.no_mistake && ids.every((i) => segs.has(i)) && setKey(ids) === setKey(p.accepted_segment_ids);
+        // accept_any (word-level items): the error spans one to three words and tapping any one of them finds it
+        const ok = !p.no_mistake && ids.every((i) => segs.has(i)) && (p.accept_any ? ids.length === 1 && p.accepted_segment_ids.includes(ids[0]!) : setKey(ids) === setKey(p.accepted_segment_ids));
         return confirmed(ok ? "correct" : "incorrect", ok ? "Exact match with the faulty segment(s)." : p.no_mistake ? "The sentence has no mistake." : "Selected segment(s) differ from the faulty one(s).");
       }
       case "context_reading": {

@@ -101,12 +101,12 @@ describe("a default snapshot (N=18, 5/5/5/1/2)", () => {
 
     // pinned versions and the audit decision
     const s = one<{ settings_revision_id: string; plan_id: string; selection_version: string; random_seed: string; blueprint_revision_id: string }>("SELECT * FROM sessions WHERE id = ?", sessionId);
-    expect(s).toMatchObject({ selection_version: "grammar-selection-v3", random_seed: "seed-1", blueprint_revision_id: env.blueprintRevisionId });
+    expect(s).toMatchObject({ selection_version: "grammar-selection-v4", random_seed: "seed-1", blueprint_revision_id: env.blueprintRevisionId });
     expect(one<{ revision: number }>("SELECT revision FROM settings_revisions WHERE id = ?", s.settings_revision_id).revision).toBe(2);
     expect(one<{ reviewer: string }>("SELECT reviewer FROM learning_plans WHERE id = ?", s.plan_id).reviewer).toBe("system:baseline");
     const d = one<{ choices_json: string; deficits_json: string; algorithm_id: string; candidate_hash: string }>("SELECT * FROM scheduling_decisions WHERE session_id = ?", sessionId);
     const choices = JSON.parse(d.choices_json) as { seed: string; stats: { weakTarget: number; weakActual: number }; slots: unknown[]; discovery: { version: string; qualificationIds: string[] } };
-    expect(d.algorithm_id).toBe("grammar-selection-v3");
+    expect(d.algorithm_id).toBe("grammar-selection-v4");
     expect(d.candidate_hash).toMatch(/^[0-9a-f]{64}$/);
     expect(choices).toMatchObject({ seed: "seed-1", stats: { weakTarget: 12, weakActual: 12 }, discovery: { version: "discovery-v1", qualificationIds: [] } });
     expect(choices.slots).toHaveLength(18);

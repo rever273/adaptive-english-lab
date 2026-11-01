@@ -17,7 +17,8 @@ Distractors must be WRONG in this sentence (grammar or meaning). Never use a syn
 
 /** v4: varied settings and no sentence that is already in the bank (53 of 59 empty drafts of a v3 batch repeated stock sentences). */
 export const VOCABULARY_SYSTEM_V4 = `${VOCABULARY_SYSTEM_V3}
-Each item has a topic and avoid_sentences. Set the sentence in an everyday situation of that topic ("technology" means software, computing or digital work; every other topic is ordinary adult life and must not be about IT). avoid_sentences are existing sentences with this word: write a clearly different one (new subject, situation and sentence frame); never copy or lightly rephrase them.`;
+Each item has a topic and avoid_sentences. Set the sentence in an everyday situation of that topic ("technology" means software, computing or digital work; every other topic is ordinary adult life and must not be about IT). avoid_sentences are existing sentences with this word: write a clearly different one (new subject, situation and sentence frame); never copy or lightly rephrase them.
+Self-check every draft before returning it: put each option and each accepted answer into the sentence and read the whole result (no doubled or leftover word next to the gap, a/an agrees with the next word and with EVERY option, Australian spelling); only the keyed option may fit; the Russian translation of the sentence and of the word is natural and matches this sense; the cue never also fits a common synonym; vary subject, situation and sentence frame between items.`;
 
 const words = (s: string): string[] => s.toLowerCase().match(/[a-z]+(?:['’-][a-z]+)*/g) ?? [];
 /** the answer must not repeat the words that already stand next to the gap */
