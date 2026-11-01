@@ -28,21 +28,21 @@ describe("settings over HTTP", () => {
     const call = (method: "POST" | "GET", body?: unknown, ok = true) => app!.inject({ method, url: "/api/v1/settings", payload: body as object, headers: { host, origin: `http://${host}`, cookie, "x-csrf-token": ok ? csrf : "" } });
 
     const first = (await call("GET")).json();
-    expect(first.revision).toBe(1);
+    expect(first.revision).toBe(2);
     expect(first.values).toMatchObject({ taskCount: 18, weakRatio: 0.65, voiceTarget: 2 });
     expect(vocabularyTaskCount(first.values)).toBe(8);
 
     const saved = await call("POST", { taskCount: 12, voiceTarget: 1 });
     expect(saved.statusCode).toBe(200);
-    expect(saved.json().revision).toBe(2);
+    expect(saved.json().revision).toBe(3);
     expect(saved.json().values).toMatchObject({ taskCount: 12, weakRatio: 0.65, voiceTarget: 1, difficulty: "adaptive", explanation: "compact" });
 
-    expect((await call("POST", { taskCount: 12, voiceTarget: 1 })).json().revision).toBe(2); // no change, no new revision
+    expect((await call("POST", { taskCount: 12, voiceTarget: 1 })).json().revision).toBe(3); // no change, no new revision
     for (const bad of [{ taskCount: 4 }, { taskCount: 31 }, { weakRatio: 1.5 }, { voiceTarget: 3 }, { difficulty: "C2" }]) expect((await call("POST", bad)).statusCode).toBe(400);
     expect((await call("POST", { taskCount: 10 }, false)).statusCode).toBe(403);
 
     const revs = rows<{ revision: number; v: string }>(env.db, "SELECT revision, values_json AS v FROM settings_revisions ORDER BY revision");
-    expect(revs.map((r) => r.revision)).toEqual([1, 2]);
+    expect(revs.map((r) => r.revision)).toEqual([1, 2, 3]);
     expect(JSON.parse(revs[0]!.v).taskCount).toBe(18); // the first revision is untouched
     expect(JSON.parse(revs[0]!.v).vocabularyTaskCount).toBeUndefined();
     expect((await call("POST", { vocabularyTaskCount: 4 })).statusCode).toBe(400);
@@ -69,9 +69,11 @@ describe("settings over HTTP", () => {
     expect(reviewNoticeThreshold((await call("POST", { reviewNoticeThreshold: 3 })).json().values)).toBe(3);
 
     // TASK_021: optional target difficulty range; absent (older revisions) means no restriction
-    expect(difficultyLevels(first.values)).toBeNull();
+    expect(difficultyLevels(first.values)).toEqual(["B1", "B2", "C1"]);
     expect(JSON.parse(revs[0]!.v).difficultyMin).toBeUndefined();
-    expect((await call("POST", { difficultyMin: "C2" })).statusCode).toBe(400);
+    expect((await call("POST", { difficultyMax: "C2" })).statusCode).toBe(200);
+    expect(difficultyLevels((await call("GET")).json().values)).toEqual(["B1", "B2", "C1", "C2"]);
+    expect((await call("POST", { difficultyMin: "C3" })).statusCode).toBe(400);
     const range = await call("POST", { difficultyMin: "B2", difficultyMax: "C1" });
     expect(range.statusCode).toBe(200);
     expect(difficultyLevels(range.json().values)).toEqual(["B2", "C1"]);

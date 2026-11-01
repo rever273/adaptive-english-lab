@@ -18,14 +18,15 @@ export interface PriorityTable {
  * P = .4 weakness + .25 failure pressure + .2 due + .15 uncertainty (spec/04), computed from the same eligible evidence
  * as Mastery. Pure arithmetic from stored events: no model, and a larger bank never changes a skill's priority.
  */
-export function loadPriorities(db: Db, candidates: readonly BankCandidate[], asOfIso: string, taxonomyId: string): PriorityTable {
+export function loadPriorities(db: Db, candidates: readonly BankCandidate[], asOfIso: string, taxonomyId: string, additionalCohorts: readonly { criterionVersion: string; difficulty: string }[] = []): PriorityTable {
   const watermark = currentWatermark(db);
   const cohorts = new Map<string, { criterionVersion: string; difficulty: BankCandidate["difficulty"] }>();
   for (const c of candidates) cohorts.set(`${c.rubricVersion}|${c.difficulty}`, { criterionVersion: c.rubricVersion, difficulty: c.difficulty });
+  for (const c of additionalCohorts) cohorts.set(`${c.criterionVersion}|${c.difficulty}`, c);
   const table = new Map<string, number>();
   const parts: string[] = [];
   for (const [key, cohort] of [...cohorts.entries()].sort(([a], [b]) => (a < b ? -1 : 1))) {
-    const evidence = loadEvidence(db, { watermark, asOf: asOfIso, taxonomyId, cohort: cohort as { criterionVersion: string; difficulty: "A2" | "B1" | "B2" | "C1" } });
+    const evidence = loadEvidence(db, { watermark, asOf: asOfIso, taxonomyId, cohort: cohort as { criterionVersion: string; difficulty: "A2" | "B1" | "B2" | "C1" | "C2" } });
     const activity = loadActivity(db, { watermark, asOf: asOfIso, taxonomyId });
     const groups = computeGroups(evidence, activity, asOfIso, MASTERY_V1);
     const bySkillDim = new Map<string, typeof evidence>();

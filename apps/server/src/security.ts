@@ -35,7 +35,7 @@ export function registerSecurity(app: FastifyInstance, config: Pick<AppConfig, "
     reply.header("X-Frame-Options", "DENY");
     reply.header(
       "Content-Security-Policy",
-      "default-src 'self'; script-src 'self'; style-src 'self'; img-src 'self' data:; connect-src 'self'; object-src 'none'; base-uri 'none'; frame-ancestors 'none'; form-action 'self'",
+      "default-src 'self'; script-src 'self'; style-src 'self'; img-src 'self' data:; media-src 'self' blob:; connect-src 'self'; object-src 'none'; base-uri 'none'; frame-ancestors 'none'; form-action 'self'",
     );
     if (req.url.startsWith("/api/") || req.url.startsWith("/internal/")) reply.header("Cache-Control", "no-store");
     return payload;

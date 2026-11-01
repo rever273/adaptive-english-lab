@@ -19,7 +19,8 @@ import { createDiagnosticBlock, createHeldoutCheck, diagnosticStatus, heldoutSta
 import { getFeedback } from "../domain/sessions/feedback.js";
 import { finishSession, summarize } from "../domain/sessions/finish.js";
 import { HEARTBEAT_SECONDS, takeLease } from "../domain/sessions/lease.js";
-import { PLAYABLE_BLUEPRINT_STATUSES, loadBlueprint, loadSettings, type SessionDeps } from "../domain/sessions/policy.js";
+import { loadBlueprint, loadSettings, type SessionDeps } from "../domain/sessions/policy.js";
+import { courseLessons } from "../domain/sessions/course.js";
 import { computeReadiness } from "../domain/sessions/readiness.js";
 import { revealSlot } from "../domain/sessions/reveal.js";
 import { currentSessionId, getSnapshot, recentSessionId, sessionCategory, type SessionCategory } from "../domain/sessions/snapshot.js";
@@ -58,7 +59,7 @@ export function registerSessionRoutes(app: FastifyInstance, db: Db, deps: Sessio
   app.get("/api/v1/activity-progress", async () => ({ grammar: activityProgress(db, "grammar"), vocabulary: activityProgress(db, "vocabulary") }));
   app.post("/api/v1/sessions", async (req, reply): Promise<CreateSessionResponse> => {
     const body = parse(CreateSessionRequestSchema, req.body);
-    const r = body.purpose === "diagnostic" ? createDiagnosticBlock(db, deps, body) : body.purpose === "heldout" ? createHeldoutCheck(db, deps, body) : createPracticeSession(db, deps, body, { discovery: opts.discovery });
+    const r = body.purpose === "diagnostic" ? createDiagnosticBlock(db, deps, body) : body.purpose === "heldout" ? createHeldoutCheck(db, deps, body) : createPracticeSession(db, deps, body, { discovery: opts.discovery, enforceStock: true });
     reply.code(201);
     return r;
   });
@@ -122,20 +123,12 @@ export function registerSessionRoutes(app: FastifyInstance, db: Db, deps: Sessio
   // Dashboard: resume pointer, readiness by sequential simulation, and the exact shortage when a session cannot be built.
   app.get("/api/v1/dashboard", async (): Promise<Dashboard> => {
     const settings = loadSettings(db);
-    const rows = db
-      .prepare(
-        `SELECT br.id AS id, b.stable_key AS key, br.status AS status
-           FROM blueprint_revisions br JOIN blueprints b ON b.id = br.blueprint_id
-          WHERE br.revision = (SELECT MAX(x.revision) FROM blueprint_revisions x WHERE x.blueprint_id = br.blueprint_id)
-          ORDER BY b.stable_key`,
-      )
-      .all() as Array<{ id: string; key: string; status: string }>;
+    const rows = courseLessons(db);
     const blueprints = rows
-      .filter((r) => PLAYABLE_BLUEPRINT_STATUSES.has(r.status))
       .map((r) => {
         const bp = loadBlueprint(db, r.id);
         const ready = computeReadiness(db, deps, r.id);
-        return { blueprintRevisionId: r.id, key: r.key, title: bp.policy.title, status: r.status, readySessions: ready.readySessions, shortage: ready.shortage };
+        return { blueprintRevisionId: r.id, key: r.key, title: bp.policy.title, status: r.status, completed: r.completed, unlocked: r.unlocked, readySessions: ready.readySessions, shortage: ready.shortage };
       });
     return { activeSessionId: currentSessionId(db, "grammar"), taskCount: settings.values.taskCount, blueprints, banner: opts.banner ?? null, diagnostic: diagnosticStatus(db, deps), review: reviewStatus(db), heldout: heldoutStatus(db, deps) };
   });

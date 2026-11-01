@@ -3,7 +3,7 @@ import type { Db } from "../../db/open.js";
 /** The cohort a report speaks about (spec/04, spec/09): never mixed across rubric, difficulty or protocol. */
 export interface ReportCohort {
   criterionVersion: string;
-  difficulty: "A2" | "B1" | "B2" | "C1";
+  difficulty: "A2" | "B1" | "B2" | "C1" | "C2";
   protocol: "practice" | "diagnostic-v1";
 }
 

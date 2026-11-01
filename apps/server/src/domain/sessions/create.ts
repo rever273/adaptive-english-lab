@@ -4,7 +4,7 @@ import {
   DEFAULT_QUOTAS,
   DISCOVERY_V1,
   GRAMMAR_REPEAT_CONFIG,
-  GRAMMAR_SELECTION_V2,
+  GRAMMAR_SELECTION_V3,
   SELECTION_VERSION,
   canonicalJson,
   clampMultiplier,
@@ -18,6 +18,8 @@ import {
 } from "@english-lab/learning";
 import type { Db } from "../../db/open.js";
 import { ApiError } from "../../errors.js";
+import { MAX_LESSON_PLAYS } from "@english-lab/contracts";
+import { lessonNeedFor, needMessage } from "../content/batches/lessonNeeds.js";
 import { runDiscovery } from "../analytics/discoveryAdapter.js";
 import { localDateIn } from "../attempts/canonical.js";
 import { loadBlockedFingerprints, loadCandidates, type BankCandidate } from "./bank.js";
@@ -25,23 +27,26 @@ import { PLAYABLE_BLUEPRINT_STATUSES, loadBlueprint, loadPlan, loadSettings, typ
 import { loadPriorities } from "./priorities.js";
 import { withRepeats } from "./repeats.js";
 import { getSnapshot } from "./snapshot.js";
+import { courseLessons } from "./course.js";
 
 const sha256 = (s: string): string => createHash("sha256").update(s).digest("hex");
 
 export interface CreateOptions {
   /** discovery-v1 configuration; the shipped default has no qualified model, so the signal is off */
   discovery?: DiscoveryConfig;
+  /** the HTTP route sets it: a lesson already played MAX_LESSON_PLAYS times, or whose stock does not cover its remaining plays (repeats counted), does not open */
+  enforceStock?: boolean;
 }
 
-/** D68: sessions are recorded under grammar-selection-v2 (selection-v1 plus labelled repeats); the v1 row, where it exists, stays in history */
+/** D68: sessions use grammar-selection-v3; earlier algorithm records remain unchanged */
 export function ensureSelectionVersion(db: Db, deps: SessionDeps, discovery: DiscoveryConfig): string {
-  const cfg = { version: GRAMMAR_SELECTION_V2, base: SELECTION_VERSION, defaultQuotas: DEFAULT_QUOTAS, familyCap: 0.35, formatCap: 0.4, discovery: discovery.version, repeats: GRAMMAR_REPEAT_CONFIG };
+  const cfg = { version: GRAMMAR_SELECTION_V3, base: SELECTION_VERSION, defaultQuotas: DEFAULT_QUOTAS, familyCap: 0.35, formatCap: 0.4, discovery: discovery.version, repeats: GRAMMAR_REPEAT_CONFIG };
   const json = canonicalJson(cfg);
   const hash = sha256(json);
-  const row = db.prepare("SELECT config_hash AS h FROM algorithm_versions WHERE id = ?").get(GRAMMAR_SELECTION_V2) as { h: string } | undefined;
-  if (row) return GRAMMAR_SELECTION_V2; // the shape of the config is fixed per version id; a different shape needs a new id
-  db.prepare("INSERT INTO algorithm_versions(id, config_json, config_hash, source_version, created_at) VALUES (?,?,?,?,?)").run(GRAMMAR_SELECTION_V2, json, hash, "packages/learning@0.1.0", deps.now().toISOString());
-  return GRAMMAR_SELECTION_V2;
+  const row = db.prepare("SELECT config_hash AS h FROM algorithm_versions WHERE id = ?").get(GRAMMAR_SELECTION_V3) as { h: string } | undefined;
+  if (row) return GRAMMAR_SELECTION_V3; // the shape of the config is fixed per version id; a different shape needs a new id
+  db.prepare("INSERT INTO algorithm_versions(id, config_json, config_hash, source_version, created_at) VALUES (?,?,?,?,?)").run(GRAMMAR_SELECTION_V3, json, hash, "packages/learning@0.1.0", deps.now().toISOString());
+  return GRAMMAR_SELECTION_V3;
 }
 
 /** What the allocator needs from the bank, reused by readiness simulation. */
@@ -99,15 +104,19 @@ export function createPracticeSession(db: Db, deps: SessionDeps, req: CreateSess
 
       const blueprint = loadBlueprint(db, req.blueprintRevisionId!);
       if (!PLAYABLE_BLUEPRINT_STATUSES.has(blueprint.status)) throw new ApiError(409, "BLUEPRINT_NOT_APPROVED", `Blueprint is ${blueprint.status}, not approved/published`);
+      const lessonRow = courseLessons(db).find((lesson) => lesson.id === blueprint.id);
+      if (!lessonRow?.unlocked) throw new ApiError(409, "LESSON_LOCKED", "Complete the previous lesson to unlock this lesson");
+      if (opts.enforceStock && lessonRow.completed >= MAX_LESSON_PLAYS) throw new ApiError(409, "LESSON_DONE", `This lesson is finished (${lessonRow.completed}/${MAX_LESSON_PLAYS}). Continue with the next lesson.`, { completed: lessonRow.completed, max: MAX_LESSON_PLAYS });
       const settings = loadSettings(db, req.settingsRevisionId);
       const plan = loadPlan(db, deps);
       const taxonomyId = (db.prepare("SELECT id FROM taxonomy_versions ORDER BY created_at DESC, rowid DESC LIMIT 1").get() as { id: string }).id;
       const nowIso = deps.now().toISOString();
 
       // D68: exercises shown in an earlier ended session come back as labelled repeats when due; everything else is fresh
-      const candidates = withRepeats(db, loadCandidates(db, "practice", blueprint.policy.skillPool, difficultyLevels(settings.values)), deps.now()).candidates;
+      const bank = loadCandidates(db, "practice", blueprint.policy.skillPool, difficultyLevels(settings.values));
+      let candidates = withRepeats(db, bank, deps.now()).candidates;
       const blocked = loadBlockedFingerprints(db);
-      const priorities = loadPriorities(db, candidates, nowIso, taxonomyId);
+      const priorities = loadPriorities(db, bank, nowIso, taxonomyId);
       const discovery = runDiscovery(db, { asOf: nowIso, taxonomyId, config: discoveryCfg });
       const bonusBySkill = Object.fromEntries(discovery.skills.filter((s) => s.bonus > 0).map((s) => [s.skillId, s.bonus]));
       const seed = req.seed ?? deps.newId();
@@ -134,7 +143,18 @@ export function createPracticeSession(db: Db, deps: SessionDeps, req: CreateSess
         discoveryFallback = true;
       }
       if (!result.feasible) {
+        // Only relax the age of correct repeats after the ordinary pool cannot build a session.
+        candidates = withRepeats(db, bank, deps.now(), "shortage").candidates;
+        ({ result, quotas } = solveWith({}));
+      }
+      if (!result.feasible) {
         throw new ApiError(409, "CONTENT_SHORTAGE", `Not enough approved exercises for ${n} tasks`, { deficits: result.deficits, largestFeasibleN: result.largestFeasibleN, requestedN: n });
+      }
+      if (opts.enforceStock) {
+        const need = lessonNeedFor(db, blueprint.id, deps.now());
+        if (need && need.deficit > 0) {
+          throw new ApiError(409, "LESSON_STOCK_LOW", `${needMessage(need)} Create a new batch in Content Studio (suggested size ${need.recommended}).`, { lesson: need.label, deficit: need.deficit, recommended: need.recommended });
+        }
       }
       const byId = new Map<string, Candidate>(candidates.map((c) => [c.revisionId, c]));
       const violations = hardViolations(result.slots, n, byId, blocked, quotas);

@@ -34,6 +34,7 @@ const { loadConfig } = await loadServerModule("config.js");
 const { prepareDatabase } = await loadServerModule("db/prepare.js");
 const { readLock, classifyLock } = await loadServerModule("lock.js");
 const repo = await loadServerModule("domain/content/repository.js");
+const { BlueprintPolicySchema } = await loadServerModule("domain/sessions/policy.js");
 const { computeReadiness } = await loadServerModule("domain/sessions/readiness.js");
 const { REVIEW_CHECKLIST_KEYS } = await import(pathToFileURL(path.join(projectRoot, "packages", "contracts", "dist", "index.js")).href);
 
@@ -44,6 +45,25 @@ if (cmd === "publish" && running && classifyLock(running) !== "stale") {
   process.exit(3);
 }
 const { db } = await prepareDatabase(config);
+const blueprintKeys = new Set();
+const lessonNumbers = new Map(db.prepare("SELECT stable_key AS key FROM blueprints").all().map((r) => [/l(\d+)$/i.exec(r.key)?.[1], r.key]).filter(([n]) => n !== undefined).map(([n, key]) => [Number(n), key]));
+const activeSkills = new Set(db.prepare("SELECT skill_id AS id FROM skill_revisions WHERE active = 1 AND taxonomy_id = (SELECT id FROM taxonomy_versions ORDER BY created_at DESC, rowid DESC LIMIT 1)").all().map((r) => r.id));
+for (const b of pack.blueprints ?? []) {
+  const valid = BlueprintPolicySchema.safeParse(b.policy);
+  if (typeof b.key !== "string" || !/^[a-z0-9][a-z0-9-]*$/.test(b.key) || blueprintKeys.has(b.key) || !valid.success || (valid.success && valid.data.skillPool.some((id) => !activeSkills.has(id)))) {
+    console.error(`Invalid or duplicate blueprint ${b.key ?? "(missing key)"}`);
+    db.close();
+    process.exit(2);
+  }
+  const number = /l(\d+)$/i.exec(b.key)?.[1];
+  if (number !== undefined && lessonNumbers.has(Number(number)) && lessonNumbers.get(Number(number)) !== b.key) {
+    console.error(`Lesson number ${Number(number)} is already used by ${lessonNumbers.get(Number(number))}`);
+    db.close();
+    process.exit(2);
+  }
+  if (number !== undefined) lessonNumbers.set(Number(number), b.key);
+  blueprintKeys.add(b.key);
+}
 const deps = { now: () => new Date(), newId: randomUUID };
 const authorActor = { type: "agent", id: pack.author.slice("agent:".length) };
 const exportsDir = path.join(config.dataRoot, "exports");

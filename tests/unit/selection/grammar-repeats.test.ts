@@ -55,7 +55,7 @@ const repeatsIn = (r: ReturnType<typeof selectSession>) => r.slots.filter((s) =>
 
 describe("grammar repeats in the solver (D68)", () => {
   it("the config is the one the task fixes: 30% soon, 14 days for a correct answer", () => {
-    expect(GRAMMAR_REPEAT_CONFIG).toMatchObject({ soonShare: 0.3, correctAfterDays: 14 });
+    expect(GRAMMAR_REPEAT_CONFIG).toMatchObject({ soonShare: 0.3, correctAfterDays: 3, shortageAfterDays: 1 });
   });
 
   it("a bank without repeats gives exactly the old session: the revision ids equal what the unchanged selection-v1 code produced", () => {

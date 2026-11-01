@@ -5,7 +5,7 @@ import { ApiError } from "../../errors.js";
 import { applyAction, enqueue } from "../../queue/jobs.js";
 import { bankTexts, countOccurrences, isValidWord, matchForms, normalizeWord, shownTexts } from "./forms.js";
 
-export const VOCAB_PROMPT = "vocabulary-v3";
+export const VOCAB_PROMPT = "vocabulary-v4";
 export const CEFR_LEVELS = ["A1", "A2", "B1", "B2", "C1", "C2"] as const;
 export const POS_VALUES = ["noun", "verb", "adjective", "adverb", "preposition", "conjunction", "pronoun", "determiner", "phrase", "phrasal verb", "idiom", "other"] as const;
 
@@ -75,6 +75,8 @@ export interface EntryView {
   aiExampleOmitted: boolean;
   /** AI draft CEFR level of the word in the sense the learner met it (D64), null until the model has written it */
   level: string | null;
+  /** reference facts from the word job (D69), taken as true by user decision; empty strings/arrays where the model had nothing reliable; null until the job has run */
+  lexicon: { transcription: string; definitionRu: string; synonyms: string[]; irregularForms: string[]; frequency: number | null } | null;
   /** how many vocabulary-practice tasks on this word you have answered (first tries only; a plain count, not a score) */
   practised: number;
   bank: { occurrences: number; revisions: number };
@@ -115,6 +117,7 @@ function view(db: Db, e: EntryRow): EntryView {
   const bank = db.prepare("SELECT COUNT(*) AS n, COUNT(DISTINCT revision_id) AS r FROM vocabulary_encounters WHERE entry_id = ? AND kind = 'bank'").get(e.id) as { n: number; r: number };
   const shown = db.prepare("SELECT COUNT(*) AS n, COUNT(DISTINCT slot_id) AS s, MAX(created_at) AS last FROM vocabulary_encounters WHERE entry_id = ? AND kind = 'displayed'").get(e.id) as { n: number; s: number; last: string | null };
   const level = db.prepare("SELECT level FROM vocabulary_levels WHERE entry_id = ? ORDER BY created_at DESC, rowid DESC LIMIT 1").get(e.id) as { level: string } | undefined;
+  const lex = db.prepare("SELECT transcription, definition_ru AS d, synonyms_json AS s, irregular_forms_json AS i, frequency FROM vocabulary_lexicon WHERE entry_id = ? ORDER BY created_at DESC, rowid DESC LIMIT 1").get(e.id) as { transcription: string; d: string; s: string; i: string; frequency: number | null } | undefined;
   const practised = (db
     .prepare(
       `SELECT COUNT(*) AS n FROM attempts t JOIN session_slots ss ON ss.id = t.slot_id JOIN vocabulary_sessions vs ON vs.session_id = ss.session_id
@@ -142,6 +145,7 @@ function view(db: Db, e: EntryRow): EntryView {
     aiError: !translation.text && !pending && latestFullJob?.state === "failed" ? latestFullJob.error : null,
     aiExampleOmitted: !user?.example_en && modelResult?.schema === "vocabulary-partial-v1",
     level: level?.level ?? null,
+    lexicon: lex ? { transcription: lex.transcription, definitionRu: lex.d, synonyms: JSON.parse(lex.s) as string[], irregularForms: JSON.parse(lex.i) as string[], frequency: lex.frequency } : null,
     practised,
     bank: { occurrences: bank.n, revisions: bank.r },
     displayed: { occurrences: shown.n, slots: shown.s },
@@ -248,7 +252,7 @@ export function listWords(db: Db, o: { q?: string; learned?: boolean; limit?: nu
  */
 export function queueMissingLevels(db: Db, deps: Deps): number {
   const missing = db
-    .prepare(`SELECT id FROM vocabulary_entries WHERE ${VISIBLE} AND NOT EXISTS (SELECT 1 FROM vocabulary_levels l WHERE l.entry_id = vocabulary_entries.id)`)
+    .prepare(`SELECT id FROM vocabulary_entries WHERE ${VISIBLE} AND (NOT EXISTS (SELECT 1 FROM vocabulary_levels l WHERE l.entry_id = vocabulary_entries.id) OR NOT EXISTS (SELECT 1 FROM vocabulary_lexicon x WHERE x.entry_id = vocabulary_entries.id))`)
     .all() as Array<{ id: string }>;
   let queued = 0;
   for (const { id: entryId } of missing) {
@@ -256,7 +260,9 @@ export function queueMissingLevels(db: Db, deps: Deps): number {
     // A full translation job also creates the level. Do not run a level-only job that would discard a usable translation.
     if (!hasDraft && db.prepare("SELECT 1 FROM jobs WHERE kind = 'vocabulary_enrichment' AND json_extract(payload_json, '$.entryId') = ? AND COALESCE(json_extract(payload_json, '$.levelOnly'), 0) = 0 LIMIT 1").get(entryId)) continue;
     const rev = (db.prepare("SELECT user_revision AS r FROM vocabulary_entries WHERE id = ?").get(entryId) as { r: number }).r;
-    const key = hasDraft ? `vocab:${entryId}:level` : `vocab:${entryId}:${rev}`;
+    // a word that has a level but no reference facts (D69) gets its own key: its `:level` job already ran, before the facts existed
+    const hasLevel = db.prepare("SELECT 1 FROM vocabulary_levels WHERE entry_id = ?").get(entryId) !== undefined;
+    const key = hasDraft ? (hasLevel ? `vocab:${entryId}:lex` : `vocab:${entryId}:level`) : `vocab:${entryId}:${rev}`;
     if (db.prepare("SELECT 1 FROM jobs WHERE idempotency_key = ?").get(key)) continue;
     enqueue(db, { now: deps.now, newId: deps.newId ?? randomUUID }, { kind: "vocabulary_enrichment", payload: { entryId, expectedUserRevision: rev, ...(hasDraft ? { levelOnly: true } : {}) }, idempotencyKey: key, priority: 2 });
     queued++;

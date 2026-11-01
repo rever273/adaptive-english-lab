@@ -25,6 +25,8 @@ export interface AppConfig {
   projectRoot: string;
   dataRoot: string;
   vocabularyImagesDir?: string;
+  /** optional old word list (D69), a hint for the word job; never imported */
+  lexiconCsv?: string;
   dbPath: string;
   backupsDir: string;
   logsDir: string;
@@ -96,12 +98,12 @@ export function resolveDataRoot(requested: string | undefined, projectRoot: stri
 }
 
 /** Git-ignored per-machine settings in the project root (D62), e.g. { "dbDir": "C:\\Databases\\EnglishLab" }. */
-export function readLocalSettings(projectRoot: string): { dbDir?: string; vocabularyImagesDir?: string } {
+export function readLocalSettings(projectRoot: string): { dbDir?: string; vocabularyImagesDir?: string; lexiconCsv?: string } {
   const file = path.join(projectRoot, "englishlab.local.json");
   if (!existsSync(file)) return {};
   try {
-    const v = JSON.parse(readFileSync(file, "utf8")) as { dbDir?: unknown; vocabularyImagesDir?: unknown };
-    return { ...(typeof v.dbDir === "string" && v.dbDir.length > 0 ? { dbDir: v.dbDir } : {}), ...(typeof v.vocabularyImagesDir === "string" && v.vocabularyImagesDir.length > 0 ? { vocabularyImagesDir: v.vocabularyImagesDir } : {}) };
+    const v = JSON.parse(readFileSync(file, "utf8")) as { dbDir?: unknown; vocabularyImagesDir?: unknown; lexiconCsv?: unknown };
+    return { ...(typeof v.dbDir === "string" && v.dbDir.length > 0 ? { dbDir: v.dbDir } : {}), ...(typeof v.vocabularyImagesDir === "string" && v.vocabularyImagesDir.length > 0 ? { vocabularyImagesDir: v.vocabularyImagesDir } : {}), ...(typeof v.lexiconCsv === "string" && v.lexiconCsv.length > 0 ? { lexiconCsv: v.lexiconCsv } : {}) };
   } catch {
     throw new ConfigError("CONFIG_INVALID", "englishlab.local.json is not valid JSON");
   }
@@ -115,7 +117,7 @@ export function resolveDbDir(requested: string): string {
   return realpathLenient(requested);
 }
 
-export function loadConfig(env: NodeJS.ProcessEnv = process.env, projectRoot = detectProjectRoot(), local?: { dbDir?: string; vocabularyImagesDir?: string }): AppConfig {
+export function loadConfig(env: NodeJS.ProcessEnv = process.env, projectRoot = detectProjectRoot(), local?: { dbDir?: string; vocabularyImagesDir?: string; lexiconCsv?: string }): AppConfig {
   const parsed = EnvSchema.safeParse(env);
   if (!parsed.success) {
     throw new ConfigError("CONFIG_INVALID", parsed.error.issues.map((i) => `${i.path.join(".")}: ${i.message}`).join("; "));
@@ -135,6 +137,7 @@ export function loadConfig(env: NodeJS.ProcessEnv = process.env, projectRoot = d
     projectRoot: root,
     dataRoot,
     vocabularyImagesDir: (local ?? readLocalSettings(root)).vocabularyImagesDir,
+    lexiconCsv: (local ?? readLocalSettings(root)).lexiconCsv,
     dbPath: path.join(dbDir, "english-lab.sqlite"),
     backupsDir: path.join(dataRoot, "backups"),
     logsDir: path.join(dataRoot, "logs"),

@@ -12,7 +12,7 @@ export interface ItemPlan {
   /** detect_error only: this item must be a fully correct sentence (the "No mistake" quota) */
   noMistake?: boolean;
   /** TASK_021: CEFR level requested from the settings range when the batch was created; absent = the historical B2 */
-  level?: "A2" | "B1" | "B2" | "C1";
+  level?: "A2" | "B1" | "B2" | "C1" | "C2";
   /** D68: stable key of the lesson whose deficit this item serves (grammar batches planned from lesson deficits) */
   lesson?: string;
   vocabulary?: { lemma: string; translationRu: string | null; family: "recognition" | "guided_recall" | "collocation" };

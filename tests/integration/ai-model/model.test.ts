@@ -161,7 +161,7 @@ describe("warm-up", () => {
     expect(JSON.parse((t.db.prepare("SELECT values_json AS v FROM settings_revisions WHERE revision = 1").get() as { v: string }).v).preloadModelOnStart).toBeUndefined();
     expect((await t.call("POST", "/api/v1/settings", { preloadModelOnStart: "yes" })).statusCode).toBe(400);
     const off = await t.call("POST", "/api/v1/settings", { preloadModelOnStart: false });
-    expect(off.json().revision).toBe(2);
+    expect(off.json().revision).toBe(3);
     expect(preloadModelOnStart(off.json().values)).toBe(false);
     t.residency.warmOnStart();
     await t.call("GET", "/api/v1/dashboard");

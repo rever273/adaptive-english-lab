@@ -20,6 +20,10 @@ interface Props {
   checkMode?: boolean;
   /** vocabulary practice: word-centred labels, and a typed gap is one line under its sentence */
   vocabulary?: boolean;
+  translation?: string | null;
+  onTranslation?: () => void;
+  letters?: Array<string | null> | null;
+  onLetter?: (index: number) => void;
 }
 
 /** vocabulary practice: each family has one format (see content/packs/vocab-starter) */
@@ -49,7 +53,7 @@ export const FORMAT_LOOK: Record<string, { icon: string; label: string }> = {
 };
 
 /** Renders one prompt (all six formats) and the answer controls. No keyboard shortcut steals Space/Enter while typing. */
-export function PromptView({ reveal, busy, hint, voice, onSubmit, onIdk, onSkip, onHint, onShowAnswer, locked = false, checkMode = false, vocabulary = false }: Props) {
+export function PromptView({ reveal, busy, hint, voice, onSubmit, onIdk, onSkip, onHint, onShowAnswer, locked = false, checkMode = false, vocabulary = false, translation, onTranslation, letters, onLetter }: Props) {
   const [selected, setSelected] = useState<string[]>([]);
   const [text, setText] = useState("");
   const [noMistake, setNoMistake] = useState(false);
@@ -65,6 +69,10 @@ export function PromptView({ reveal, busy, hint, voice, onSubmit, onIdk, onSkip,
     }
   }, [vs]);
   const p = reveal.prompt;
+  // Some vocabulary prompts include the word's Russian meaning before the sentence.
+  const wordMeaning = vocabulary && p.kind === "choice"
+    ? /^Choose the word meaning\s+[\u00ab\u201c"]([^\u00bb\u201d"]+)[\u00bb\u201d"]\s*:\s*(.+)$/isu.exec(p.prompt_en)
+    : null;
 
   const toggle = (id: string, multiple: boolean) => setSelected((cur) => (multiple ? (cur.includes(id) ? cur.filter((x) => x !== id) : [...cur, id]) : [id]));
   const canSubmit = p.kind === "short" ? text.trim().length > 0 : p.kind === "segments" ? noMistake || selected.length > 0 : selected.length > 0;
@@ -78,7 +86,7 @@ export function PromptView({ reveal, busy, hint, voice, onSubmit, onIdk, onSkip,
 
   // keyboard: 1-9 pick an option or part, Enter submits, I / H / A / S act, hold M to talk (Alt+M inside the text box)
   const options = p.kind === "choice" ? p.options : p.kind === "reading" ? p.question.options : p.kind === "segments" ? p.segments : [];
-  const canHint = !checkMode && reveal.hintsAvailable > 0;
+  const canHint = !checkMode && (vocabulary || reveal.hintsAvailable > 0);
   useKeys(
     (e) => {
       if (locked || e.ctrlKey || e.metaKey || e.isComposing) return;
@@ -152,7 +160,9 @@ export function PromptView({ reveal, busy, hint, voice, onSubmit, onIdk, onSkip,
 
       {p.kind === "choice" && (
         <fieldset className="options">
-          <legend className="prompt" data-testid="prompt" data-word-area>{p.prompt_en}</legend>
+          <legend className="prompt" data-testid="prompt" data-word-area>{wordMeaning?.[2] ?? p.prompt_en}</legend>
+          {wordMeaning && <p lang="ru" className="vocab-word-meaning">{"\u041f\u0435\u0440\u0435\u0432\u043e\u0434 \u0441\u043b\u043e\u0432\u0430: \u00ab"}{wordMeaning[1]}{"\u00bb"}</p>}
+          {vocabulary && translation && <p lang="ru" className="vocab-translation" role="status">{translation}</p>}
           {p.options.map((o, i) => (
             <label key={o.id} className="option has-kbd">
               {!locked && key(i)}
@@ -205,6 +215,7 @@ export function PromptView({ reveal, busy, hint, voice, onSubmit, onIdk, onSkip,
       {p.kind === "short" && vocabulary && (
         <div className="short gap-fill">
           <p className="prompt" data-testid="prompt" data-word-area>{p.prompt_en}</p>
+          {translation && <p lang="ru" className="vocab-translation" role="status">{translation}</p>}
           <p lang="ru" className="ru cue small">{p.cue_ru}</p>
           <label htmlFor={`${groupId}-t`} className="visually-hidden">The missing word</label>
           <input id={`${groupId}-t`} className="gap-input" maxLength={80} value={text} readOnly={locked} onChange={(e) => setText(e.target.value)} placeholder={p.max_words === 1 ? "one word" : `${p.max_words} words`} autoComplete="off" spellCheck={false} data-testid="answer-text" />
@@ -240,6 +251,11 @@ export function PromptView({ reveal, busy, hint, voice, onSubmit, onIdk, onSkip,
         </div>
       )}
 
+      {vocabulary && letters && <div className="letter-hint" aria-label="Letter hint">
+        {letters.map((letter, index) => letter === null
+          ? <button key={index} type="button" className="letter-hint-tile" disabled={busy || locked} onClick={() => onLetter?.(index)} aria-label={`Reveal letter ${index + 1}`} />
+          : /\p{L}/u.test(letter) ? <span key={index} className="letter-hint-tile letter-hint-open">{letter}</span> : <span key={index} className="letter-hint-separator">{letter}</span>)}
+      </div>}
       {hint && (
         <p className="hint" lang="ru" data-testid="hint" role="status">
           Hint: {hint}
@@ -256,8 +272,9 @@ export function PromptView({ reveal, busy, hint, voice, onSubmit, onIdk, onSkip,
           <Kbd k="I" />
           <i className="pi pi-question-circle" aria-hidden="true" /> I don’t know
         </button>
+        {vocabulary && !checkMode && !translation && <button type="button" className="btn" disabled={busy} onClick={onTranslation}><i className="pi pi-language" aria-hidden="true" /> Show Russian translation</button>}
         {!checkMode && (
-          <button type="button" className="btn has-kbd" disabled={busy || reveal.hintsAvailable === 0} onClick={onHint} data-testid="hint-btn">
+          <button type="button" className="btn has-kbd" disabled={busy || (!vocabulary && reveal.hintsAvailable === 0) || (vocabulary && !!letters)} onClick={onHint} data-testid="hint-btn">
             <Kbd k="H" />
             <i className="pi pi-lightbulb" aria-hidden="true" /> Hint
           </button>

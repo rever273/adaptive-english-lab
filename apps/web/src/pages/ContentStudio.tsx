@@ -1,10 +1,11 @@
 import { useCallback, useEffect, useState } from "react";
 import { VocabularyStudio } from "./VocabularyStudio";
-import { ApiRequestError, createBatchApi, fetchBatch, fetchBatches, fetchCoverage, fetchRevisionContent, fetchContentStock, type BatchItem, type BatchSummary, type Coverage, type ItemStatus } from "../api";
+import { batchCache, coverageCache, stockCache } from "./studioCache";
+import { ApiRequestError, createBatchApi, fetchBatch, fetchRevisionContent, fetchContentStock, type BatchItem, type BatchSummary, type StudioBatchSummary, type Coverage, type ItemStatus } from "../api";
 
 const STATUS_LABEL: Record<ItemStatus, string> = { queued: "Generating", invalid: "Needs agent repair", generated: "Draft", ready_for_review: "Awaiting agent", approved: "Approved", released: "Accepted", flagged: "Flagged", rejected: "Rejected" };
 const errorText = (e: unknown) => e instanceof ApiRequestError ? e.message : "Something went wrong.";
-export const batchAgentTask = (id: string, category: "grammar" | "vocabulary") => `Complete and publish ${category} replenishment batch ${id}. Read content/agent-workflows/${category}.md and common.md in that directory. Run npm run content:agent -- prepare ${id}, review every item, repair suitable drafts as new revisions and reject unsuitable ones. Use the check and finalize commands in the instructions. Independent review by a separate agent is explicitly requested for every final candidate, especially corrections; do not self-approve. Apply the reviewed results to the local app yourself. Do not ask me to copy JSON or run commands. Preserve lesson selection, dictionary edits and raw attempt history. Reply briefly with accepted, corrected and rejected counts.`;
+export const batchAgentTask = (id: string, category: "grammar" | "vocabulary") => `Complete and publish ${category} replenishment batch ${id}. Read content/agent-workflows/${category}.md and common.md in that directory. Run npm run content:agent -- prepare ${id}, review every item, repair suitable drafts as new revisions and reject unsuitable ones. Use the check and finalize commands in the instructions. Independent review by a separate agent is explicitly requested for every final candidate, especially corrections; do not self-approve. Do the review through the content-reviewer agent and the tools in .claude/tools (see your project memory for the workflow), after you have rejected duplicates and fixed the known defects yourself. Apply the reviewed results to the local app yourself. Do not ask me to copy JSON or run commands. Preserve lesson selection, dictionary edits and raw attempt history. Reply briefly with accepted, corrected and rejected counts, and end with one short line: how many tokens the review subagent(s) used in total.`;
 
 export function ContentStudio({ initialView = "grammar" }: { initialView?: "grammar" | "vocabulary" } = {}) {
   const [category, setCategory] = useState(initialView);
@@ -16,51 +17,97 @@ export function ContentStudio({ initialView = "grammar" }: { initialView?: "gram
   </>;
 }
 function BatchStudio({ category, onCategoryChange }: { category: "grammar" | "vocabulary"; onCategoryChange: (category: "grammar" | "vocabulary") => void }) {
-  const [batches, setBatches] = useState<BatchSummary[]>([]);
-  const [otherCount, setOtherCount] = useState(0);
-  const [coverage, setCoverage] = useState<Coverage | null>(null);
-  const [stock, setStock] = useState<Awaited<ReturnType<typeof fetchContentStock>> | null>(null);
+  const [batches, setBatches] = useState<StudioBatchSummary[]>(() => (batchCache.peek()?.batches ?? []).filter(b => (b.category ?? "grammar") === category));
+  const [otherCount, setOtherCount] = useState(() => (batchCache.peek()?.batches ?? []).filter(b => (b.category ?? "grammar") !== category).length);
+  const [coverage, setCoverage] = useState<Coverage | null>(() => coverageCache.peek());
+  const [stock, setStock] = useState<Awaited<ReturnType<typeof fetchContentStock>> | null>(() => stockCache.peek());
   const [open, setOpen] = useState<string | null>(null);
   const [count, setCount] = useState(50);
   const [countTouched, setCountTouched] = useState(false);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [note, setNote] = useState<string | null>(null);
-  const load = useCallback(async () => {
+  const loadBatches = useCallback(async (force = false) => {
     try {
-      const [b, c, s] = await Promise.all([fetchBatches(), fetchCoverage(), fetchContentStock()]);
-      setBatches(b.batches.filter(b => (b.category ?? "grammar") === category)); setOtherCount(b.batches.filter(b => (b.category ?? "grammar") !== category).length); setCoverage(c); setStock(s);
-      // D68: the batch size is pre-filled from the next lesson's deficit (+20%) until the learner types their own
+      const b = await batchCache.get(force);
+      setBatches(b.batches.filter(b => (b.category ?? "grammar") === category));
+      setOtherCount(b.batches.filter(b => (b.category ?? "grammar") !== category).length);
+    } catch (e) { setError(errorText(e)); }
+  }, [category]);
+  const loadCoverage = useCallback(async (force = false) => {
+    try {
+      const c = await coverageCache.get(force); setCoverage(c);
+      const s = await stockCache.get(force); setStock(s);
       const rec = s[category].recommended; if (!countTouched && rec && rec > 0) setCount(Math.min(500, rec));
-    } catch(e) { setError(errorText(e)); }
+    } catch (e) { setError(errorText(e)); }
   }, [category, countTouched]);
-  useEffect(() => { void load(); const t = setInterval(() => void load(), 5000); return () => clearInterval(t); }, [load]);
+  useEffect(() => {
+    let active = true;
+    void loadBatches().then(() => { if (active) void loadCoverage(); });
+    const listTimer = setInterval(() => void loadBatches(true), 5000);
+    const coverageTimer = setInterval(() => void loadCoverage(true), 30000);
+    return () => { active = false; clearInterval(listTimer); clearInterval(coverageTimer); };
+  }, [loadBatches, loadCoverage]);
   const start = async () => {
     setBusy(true); setError(null); setNote(null);
-    try { const r = await createBatchApi({count, mode: "adaptive", category}); setOpen(r.batchId); setNote(`Started ${r.items} drafts. Progress is shown in AI Tasks and the AI activity panel.`); await load(); }
+    try { const r = await createBatchApi({count, mode: "adaptive", category}); setOpen(r.batchId); setNote(`Started ${r.items} drafts. Progress is shown in AI Tasks and the AI activity panel.`); await batchCache.get(); await loadBatches(true); }
     catch(e) { setError(errorText(e)); } finally { setBusy(false); }
   };
   const low = stock?.[category];
+  const course = category === "grammar" ? stock?.grammar.course : undefined;
+  const calculateCourse = async () => {
+    setBusy(true); setError(null);
+    try {
+      const fresh = await stockCache.get(true); setStock(fresh);
+      const estimate = fresh.grammar.course;
+      if (!estimate) { setNote("No available lessons to plan."); return; }
+      setCountTouched(true);
+      if (estimate.recommended > 0) setCount(Math.min(500, estimate.recommended));
+      setNote(estimate.recommended === 0 ? "No estimated deficit for the lessons." : `Estimated ${estimate.recommended} drafts for ${estimate.lessons} lessons, including 20% margin.${estimate.recommended > 500 ? " One batch can contain up to 500; create another after review and recalculate." : ""}`);
+    } catch (e) { setError(errorText(e)); } finally { setBusy(false); }
+  };
+  const vocabularyPlan = category === "vocabulary" ? stock?.vocabulary.plan : undefined;
+  const calculateVocabulary = async () => {
+    setBusy(true); setError(null);
+    try {
+      const fresh = await stockCache.get(true); setStock(fresh);
+      const estimate = fresh.vocabulary.plan;
+      if (!estimate || estimate.words === 0) { setNote("Add words to your dictionary first."); return; }
+      setCountTouched(true);
+      if (estimate.recommended > 0) setCount(Math.min(500, estimate.recommended));
+      setNote(estimate.recommended === 0 ? "All words have the planned stock of contexts." : `Estimated ${estimate.recommended} drafts for ${estimate.words} words, including 20% margin.${estimate.recommended > 500 ? " One batch can contain up to 500; review it and recalculate before the next batch." : ""}`);
+    } catch (e) { setError(errorText(e)); } finally { setBusy(false); }
+  };
+  const batchRow = (b: StudioBatchSummary) => <li key={b.id}>
+    <button className={`batch-row${open === b.id ? " batch-row-on" : ""}`} onClick={() => setOpen(open === b.id ? null : b.id)} aria-expanded={open === b.id}>
+      <span><strong>{category === "grammar" ? "Grammar" : "Vocabulary"} batch | {b.requestedCount} items</strong> <span className="muted small">#{b.id.slice(0,8)} | {new Date(b.createdAt).toLocaleDateString()}</span></span>
+      <span className="chips">{b.completion ? <><span className="chip">Completed</span><span className="chip chip-released">{b.completion.accepted} accepted</span><span className="chip chip-rejected">{b.completion.rejected} rejected</span>{b.completion.flagged > 0 && <span className="chip chip-flagged">{b.completion.flagged} flagged</span>}</> : Object.entries(b.counts ?? {}).filter(([,n]) => n > 0).map(([status,n]) => <span key={status} className={`chip chip-${status}`}>{n} {STATUS_LABEL[status as ItemStatus].toLowerCase()}</span>)}</span>
+    </button>
+    {open === b.id && (b.completion ? <div className="batch-detail"><p className="notice notice-info" role="status">Completed: {b.completion.accepted} accepted, {b.completion.corrected} revised, {b.completion.rejected} rejected{b.completion.flagged ? `, ${b.completion.flagged} flagged` : ""}.</p></div> : <BatchDetail id={b.id} category={category} />)}
+  </li>;
   return <>
     <section className="card">
       <h2>Content Studio</h2>
       <p className="lede">Create new {category === "grammar" ? "exercises for your learning skills" : "exercises using your saved words"}. When generation finishes, copy the task to your agent. It checks, repairs and publishes the results for you.</p>
       {error && <p className="notice notice-error" role="alert">{error}</p>}
       {note && <p className="notice notice-info" role="status">{note}</p>}
-      <div className="actions"><label className="inline"><span>Batch size</span><input type="number" min={1} max={500} value={count} onChange={e => { setCountTouched(true); setCount(Number(e.target.value)); }} aria-label="Batch size" /></label><button className="btn btn-primary" disabled={busy || !Number.isInteger(count) || count < 1 || count > 500} onClick={() => void start()}>Start batch</button></div>
+      <div className="actions"><label className="inline"><span>Batch size</span><input type="number" min={1} max={500} value={count} onChange={e => { setCountTouched(true); setCount(Number(e.target.value)); }} aria-label="Batch size" /></label><button className="btn btn-primary" disabled={busy || !Number.isInteger(count) || count < 1 || count > 500} onClick={() => void start()}>Start batch</button>{category === "grammar" ? <button className="btn" disabled={busy} onClick={() => void calculateCourse()}>Calculate for lessons</button> : <button className="btn" disabled={busy} onClick={() => void calculateVocabulary()}>Calculate for words</button>}</div>
     </section>
     <section className="card"><h2>Batches</h2>
       {otherCount > 0 && <p className="small muted">Showing {category} batches. <button className="link" onClick={() => onCategoryChange(category === "grammar" ? "vocabulary" : "grammar")}>Show {otherCount} {category === "grammar" ? "vocabulary" : "grammar"} {otherCount === 1 ? "batch" : "batches"}</button></p>}
-      {batches.length === 0 ? <p className="muted">No batches yet. Choose a number and start a batch.</p> : <ul className="batch-list" data-testid="batches">{batches.map(b => <li key={b.id}>
-        <button className={`batch-row${open === b.id ? " batch-row-on" : ""}`} onClick={() => setOpen(open === b.id ? null : b.id)} aria-expanded={open === b.id}>
-          <span><strong>{category === "grammar" ? "Grammar" : "Vocabulary"} batch · {b.requestedCount} items</strong> <span className="muted small">#{b.id.slice(0,8)} | {new Date(b.createdAt).toLocaleDateString()}</span></span>
-          <span className="chips">{Object.entries(b.counts).filter(([,n]) => n > 0).map(([s,n]) => <span key={s} className="chip">{n} {STATUS_LABEL[s as ItemStatus].toLowerCase()}</span>)}</span>
-        </button>
-        {open === b.id && <BatchDetail id={b.id} category={category} />}
-      </li>)}</ul>}
+      {batches.length === 0 ? <p className="muted">No batches yet. Choose a number and start a batch.</p> : <>
+        <ul className="batch-list" data-testid="batches">{batches.slice(0, 5).map(batchRow)}</ul>
+        {batches.length > 5 && <details className="older-batches">
+          <summary>Earlier batches ({batches.length - 5})</summary>
+          <div className="older-batches-scroll"><ul className="batch-list">{batches.slice(5).map(batchRow)}</ul></div>
+        </details>}
+      </>}
+
     </section>
     <section className="card"><h2>Coverage</h2>
       {low && <p className={`notice ${low.low ? "notice-error" : "notice-info"}`} role="status">{low.message ?? `${low.available} new approved exercises available.${low.low ? ` Stock is running low (warning below ${low.threshold}). Create a new batch.` : ""}`}{low.recommended ? ` Suggested batch size: ${low.recommended} (deficit + 20%).` : ""}</p>}
+      {vocabularyPlan && <p className="small" role="status">{vocabularyPlan.words} words: {vocabularyPlan.deficit} contexts missing; {vocabularyPlan.recommended} drafts suggested with 20% margin. Target: {vocabularyPlan.targetPerWord} approved contexts per word (2 recognition, 2 recall, 1 collocation). Previously seen contexts count as reusable; drafts do not count until approved. Recalculate after review.</p>}
+      {course && <p className="small" role="status">All lessons: estimated {course.deficit} exercises short; {course.recommended} drafts suggested with 20% margin for {course.sessionsPerLesson} sessions per lesson. Based on approved stock only; pending drafts may be rejected. Shared exercises and future repeats make this an estimate, not a guarantee. Recalculate after review.</p>}
       {category === "vocabulary" ? <VocabularyStudio /> : coverage && <><p>{coverage.totals.releasedExercises} published grammar exercises in total. Used sentences are excluded from available stock.</p><details><summary>Coverage by skill</summary><ul className="small">{coverage.skills.map(s => <li key={s.skill}><code>{s.skill}</code>: {s.released} published, {s.inReview} awaiting agent</li>)}</ul></details></>}
     </section>
   </>;

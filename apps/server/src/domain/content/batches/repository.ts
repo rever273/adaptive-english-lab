@@ -9,12 +9,15 @@ import { draftFormatsText } from "./draftFormats.js";
 import { lessonPlanView } from "./lessonNeeds.js";
 import { groupUnits, planBatch, planFromDeficits, type ItemPlan, type LessonDemand } from "./plan.js";
 import { taxonomyForNewRevisions } from "../repository.js";
-import { exportVocabulary } from "../../vocabulary/practice.js";
+import { vocabularyPlanSlots, vocabularyReplenishment } from "./vocabularyPlan.js";
 import { loadBlockedFingerprints, loadCandidates } from "../../sessions/bank.js";
 import { loadBlueprint, loadSettings } from "../../sessions/policy.js";
 import { vocabularyFormat } from "./vocabularyDrafts.js";
 
-export const GENERATION_PROMPT = "generation-v5";
+/** Setting of a vocabulary sentence: 15% IT/technology (every 7th step of a 20-cycle), the rest general adult life, varied per ordinal and per repeat of the same word. */
+const GENERAL_TOPICS = ["workplace", "travel", "health", "shopping", "family", "education", "community", "household", "sport", "food", "finance", "weather"] as const;
+export const vocabularyTopic = (ordinal: number, round: number): string => (ordinal * 7) % 20 < 3 ? "technology" : GENERAL_TOPICS[(ordinal * 5 + round * 3) % GENERAL_TOPICS.length]!;
+export const GENERATION_PROMPT = "generation-v6";
 /** a skill is "covered" when it has this many released (selectable) exercises; below it the coverage view reports a deficit (D46) */
 export const TARGET_SELECTABLE_PER_SKILL = 12;
 
@@ -146,6 +149,19 @@ export function listBatches(db: Db): Array<Omit<BatchView, "items">> {
   return (db.prepare("SELECT id FROM batches ORDER BY created_at DESC, rowid DESC").all() as Array<{ id: string }>).map((b) => getBatch(db, b.id, false));
 }
 
+/** Lightweight Studio list: completed batches use their immutable completion receipt, active batches retain live counts. */
+export function listStudioBatches(db: Db): Array<Pick<BatchView, "id" | "createdAt" | "category" | "requestedCount" | "completion"> & { counts: BatchView["counts"] | null }> {
+  const rows = db.prepare(`SELECT b.id, b.created_at AS createdAt, b.requested_count AS requestedCount, b.spec_json AS specJson, c.result_json AS completionJson
+    FROM batches b LEFT JOIN batch_completions c ON c.batch_id = b.id ORDER BY b.created_at DESC, b.rowid DESC`).all() as Array<{ id: string; createdAt: string; requestedCount: number; specJson: string; completionJson: string | null }>;
+  return rows.map((b) => {
+    if (!b.completionJson) {
+      const active = getBatch(db, b.id, false);
+      return { id: active.id, createdAt: active.createdAt, requestedCount: active.requestedCount, category: active.category, completion: null, counts: active.counts };
+    }
+    return { id: b.id, createdAt: b.createdAt, requestedCount: b.requestedCount, category: (JSON.parse(b.specJson) as { category?: "grammar" | "vocabulary" }).category ?? "grammar", completion: JSON.parse(b.completionJson) as NonNullable<BatchView["completion"]>, counts: null };
+  });
+}
+
 export interface TrialGate {
   passed: boolean;
   /** the trial batch that opens the gate (latest fully resolved trial of the CURRENT generation prompt version) */
@@ -206,20 +222,17 @@ export function createBatch(db: Db, deps: BatchDeps, input: z.input<typeof Creat
       let plans: ItemPlan[];
       if (request.category === "vocabulary") {
         if (request.trial) throw new ApiError(422, "NO_VOCABULARY_TRIAL", "Vocabulary replenishment uses regular batches");
-        const words = (exportVocabulary(db).json as { words: Array<{ lemma: string; translationRu: string | null; learned: boolean; newExercises: number }> }).words;
-        if (!words.length) throw new ApiError(409, "DICTIONARY_EMPTY", "Save words in your dictionary before creating vocabulary exercises");
-        words.sort((a, b) => Number(a.learned) - Number(b.learned) || a.newExercises - b.newExercises || a.lemma.localeCompare(b.lemma));
-        plans = Array.from({ length: request.count }, (_, ordinal) => {
-          const word = words[ordinal % words.length]!;
-          const family = (["recognition", "guided_recall", "recognition", "collocation", "guided_recall"] as const)[Math.floor(ordinal / words.length) % 5]!;
+        const demand = vocabularyReplenishment(db);
+        if (!demand.words.length) throw new ApiError(409, "DICTIONARY_EMPTY", "Save words in your dictionary before creating vocabulary exercises");
+        plans = vocabularyPlanSlots(demand, request.count).map(({ word, family }, ordinal) => {
           const type = family === "guided_recall" ? "guided_short_answer" : family === "collocation" ? "choose_form" : "choose_missing_fragment";
-          return { ordinal, type, dimension: family === "guided_recall" ? "production" : "recognition", target_skill: "collocations.natural_phrases", topic: "everyday", context_id: `vocab-${batchId.slice(0, 8)}-${ordinal}`, vocabulary: { lemma: word.lemma, translationRu: word.translationRu, family } };
+          return { ordinal, type, dimension: family === "guided_recall" ? "production" : "recognition", target_skill: "collocations.natural_phrases", topic: vocabularyTopic(ordinal, Math.floor(ordinal / demand.words.length)), context_id: `vocab-${batchId.slice(0, 8)}-${ordinal}`, vocabulary: { lemma: word.lemma, translationRu: word.translationRu, family } };
         });
       } else {
         // D68: an adaptive batch is planned from the DEFICITS of the next lesson (then the following lessons), not from the last played one
         const view = request.mode === "adaptive" && !request.trial && !request.skills?.length ? lessonPlanView(db, deps.now()) : null;
         if (view) {
-          const lessons: LessonDemand[] = view.lessons.slice(view.nextIndex).map((n) => ({
+          const lessons: LessonDemand[] = [...view.lessons.slice(view.nextIndex), ...view.lessons.slice(0, view.nextIndex)].map((n) => ({
             key: n.key,
             formatDeficit: Object.fromEntries((n.formats.some((f) => f.deficit > 0) ? n.formats.filter((f) => f.deficit > 0).map((f) => [f.format, f.deficit]) : n.deficit > 0 ? n.formats.map((f) => [f.format, f.need]) : []) as Array<[string, number]>),
             skills: n.skills.length > 0
@@ -241,7 +254,7 @@ export function createBatch(db: Db, deps: BatchDeps, input: z.input<typeof Creat
         const levels = difficultyLevels(loadSettings(db).values);
         if (levels) plans = plans.map((p) => ({ ...p, level: levels[p.ordinal % levels.length]! }));
       }
-      const promptVersionId = ensurePromptVersion(db, request.category === "vocabulary" ? "vocabulary-generation-v2" : GENERATION_PROMPT, request.category === "vocabulary" ? JSON.stringify(vocabularyFormat(2)) : draftFormatsText());
+      const promptVersionId = ensurePromptVersion(db, request.category === "vocabulary" ? "vocabulary-generation-v4" : GENERATION_PROMPT, request.category === "vocabulary" ? JSON.stringify(vocabularyFormat(2)) : draftFormatsText());
       const now = deps.now().toISOString();
       const count = purpose === "trial" ? TRIAL_SIZE : request.count;
       db.prepare("INSERT INTO batches(id, requested_count, mode, purpose, prompt_version_id, spec_json, created_at) VALUES (?,?,?,?,?,?,?)").run(batchId, count, request.mode, purpose, promptVersionId, JSON.stringify({ category: request.category, skills: request.skills ?? null, types: purpose === "trial" ? [...EXERCISE_TYPES] : (request.types ?? null), perTypeTrial: TRIAL_PER_TYPE }), now);

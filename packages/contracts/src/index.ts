@@ -93,8 +93,8 @@ export const CapabilitiesSchema = z
   .strict();
 export type Capabilities = z.infer<typeof CapabilitiesSchema>;
 
-/** The exercise schema allows these difficulty labels (content/schemas/exercise.schema.json); C2 would need a schema change. */
-export const CEFR_RANGE = ["A2", "B1", "B2", "C1"] as const;
+/** Grammar exercise difficulty labels. */
+export const CEFR_RANGE = ["A2", "B1", "B2", "C1", "C2"] as const;
 export type CefrLevel = (typeof CEFR_RANGE)[number];
 
 /** settings_revisions.values_json (spec/01 "Параметры"; Advanced keys are added by later tasks). */
@@ -117,7 +117,7 @@ export const SettingsV1Schema = z
     reviewNoticeThreshold: z.number().int().min(1).max(50).optional(),
     /** D64: share of the session's tasks offered for voice (0..1). When set it replaces voiceTarget; older revisions do not have it. */
     voiceShare: z.number().min(0).max(1).optional(),
-    /** TASK_021: target CEFR range of grammar sentences (selection for practice and the level requested for new content); absent = no restriction */
+    /** Target CEFR range; old revisions without bounds keep their historical A2-C1 meaning. */
     difficultyMin: z.enum(CEFR_RANGE).optional(),
     difficultyMax: z.enum(CEFR_RANGE).optional(),
   })
@@ -134,8 +134,8 @@ export const reviewNoticeThreshold = (v: Pick<SettingsV1, "reviewNoticeThreshold
 export const vocabularyNewWordsPerSession = (v: Pick<SettingsV1, "vocabularyNewWordsPerSession">): number => v.vocabularyNewWordsPerSession ?? 4;
 
 /**
- * The levels grammar practice may draw from and new content is requested at, or null for "no restriction" (unset, or the whole A2-C1 range).
- * Older settings revisions have neither key, so they keep today's behaviour.
+ * The levels for grammar practice and new content, or null for the full A2-C2 range.
+ * Historical revisions without bounds retain the formerly supported A2-C1 range.
  */
 export const difficultyLevels = (v: Pick<SettingsV1, "difficultyMin" | "difficultyMax">): CefrLevel[] | null => {
   const lo = CEFR_RANGE.indexOf(v.difficultyMin ?? "A2");
@@ -158,6 +158,8 @@ export const DEFAULT_SETTINGS_V1: SettingsV1 = {
   explanation: "compact",
   vocabularyShare: 0.12,
   stockWarning: 3,
+  difficultyMin: "B1",
+  difficultyMax: "C1",
 };
 export * from "./attempts.js";
 export * from "./analytics.js";

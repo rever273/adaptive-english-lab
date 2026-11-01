@@ -109,12 +109,15 @@ describe("TASK_021: requested level from the Settings range", () => {
     const asked = JSON.parse(buildGenerationUser("b", [plan("choose_form", { level: "C1" }), plan("choose_form", { ordinal: 1, level: "B2" })])) as { items: Array<{ target_level?: string }> };
     expect(asked.items[0]!.target_level).toContain("C1");
     expect(asked.items[1]!.target_level).toContain("B2");
+    expect(JSON.parse(buildGenerationUser("b", [plan("choose_form", { level: "C2" })])).items[0].target_level).toContain("C2");
     expect(JSON.parse(buildGenerationUser("b", [plan("choose_form")])).items[0]).not.toHaveProperty("target_level");
 
     const raw = { ...ex("choose_form"), sentence: "Newly the council ___ the revised timetable yesterday." };
     const c1 = assembleExercise(raw, plan("choose_form", { level: "C1" }), ctx);
+    const c2 = assembleExercise(raw, plan("choose_form", { level: "C2" }), ctx);
     const none = assembleExercise(raw, plan("choose_form"), ctx);
     expect(c1.ok && c1.exercise).toMatchObject({ difficulty: "C1", context_level: "C1" });
+    expect(c2.ok && c2.exercise).toMatchObject({ difficulty: "C2", context_level: "C2" });
     expect(none.ok && none.exercise).toMatchObject({ difficulty: "B2", context_level: "B2" });
   });
 });

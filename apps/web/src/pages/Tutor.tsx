@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useRef, useState } from "react";
+import { useCallback, useEffect, useRef, useState, type ReactNode } from "react";
 import type { FeedbackResponse } from "@english-lab/contracts";
 import { ApiRequestError, askTutor, fetchAgentTask, fetchFeedback, fetchTutorSlots, fetchTutorThread, type TutorSlot, type TutorThread } from "../api";
 import { FORMAT_LOOK } from "../components/PromptView";
@@ -26,6 +26,52 @@ function keyPart(prompt: string): { main: string; start: string | null } {
   return m.length > 1 ? { main: m[0]!.trim(), start: m.slice(1).join(" ").trim() } : { main: prompt, start: null };
 }
 
+/** **bold**, *italic* and `code` inside one line; everything else stays plain text (no HTML is ever injected) */
+function inline(text: string): ReactNode[] {
+  return text.split(/(\*\*[^*]+\*\*|`[^`]+`|\*[^*\s][^*]*\*)/g).map((p, i) =>
+    p.startsWith("**") && p.endsWith("**") && p.length > 4 ? <strong key={i}>{p.slice(2, -2)}</strong>
+    : p.startsWith("`") && p.endsWith("`") && p.length > 2 ? <code key={i}>{p.slice(1, -1)}</code>
+    : p.startsWith("*") && p.endsWith("*") && p.length > 2 ? <em key={i}>{p.slice(1, -1)}</em>
+    : p);
+}
+
+/** a small Markdown subset: paragraphs, "1." lists, "-"/"*" lists, #-headings; a list written on one line ("... 1. a 2. b") is split into items */
+export function Markdown({ text }: { text: string }) {
+  const prepared = text.replace(/\r/g, "").replace(/([^\n])\s+(?=\d{1,2}\.\s+\S)/g, (m, c: string) => (/[.:;!?)*]$/.test(c) ? `${c}\n` : m));
+  const blocks: ReactNode[] = [];
+  let list: { ordered: boolean; items: string[] } | null = null;
+  let para: string[] = [];
+  const flush = () => {
+    if (para.length) blocks.push(<p key={blocks.length}>{inline(para.join(" "))}</p>);
+    para = [];
+    if (list) {
+      const items = list.items.map((t, i) => <li key={i}>{inline(t)}</li>);
+      blocks.push(list.ordered ? <ol key={blocks.length}>{items}</ol> : <ul key={blocks.length}>{items}</ul>);
+      list = null;
+    }
+  };
+  for (const line of prepared.split("\n")) {
+    const num = /^\s*\d{1,2}[.)]\s+(.*)$/.exec(line);
+    const bullet = /^\s*[-*•]\s+(.*)$/.exec(line);
+    const head = /^\s*#{1,4}\s+(.*)$/.exec(line);
+    if (num || bullet) {
+      const ordered = Boolean(num);
+      if (para.length || (list && list.ordered !== ordered)) flush();
+      list ??= { ordered, items: [] };
+      list.items.push((num ?? bullet)![1]!);
+    } else if (head) {
+      flush();
+      blocks.push(<p key={blocks.length}><strong>{inline(head[1]!)}</strong></p>);
+    } else if (!line.trim()) flush();
+    else {
+      if (list) flush();
+      para.push(line.trim());
+    }
+  }
+  flush();
+  return <div className="md">{blocks}</div>;
+}
+
 function Message({ m }: { m: TutorThread["messages"][number] }) {
   if (m.role === "user") return <p className="tutor-ask small" data-testid="tutor-user"><i className="pi pi-user" aria-hidden="true" /> {m.text}</p>;
   return (
@@ -33,7 +79,7 @@ function Message({ m }: { m: TutorThread["messages"][number] }) {
       <p className="small tutor-reply-head">
         {m.source === "approved_exercise" ? <><i className="pi pi-verified" aria-hidden="true" /> Approved rule</> : <><i className="pi pi-sparkles" aria-hidden="true" /> Local AI — a draft, not checked</>}
       </p>
-      <p lang="ru" className="ru">{m.text}</p>
+      <div lang="ru" className="ru"><Markdown text={m.text} /></div>
       {m.examples.length > 0 && <ul className="small">{m.examples.map((e, i) => <li key={i}>{e}</li>)}</ul>}
       {m.uncertaintyNoteRu && <p lang="ru" className="ru small muted">{m.uncertaintyNoteRu}</p>}
     </div>
@@ -131,12 +177,18 @@ export function Tutor() {
   };
 
   const waiting = (k: Kind) => sending === k || (thread?.pendingKinds ?? []).includes(k);
-  const askButton = (kind: Kind, icon: string, label: string, testId?: string) => (
-    <button className="btn" disabled={waiting(kind) || (sending !== null && sending !== kind)} onClick={() => void ask(kind)} data-testid={testId} aria-busy={waiting(kind)}>
-      <i className={`pi ${waiting(kind) ? "pi-spin pi-spinner" : icon}`} aria-hidden="true" /> {label}
-      {waiting(kind) && kind !== "why" && <span className="small muted"> · writing…</span>}
-    </button>
-  );
+  // each button works once per task: used once an answer of that kind is in the thread
+  const used = (k: Kind) => (thread?.messages ?? []).some((m) => m.role === "assistant" && m.kind === k);
+  const askButton = (kind: Kind, icon: string, label: string, testId?: string) => {
+    const done = used(kind);
+    return (
+      <button className={`btn${done ? " btn-used" : ""}`} disabled={done || waiting(kind) || (sending !== null && sending !== kind)} onClick={() => void ask(kind)} data-testid={testId} aria-busy={waiting(kind)}>
+        <i className={`pi ${waiting(kind) ? "pi-spin pi-spinner" : done ? "pi-check" : icon}`} aria-hidden="true" /> {label}
+        {waiting(kind) && kind !== "why" && <span className="small muted"> · writing…</span>}
+        {done && <span className="visually-hidden"> (already shown)</span>}
+      </button>
+    );
+  };
 
   const pick = (s: TutorSlot) => {
     setThread(null);

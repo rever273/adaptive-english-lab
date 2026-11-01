@@ -67,7 +67,7 @@ describe("start / stop scripts with a real server process", () => {
     expect(spa.status).toBe(200);
     const health = HealthSchema.parse(JSON.parse((await rawGet({})).body));
     expect(health).toMatchObject({ status: "ok", instanceId: lock1.instanceId });
-    expect(health.db.schemaVersion).toBe(19);
+    expect(health.db.schemaVersion).toBe(21);
 
     // foreign Origin / Host rejected by the real process
     expect((await rawGet({ origin: "https://evil.example" })).status).toBe(403);
@@ -86,7 +86,7 @@ describe("start / stop scripts with a real server process", () => {
 
     // persist a new settings revision through a separate connection while the server runs (WAL)
     const d = openDatabase(dbPath());
-    d.prepare("INSERT INTO settings_revisions(id,revision,values_json,created_at) VALUES ('r2',2,?,?)").run(JSON.stringify({ ...DEFAULT_SETTINGS_V1, taskCount: 20 }), new Date().toISOString());
+    d.prepare("INSERT INTO settings_revisions(id,revision,values_json,created_at) VALUES ('r3',3,?,?)").run(JSON.stringify({ ...DEFAULT_SETTINGS_V1, taskCount: 20 }), new Date().toISOString());
     const appliedAt = (d.prepare("SELECT applied_at FROM schema_migrations WHERE version=1").get() as { applied_at: string }).applied_at;
     d.close();
 
@@ -103,9 +103,9 @@ describe("start / stop scripts with a real server process", () => {
     expect(lock2.pid).not.toBe(lock1.pid);
     expect(lock2.instanceId).not.toBe(lock1.instanceId);
     const d2 = openDatabase(dbPath());
-    expect((d2.prepare("SELECT values_json FROM settings_revisions WHERE revision=2").get() as { values_json: string }).values_json).toContain('"taskCount":20');
+    expect((d2.prepare("SELECT values_json FROM settings_revisions WHERE revision=3").get() as { values_json: string }).values_json).toContain('"taskCount":20');
     expect((d2.prepare("SELECT applied_at FROM schema_migrations WHERE version=1").get() as { applied_at: string }).applied_at).toBe(appliedAt);
-    expect((d2.prepare("SELECT COUNT(*) AS n FROM schema_migrations").get() as { n: number }).n).toBe(19);
+    expect((d2.prepare("SELECT COUNT(*) AS n FROM schema_migrations").get() as { n: number }).n).toBe(21);
     d2.close();
     const backups = path.join(scratch.root, "backups");
     expect(existsSync(backups)).toBe(true);

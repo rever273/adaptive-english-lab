@@ -66,11 +66,33 @@ export const unloadAiModel = (): Promise<AiModelStatus> => send("POST", "/api/v1
 export const fetchCapabilities = (): Promise<Capabilities> => send("GET", "/api/v1/capabilities", CapabilitiesSchema);
 
 type SettingsValues = { preloadModelOnStart?: boolean; taskCount: number; weakRatio: number; voiceTarget: 0 | 1 | 2; voiceShare?: number; vocabularyTaskCount?: number; vocabularyNewWordsPerSession?: number; reviewNoticeThreshold?: number; difficultyMin?: Level; difficultyMax?: Level };
-export type Level = "A2" | "B1" | "B2" | "C1";
+export type Level = "A2" | "B1" | "B2" | "C1" | "C2";
 type SettingsView = { revision: number; values: SettingsValues; defaults: SettingsValues };
 export const fetchSettings = () => send("GET", "/api/v1/settings", typed<SettingsView>());
 export const savePreloadModel = (on: boolean) => send("POST", "/api/v1/settings", typed<SettingsView>(), { preloadModelOnStart: on });
 export const saveSettings = (values: { taskCount: number; weakRatio: number; voiceShare: number; vocabularyTaskCount?: number; vocabularyNewWordsPerSession?: number; reviewNoticeThreshold?: number; difficultyMin?: Level; difficultyMax?: Level }) => send("POST", "/api/v1/settings", typed<SettingsView>(), values);
+export type VocabularySpeechStatus = { enabled: boolean; configured: boolean; requests: number; blockedUntil: string | null };
+export const fetchVocabularySpeech = () => send("GET", "/api/v1/vocabulary-speech", typed<VocabularySpeechStatus>());
+export type VocabularySpeechCredits = { available: boolean; reason?: string; used?: number; limit?: number; remaining?: number; resetsAt?: string | null; tier?: string | null; appCharacters30d: number };
+export const fetchVocabularySpeechCredits = () => send("GET", "/api/v1/vocabulary-speech/credits", typed<VocabularySpeechCredits>());
+export type GroqStatus = { configured: boolean; reachable: boolean; reason?: string; limits: { capturedAt: string; status: number | null; headers: Record<string, string> } | null };
+export const fetchGroqStatus = () => send("GET", "/api/v1/groq-status", typed<GroqStatus>());
+export const setVocabularySpeech = (enabled: boolean) => send("POST", "/api/v1/vocabulary-speech/settings", typed<VocabularySpeechStatus>(), { enabled });
+async function speechRequest(path: string, signal?: AbortSignal): Promise<Blob | null> {
+  if (!csrfToken) {
+    const boot = await fetch("/api/v1/session", { signal });
+    csrfToken = SessionBootstrapSchema.parse(await boot.json()).csrfToken;
+  }
+  const res = await fetch(path, { method: "POST", headers: { "X-CSRF-Token": csrfToken }, signal });
+  if (!res.ok) {
+    if (res.status === 403) csrfToken = null;
+    const error = ErrorEnvelopeSchema.safeParse(await res.json().catch(() => null));
+    throw new ApiRequestError(error.success ? error.data.error.code : `HTTP_${res.status}`, error.success ? error.data.error.message : "Unable to play pronunciation.", res.status);
+  }
+  return res.status === 204 ? null : res.blob();
+}
+export const vocabularySpeech = (sessionId: string, slotId: string, signal: AbortSignal) => speechRequest(`/api/v1/vocabulary-speech/${encodeURIComponent(sessionId)}/${encodeURIComponent(slotId)}`, signal);
+export const vocabularyWordSpeech = (id: string) => speechRequest(`/api/v1/vocabulary-speech/word/${encodeURIComponent(id)}`);
 export const fetchDashboard = () => send("GET", "/api/v1/dashboard", DashboardSchema);
 export type SessionCategory = "grammar" | "vocabulary";
 export const fetchCurrentSession = (category: SessionCategory = "grammar") => send("GET", `/api/v1/sessions/current?category=${category}`, CurrentSessionResponseSchema);
@@ -86,8 +108,8 @@ export const takeLease = (sessionId: string, tabId: string) => send("POST", `/ap
 export const revealSlot = (sessionId: string, slotId: string, tabId: string) => send("POST", `/api/v1/sessions/${sessionId}/reveal`, RevealResponseSchema, { slotId, tabId });
 export const submitAttempt = (body: { slotId: string; submissionId: string; answer?: string | string[]; idk?: boolean; transcriptId?: string }) =>
   send("POST", "/api/v1/attempts", AttemptResponseSchema, { ...body, inputMode: body.transcriptId ? "voice" : "text" });
-export const sendEvent = (sessionId: string, slotId: string, type: "hint" | "reveal_answer" | "skip" | "continue") =>
-  send("POST", `/api/v1/sessions/${sessionId}/events`, SessionEventResponseSchema, { slotId, type, clientEventId: crypto.randomUUID() });
+export const sendEvent = (sessionId: string, slotId: string, type: "hint" | "vocabulary_translation" | "vocabulary_letters" | "reveal_answer" | "skip" | "continue", letterIndex?: number) =>
+  send("POST", `/api/v1/sessions/${sessionId}/events`, SessionEventResponseSchema, { slotId, type, clientEventId: crypto.randomUUID(), ...(letterIndex !== undefined ? { letterIndex } : {}) });
 export const fetchFeedback = (sessionId: string, slotId: string) => send("GET", `/api/v1/sessions/${sessionId}/slots/${slotId}/feedback`, FeedbackResponseSchema);
 export const finishSession = (sessionId: string, mode: "completed" | "ended_early") => send("POST", `/api/v1/sessions/${sessionId}/finish`, SessionSummarySchema, { mode });
 
@@ -149,10 +171,12 @@ export type GpuInfo =
   | { available: false; reason: string }
   | { available: true; owner: string | null; fencingToken: number; leaseUntil: string | null; activeJob: { id: string; kind: string; runningForMs: number } | null; residentModels: string[]; practiceActive: boolean; reserveMib: number; telemetry: { usedMib: number; totalMib: number; freeMib: number } | "unavailable"; waitingByReason: Record<string, number> };
 
+export type StudioBatchSummary = Pick<BatchSummary, "id" | "createdAt" | "category" | "requestedCount" | "completion"> & { counts: BatchSummary["counts"] | null };
+export const fetchStudioBatches = () => send("GET", "/api/v1/content/batch-summaries", typed<{ batches: StudioBatchSummary[] }>());
 export const fetchBatches = () => send("GET", "/api/v1/content/batches", typed<{ batches: BatchSummary[]; trialGate: TrialGate }>());
 export const fetchBatch = (id: string) => send("GET", `/api/v1/content/batches/${id}`, typed<BatchSummary & { items: BatchItem[]; trialGate: TrialGate }>());
 export const createBatchApi = (body: { count: number; mode: "adaptive" | "balanced" | "manual"; trial?: boolean; category?: "grammar" | "vocabulary" }) => send("POST", "/api/v1/content/batches", typed<{ batchId: string; items: number; units: number }>(), body);
-export const fetchContentStock = () => send("GET", "/api/v1/content/stock", typed<Record<"grammar" | "vocabulary", { available: number; threshold: number; low: boolean; message?: string; recommended?: number; lesson?: { key: string; label: string; range: string } }>>());
+export const fetchContentStock = () => send("GET", "/api/v1/content/stock", typed<Record<"grammar" | "vocabulary", { available: number; threshold: number; low: boolean; message?: string; recommended?: number; plan?: { words: number; deficit: number; recommended: number; targetPerWord: number }; course?: { lessons: number; deficit: number; recommended: number; sessionsPerLesson: number }; lesson?: { key: string; label: string; range: string } }>>());
 export const fetchCoverage = () => send("GET", "/api/v1/content/coverage", typed<Coverage>());
 export const fetchRevisionContent = (id: string) => send("GET", `/api/v1/content/revisions/${id}`, typed<{ revisionId: string; contentHash: string; status: string; content: Record<string, unknown> }>());
 export const importReview = (batchId: string, manifest: unknown) => send("POST", `/api/v1/content/batches/${batchId}/review-import`, typed<{ recorded: number; approved: number; flagged: number; rejected: number }>(), manifest);
@@ -269,11 +293,14 @@ export interface VocabEntry {
   posSource: Src | "entry";
   /** AI draft CEFR level (A1..C2) of the word in the sense it was met, or null (D64) */
   level: string | null;
+  /** reference facts from the word job (D69), or null until it has run */
+  lexicon: { transcription: string; definitionRu: string; synonyms: string[]; irregularForms: string[]; frequency: number | null } | null;
   /** vocabulary-practice tasks on this word that you have answered (first tries) */
   practised: number;
   bank: { occurrences: number; revisions: number };
   displayed: { occurrences: number; slots: number };
   lastSeen: string | null;
+  createdAt: string;
 }
 interface VocabTotals { words: number; learned: number; bankOccurrences: number; displayedOccurrences: number }
 const anyOf = <T>() => ({ parse: (x: unknown) => x as T }) as unknown as ZodType<T>;
@@ -307,9 +334,9 @@ export const askTutor = (body: { sessionId: string; slotId: string; kind: "why" 
 export const fetchAgentTask = (kind: "session" | "exercise" | "batch" | "findings" | "coverage" | "progress" | "lessons" | "vocabulary" | "review", id?: string) => send("GET", `/api/v1/tutor/agent-task?kind=${kind}${id ? `&id=${encodeURIComponent(id)}` : ""}`, anyOf<{ text: string }>());
 
 // ---- Vocabulary Practice, XP tracks, vocabulary coverage and analytics (vocabulary TZ) ----
-export interface TrackProgress { track: "grammar" | "vocabulary"; total: number; level: number; withinLevel: number; threshold: number; ruleVersion: string }
+export interface TrackProgress { track: "grammar" | "vocabulary"; total: number; level: number; withinLevel: number; threshold: number; ruleVersion: string; levelRule?: string }
 export const fetchActivityProgress = () => send("GET", "/api/v1/activity-progress", typed<{ grammar: TrackProgress; vocabulary: TrackProgress }>());
-export interface VocabPracticeStatus { taskCount: number; available: number; freshAvailable?: number; repeatsAvailable?: number; repeatStock?: number; wordsWithContexts: number; words: number; learned: number; approvedForWords: number; draftsNotReleased: number; shortage: { available: number; requested: number; message: string } | null; activeSessionId: string | null }
+export interface VocabPracticeStatus { wordQueue?: { due: number; newWords: number; recent: number }; taskCount: number; available: number; freshAvailable?: number; repeatsAvailable?: number; repeatStock?: number; wordsWithContexts: number; words: number; learned: number; approvedForWords: number; draftsNotReleased: number; shortage: { available: number; requested: number; message: string } | null; activeSessionId: string | null }
 export const fetchVocabPractice = () => send("GET", "/api/v1/vocabulary/practice", typed<VocabPracticeStatus>());
 export const createVocabSession = (count?: number) =>
   send("POST", "/api/v1/vocabulary/sessions", CreateSessionResponseSchema, { timezone: Intl.DateTimeFormat().resolvedOptions().timeZone, ...(count ? { count } : {}) });

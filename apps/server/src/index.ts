@@ -10,6 +10,7 @@ import { loadSettings } from "./domain/sessions/policy.js";
 import { preloadModelOnStart } from "@english-lab/contracts";
 import { OllamaChatClient } from "./adapters/ollama/chat.js";
 import { VocabularyJobRunner } from "./domain/vocabulary/enrichment.js";
+import { LexiconHints } from "./domain/vocabulary/lexiconHint.js";
 import { TutorJobRunner } from "./domain/tutor/runner.js";
 import { GroqWorker } from "./adapters/stt/groqWorker.js";
 import { existsSync, readFileSync } from "node:fs";
@@ -47,6 +48,8 @@ async function main(): Promise<void> {
   const envPath = path.join(config.projectRoot, ".env");
   const localEnv = existsSync(envPath) ? parseEnv(readFileSync(envPath, "utf8")) : {};
   const groqKey = process.env.GROQ_API_KEY ?? process.env.groq_api_key ?? localEnv.GROQ_API_KEY ?? localEnv.groq_api_key;
+  const elevenLabsKey = process.env.ELEVENLABS_API_KEY ?? process.env.elevenlabs_api_key ?? localEnv.ELEVENLABS_API_KEY ?? localEnv.elevenlabs_api_key;
+  const elevenLabsVoiceId = process.env.ELEVENLABS_VOICE_ID ?? process.env.elevenlabs_voice_id ?? localEnv.ELEVENLABS_VOICE_ID ?? localEnv.elevenlabs_voice_id;
   const cloudSpeech = Boolean(groqKey);
   const instanceId = randomUUID();
   const startedAt = new Date().toISOString();
@@ -98,7 +101,7 @@ async function main(): Promise<void> {
     runtimeVersion: () => analysisOpts.runtimeVersion(),
     deps: { now: () => new Date(), newId: randomUUID },
   });
-  const vocabulary = new VocabularyJobRunner({ db, chat: new OllamaChatClient(ollama), installedDigest: (tag) => analysisOpts.installedDigest(tag), runtimeVersion: () => analysisOpts.runtimeVersion(), deps: { now: () => new Date(), newId: randomUUID } });
+  const vocabulary = new VocabularyJobRunner({ db, hints: new LexiconHints(config.lexiconCsv), chat: new OllamaChatClient(ollama), installedDigest: (tag) => analysisOpts.installedDigest(tag), runtimeVersion: () => analysisOpts.runtimeVersion(), deps: { now: () => new Date(), newId: randomUUID } });
   const tutor = new TutorJobRunner({ db, chat: new OllamaChatClient(ollama), installedDigest: (tag) => analysisOpts.installedDigest(tag), runtimeVersion: () => analysisOpts.runtimeVersion(), deps: { now: () => new Date(), newId: randomUUID } });
   let analysisReady = false;
   let warmed = false;
@@ -164,6 +167,9 @@ async function main(): Promise<void> {
   app = await buildApp({
     config,
     db,
+    elevenLabsKey,
+    elevenLabsVoiceId,
+    ...(groqKey ? { groqKey } : {}),
     instanceId,
     startedAt,
     shutdownToken: lock.shutdownToken,

@@ -86,7 +86,7 @@ describe("a missed grammar exercise comes back once as a labelled repeat (D68)",
     const repeatSlots = second.snapshot.slots.filter((s) => s.repeat);
     expect(repeatSlots.length).toBeGreaterThan(0);
     expect(repeatSlots.length).toBeLessThanOrEqual(5); // 30% of 18
-    // only revisions that were missed / skipped last time return (the correct ones are not due for 14 days)
+    // only revisions that were missed / skipped last time return (the correct ones are not due for 3 days)
     const repeatRevisions = repeatSlots.map((s) => one<{ r: string }>("SELECT exercise_revision_id AS r FROM session_slots WHERE id = ?", s.slotId).r);
     expect(repeatRevisions.every((r) => notCorrect.has(r))).toBe(true);
     expect(new Set(repeatRevisions).size).toBe(repeatRevisions.length); // never twice in one session
@@ -102,7 +102,7 @@ describe("a missed grammar exercise comes back once as a labelled repeat (D68)",
     }
     // the decision record carries the repeat information and the new algorithm id
     const decision = one<{ algorithm_id: string; choices_json: string }>("SELECT algorithm_id, choices_json FROM scheduling_decisions WHERE session_id = ?", second.sessionId);
-    expect(decision.algorithm_id).toBe("grammar-selection-v2");
+    expect(decision.algorithm_id).toBe("grammar-selection-v3");
     expect((JSON.parse(decision.choices_json).slots as Array<{ repeat: unknown }>).filter((x) => x.repeat).length).toBe(repeatSlots.length);
 
     // strict no-repeat for everything that is not a labelled repeat
@@ -130,7 +130,7 @@ describe("a missed grammar exercise comes back once as a labelled repeat (D68)",
     expect(count("attempts a JOIN session_slots ss ON ss.id = a.slot_id WHERE ss.session_id = ?", first.sessionId)).toBe(12);
   }, 120_000);
 
-  it("a correct answer is due again only after 14 days; a miss or skip from the next session on", () => {
+  it("a correct answer is due again normally after 3 days; a miss or skip from the next session on", () => {
     env = openSliceCopy();
     const first = begin(env, "one");
     play(first.sessionId, (o) => (o < 9 ? "ok" : "skip"));
@@ -140,18 +140,33 @@ describe("a missed grammar exercise comes back once as a labelled repeat (D68)",
     const day1 = reasonsAt(new Date(now.getTime() + DAY));
     expect([...day1.values()].every((r) => r === "missed")).toBe(true);
     expect(day1.size).toBe(9);
-    expect(reasonsAt(new Date(now.getTime() + 13 * DAY)).size).toBe(9);
-    const day15 = reasonsAt(new Date(now.getTime() + 15 * DAY));
+    expect(withRepeats(env.db, all, new Date(now.getTime() + DAY), "shortage").candidates.filter(c => c.repeat)).toHaveLength(18);
+    expect(reasonsAt(new Date(now.getTime() + 2 * DAY)).size).toBe(9);
+    const day15 = reasonsAt(new Date(now.getTime() + 3 * DAY));
     expect(day15.size).toBe(18);
     expect([...day15.values()].filter((r) => r === "review")).toHaveLength(9);
     // a repeat lists only the units never exposed; the shown ones are in the ledger already
     const exposedFps = new Set(rows<{ f: string }>("SELECT u.fingerprint AS f FROM exposures e JOIN prompt_units u ON u.id = e.unit_id").map((r) => r.f));
-    for (const c of withRepeats(env.db, all, new Date(now.getTime() + 15 * DAY)).candidates.filter((x) => x.repeat)) expect(c.unitFingerprints.some((f) => exposedFps.has(f))).toBe(false);
+    for (const c of withRepeats(env.db, all, new Date(now.getTime() + 3 * DAY)).candidates.filter((x) => x.repeat)) expect(c.unitFingerprints.some((f) => exposedFps.has(f))).toBe(false);
     // the active (unfinished) session never feeds repeats: an exercise shown now is not yet history
     advanceClock(env, 1000);
   }, 120_000);
 
-  it("a tentative model verdict never schedules a repeat: it stays 'unchecked' (counts like correct, 14 days)", () => {
+  it("uses one-day correct repeats only when the normal pool cannot fill the next session", () => {
+    env = openSliceCopy();
+    const first = begin(env, "first-correct");
+    play(first.sessionId, () => "ok");
+    const second = begin(env, "second-correct");
+    expect(second.snapshot.slots.every(s => !s.repeat)).toBe(true);
+    play(second.sessionId, () => "ok");
+    advanceClock(env, DAY + 1000);
+    expect(computeReadiness(env.db, env.deps, env.blueprintRevisionId).readySessions).toBeGreaterThan(0);
+    const third = begin(env, "shortage-correct");
+    expect(third.snapshot.slots.some(s => s.repeat?.reason === "review")).toBe(true);
+    expect(third.snapshot.slots.filter(s => s.repeat).length).toBeLessThanOrEqual(10);
+  }, 120_000);
+
+  it("a tentative model verdict never schedules a repeat: it stays 'unchecked' (counts like correct, 3 days)", () => {
     env = openSliceCopy();
     const first = begin(env, "one");
     play(first.sessionId, () => "ok");
@@ -188,6 +203,7 @@ describe("replenishment is planned from the next lesson's deficits (D68)", () =>
     const view = lessonPlanView(env.db, env.deps.now())!;
     const next = view.lessons[view.nextIndex]!;
     expect(next.key).toBe(key);
+    expect(stock.grammar).toMatchObject({ course: { lessons: view.lessons.length, deficit: view.lessons.reduce((sum, l) => sum + l.deficit, 0), recommended: view.lessons.reduce((sum, l) => sum + l.recommended, 0), sessionsPerLesson: 2 } });
     const formatSum = next.formats.reduce((a, f) => a + f.deficit, 0);
     expect((stock.grammar as { recommended: number }).recommended).toBe(Math.ceil(next.deficit * 1.2));
     expect(next.deficit).toBeGreaterThanOrEqual(formatSum);
@@ -205,7 +221,7 @@ describe("replenishment is planned from the next lesson's deficits (D68)", () =>
     const wide = lessonPlanView(env.db, env.deps.now())!.lessons[0]!;
     const missingLevel = (["C1", "B2", "B1", "A2"] as const).find((l) => !levels.includes(l))!;
     const v1 = JSON.parse(one<{ values_json: string }>("SELECT values_json FROM settings_revisions WHERE revision = 1").values_json);
-    env.db.prepare("INSERT INTO settings_revisions(id, revision, values_json, created_at) VALUES (?,?,?,?)").run(randomUUID(), 2, JSON.stringify({ ...v1, difficultyMin: missingLevel, difficultyMax: missingLevel }), "now");
+    env.db.prepare("INSERT INTO settings_revisions(id, revision, values_json, created_at) VALUES (?,?,?,?)").run(randomUUID(), 3, JSON.stringify({ ...v1, difficultyMin: missingLevel, difficultyMax: missingLevel }), "now");
     const narrow = lessonPlanView(env.db, env.deps.now())!.lessons[0]!;
     expect(narrow.range).toBe(missingLevel);
     expect(narrow.available).toBe(0);
@@ -219,8 +235,8 @@ describe("replenishment is planned from the next lesson's deficits (D68)", () =>
     const first = begin(env, "one");
     play(first.sessionId, () => "skip");
     const after = lessonPlanView(env.db, env.deps.now())!.lessons[0]!;
-    // 18 shown exercises are due, but the solver can use at most floor(0.3*18)=5 missed repeats per session: 2 sessions -> 10
-    expect(after.reusable).toBe(10);
+    // 18 shown exercises are due (at most floor(0.3*18)=5 missed repeats per play); after one completed play only 1 play remains, and repeats only fill what fresh exercises leave short
+    expect(after.reusable).toBeLessThanOrEqual(5);
     expect(after.fresh).toBe(before.fresh - 18);
     expect(after.available).toBe(after.fresh + after.reusable);
   }, 120_000);

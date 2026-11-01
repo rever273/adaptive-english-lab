@@ -1,12 +1,14 @@
-import { difficultyLevels } from "@english-lab/contracts";
+import { MAX_LESSON_PLAYS, difficultyLevels } from "@english-lab/contracts";
 import { DEFAULT_QUOTAS, FORMAT_ORDER, GRAMMAR_REPEAT_CONFIG, applyReading, scaleQuotas, type Format } from "@english-lab/learning";
 import type { Db } from "../../../db/open.js";
 import { loadBlockedFingerprints, loadCandidates } from "../../sessions/bank.js";
-import { PLAYABLE_BLUEPRINT_STATUSES, loadBlueprint, loadSettings, type BlueprintPolicy } from "../../sessions/policy.js";
+import { loadBlueprint, loadSettings, type BlueprintPolicy } from "../../sessions/policy.js";
+import { courseLessons } from "../../sessions/course.js";
 import { withRepeats } from "../../sessions/repeats.js";
 
-/** D68: replenishment looks this many sessions ahead, counting fresh plus reusable exercises, and orders 20% on top of the deficit */
-export const PLANNING_SESSIONS = 2;
+/** D68: replenishment looks this many sessions ahead, counting fresh plus reusable exercises, and orders 20% on top of the deficit.
+ *  A lesson is played at most MAX_LESSON_PLAYS times, so a lesson with k completed plays needs stock for the remaining MAX_LESSON_PLAYS - k only. */
+export const PLANNING_SESSIONS = MAX_LESSON_PLAYS;
 export const PLANNING_MARGIN = 0.2;
 /** every skill of the lesson pool should keep at least this many usable exercises per planned session, so no skill dries up */
 export const SKILL_MIN_PER_SESSION = 2;
@@ -58,25 +60,13 @@ export const rangeLabel = (levels: readonly string[] | null): string => (!levels
 export const withMargin = (deficit: number): number => (deficit <= 0 ? 0 : Math.ceil(deficit * (1 + PLANNING_MARGIN)));
 
 /** Lessons in course order (the dashboard order) that can be played; completed practice sessions are counted per lesson. */
-function playableLessons(db: Db): Array<{ id: string; key: string; completed: number }> {
-  const rows = db
-    .prepare(
-      `SELECT br.id AS id, b.stable_key AS key, br.status AS status,
-              (SELECT COUNT(*) FROM sessions s JOIN blueprint_revisions x ON x.id = s.blueprint_revision_id
-                WHERE x.blueprint_id = br.blueprint_id AND s.purpose = 'practice' AND s.status = 'completed') AS completed
-         FROM blueprint_revisions br JOIN blueprints b ON b.id = br.blueprint_id
-        WHERE br.revision = (SELECT MAX(x.revision) FROM blueprint_revisions x WHERE x.blueprint_id = br.blueprint_id)
-        ORDER BY b.stable_key`,
-    )
-    .all() as Array<{ id: string; key: string; status: string; completed: number }>;
-  return rows.filter((r) => PLAYABLE_BLUEPRINT_STATUSES.has(r.status));
-}
+function playableLessons(db: Db) { return courseLessons(db); }
 
-function needOf(db: Db, lesson: { id: string; key: string }, now: Date, settingsValues: ReturnType<typeof loadSettings>["values"], blocked: ReadonlySet<string>): LessonNeed {
+function needOf(db: Db, lesson: { id: string; key: string; completed: number }, now: Date, settingsValues: ReturnType<typeof loadSettings>["values"], blocked: ReadonlySet<string>): LessonNeed {
   const bp = loadBlueprint(db, lesson.id);
   const levels = difficultyLevels(settingsValues);
   const n = settingsValues.taskCount;
-  const S = PLANNING_SESSIONS;
+  const S = Math.max(0, PLANNING_SESSIONS - lesson.completed);
   const all = loadCandidates(db, "practice", bp.policy.skillPool, levels);
   const reusableSet = withRepeats(db, all, now).candidates;
   // fresh = no sentence shown or reserved; reusable = shown before (labelled repeat). Overlapping sentences are counted once.
@@ -159,13 +149,20 @@ export function lessonPlanView(db: Db, now: Date = new Date()): LessonPlanView |
   if (lessons.length === 0) return null;
   const settings = loadSettings(db).values;
   const blocked = loadBlockedFingerprints(db);
-  let nextIndex = lessons.findIndex((l) => l.completed === 0);
-  if (nextIndex < 0) nextIndex = lessons.reduce((best, l, i) => (l.completed < lessons[best]!.completed ? i : best), 0);
+  let nextIndex = lessons.findIndex((l) => l.unlocked && l.completed === 0);
+  if (nextIndex < 0) nextIndex = lessons.findIndex((l) => l.unlocked && l.completed < MAX_LESSON_PLAYS);
+  if (nextIndex < 0) nextIndex = lessons.length - 1;
   return { lessons: lessons.map((l) => needOf(db, l, now, settings, blocked)), nextIndex };
+}
+
+/** Need of one lesson (by blueprint revision id), for the gate that refuses to open a lesson whose stock no longer covers PLANNING_SESSIONS plays. */
+export function lessonNeedFor(db: Db, lessonId: string, now: Date = new Date()): LessonNeed | null {
+  const lesson = playableLessons(db).find((l) => l.id === lessonId);
+  return lesson ? needOf(db, lesson, now, loadSettings(db).values, loadBlockedFingerprints(db)) : null;
 }
 
 /** "Lesson L01 at B1-C1 needs: detect_error 4, guided_short_answer 1 (new or reusable exercises for the next 2 sessions)." */
 export function needMessage(n: LessonNeed): string {
   const parts = [...n.formats.filter((f) => f.deficit > 0).map((f) => `${f.format} ${f.deficit}`), ...n.skills.filter((s) => s.deficit > 0 && n.formats.every((f) => f.deficit === 0)).map((s) => `${s.skill} ${s.deficit}`)];
-  return `Lesson ${n.label} at ${n.range} needs: ${parts.join(", ")} (new or reusable exercises for the next ${n.sessions} sessions; ${n.available} usable now).`;
+  return `Lesson ${n.label} at ${n.range} needs: ${parts.join(", ")} (new or reusable exercises for the next ${n.sessions} session${n.sessions === 1 ? "" : "s"}; ${n.available} usable now).`;
 }

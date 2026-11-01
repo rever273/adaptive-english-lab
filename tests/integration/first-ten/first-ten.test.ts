@@ -8,6 +8,7 @@ import { createDiagnosticBlock, createHeldoutCheck, diagnosticStatus, heldoutSta
 import { createPracticeSession } from "../../../apps/server/src/domain/sessions/create.js";
 import { getFeedback } from "../../../apps/server/src/domain/sessions/feedback.js";
 import { finishSession } from "../../../apps/server/src/domain/sessions/finish.js";
+import { computeReadiness } from "../../../apps/server/src/domain/sessions/readiness.js";
 import { ApiError } from "../../../apps/server/src/errors.js";
 import { ClosedFormAssessor } from "../../../apps/server/src/domain/content/grader.js";
 import { buildFirst10, firstTenBlueprints, LESSONS, READING_LESSONS } from "../../../content/first10/index.mjs";
@@ -58,17 +59,14 @@ describe("the first-ten bank is released and complete", () => {
   });
 
   it("custom 30-task sessions: a lesson without shared skills reports an exact stock deficit; where shared skills give enough, 30 is honestly feasible", () => {
-    env.db.prepare("INSERT INTO settings_revisions(id,revision,values_json,created_at) VALUES (?,?,?,?)").run(randomUUID(), 2, JSON.stringify({ ...DEFAULT_SETTINGS_V1, taskCount: 30 }), env.clock.current.toISOString());
+    env.db.prepare("INSERT INTO settings_revisions(id,revision,values_json,created_at) VALUES (?,?,?,?)").run(randomUUID(), 3, JSON.stringify({ ...DEFAULT_SETTINGS_V1, taskCount: 30, difficultyMin: "A2", difficultyMax: "C1" }), env.clock.current.toISOString());
     const report: Record<string, unknown> = {};
     try {
       for (const [code] of LESSONS) {
-        try {
-          const r = createPracticeSession(env.db, env.deps, { purpose: "practice", blueprintRevisionId: blueprintIds.get(`first10-${code.toLowerCase()}`)!, seed: `custom30-${code}`, timezone: TZ });
-          report[code] = "feasible";
-          finishSession(env.db, sessionDeps(env), r.sessionId, "ended_early"); // nothing was shown, so its reservations are released again
-        } catch (e) {
-          expect((e as ApiError).code).toBe("CONTENT_SHORTAGE");
-          const d = (e as ApiError).details as { requestedN: number; largestFeasibleN: number | null; deficits: Array<{ needed?: number; available?: number; message: string }> };
+        const ready = computeReadiness(env.db, env.deps, blueprintIds.get(`first10-${code.toLowerCase()}`)!);
+        if (ready.readySessions > 0) report[code] = "feasible";
+        else {
+          const d = ready.shortage!;
           expect(d.requestedN).toBe(30);
           expect(d.largestFeasibleN === null || d.largestFeasibleN < 30).toBe(true);
           for (const x of d.deficits) if (x.needed !== undefined) expect(x.needed).toBeGreaterThan(x.available!);
@@ -76,7 +74,7 @@ describe("the first-ten bank is released and complete", () => {
         }
       }
     } finally {
-      env.db.prepare("INSERT INTO settings_revisions(id,revision,values_json,created_at) VALUES (?,?,?,?)").run(randomUUID(), 3, JSON.stringify(DEFAULT_SETTINGS_V1), env.clock.current.toISOString());
+      env.db.prepare("INSERT INTO settings_revisions(id,revision,values_json,created_at) VALUES (?,?,?,?)").run(randomUUID(), 4, JSON.stringify({ ...DEFAULT_SETTINGS_V1, difficultyMin: "A2", difficultyMax: "C1" }), env.clock.current.toISOString());
     }
     console.log("FIRST10_CUSTOM30", JSON.stringify(report));
     expect(typeof report.L06).toBe("object"); // L06 shares no skill with another lesson: 24 exercises cannot make 30 tasks
@@ -84,7 +82,7 @@ describe("the first-ten bank is released and complete", () => {
 });
 
 describe("ten sequential first-run sessions", () => {
-  it("each lesson yields a feasible 18-slot session from its own pool (5/5/5/1/2, or 3/4/5/1/2 + a 3-question reading passage in L03/L06/L10); no exercise is used twice", () => {
+  it("each lesson yields a feasible 18-slot session across the original A2-C1 bank; no exercise is used twice", () => {
     const used = new Set<string>();
     let slotTotal = 0;
     const report: Array<Record<string, unknown>> = [];

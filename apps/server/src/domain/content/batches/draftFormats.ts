@@ -5,6 +5,7 @@ import { detectProjectRoot } from "../../../config.js";
 import { DIMENSION_BY_TYPE, type ExerciseType, type ValidationIssue } from "@english-lab/contracts";
 import { validateExercise } from "../validator.js";
 import type { ItemPlan } from "./plan.js";
+import { articleMismatch, australianDeep } from "./languageChecks.js";
 
 /**
  * generation-v2 (D48). The Trial of generation-v1 (a small model asked for a whole Exercise-v1 document) produced 0 usable drafts out of 24.
@@ -105,6 +106,10 @@ Before returning each draft, insert every option into its sentence: exactly one 
 For detect_error, identify one genuine error, ensure each segment is copied exactly from the sentence and every correction fixes it; do not call an indefinite article wrong merely because a noun is specific. For no-mistake items every segment must be correct.
 For short answers, give a precise Russian meaning, natural accepted English answers and an accurate rubric; never list an ungrammatical answer. For reading, ask distinct questions about the target construction, with exactly one correct option per question. Hints must not reveal the answer. Explain the actual rule in natural Russian.`;
 
+export const GENERATION_SYSTEM_V6 = `${GENERATION_SYSTEM_V5}
+For every multiple-choice item, replace only the gap with each complete option, without changing or deleting any other word. Read every resulting complete sentence: the keyed answer must be grammatical and natural, with no duplicated words; all other options must be ungrammatical or incompatible with explicit context. If more than one can work, rewrite the context or options. State enough time and meaning context to distinguish habitual from past actions.
+For error detection, a less common formal or standard Australian/British variant is not an error. For example, formal ?persons? can be correct; do not mark it wrong merely because ?people? is more common. Choose an unmistakable rule violation instead.`;
+
 export const GENERATION_SYSTEM_V2 = `You write practice items for ONE adult learner of Australian English (level B2). You output JSON only, in the requested shape.
 Rules: natural adult topics (work, services, travel, community, health, technology), no personal-life questions, no listening. Sentences 8-20 words.
 Every item must test exactly the TARGET SKILL given for it. Russian text (hint_ru, explanation_ru, cue_ru, meaning_ru, marker_ru, reject_ru) must be correct Russian; English text must be correct, natural Australian English.
@@ -176,7 +181,7 @@ function checkEnglish(label: string, v: unknown, out: ValidationIssue[]): void {
  */
 export function assembleExercise(raw: unknown, plan: ItemPlan, ctx: { exerciseId: string; model: { tag: string; digest: string }; promptVersion: string; taxonomySkillIds: ReadonlySet<string> }): Built {
   if (typeof raw !== "object" || raw === null || Array.isArray(raw)) return { ok: false, issues: [issue("NOT_AN_OBJECT", "", "a draft must be a JSON object")] };
-  const d = raw as Record<string, unknown>;
+  const d = australianDeep(raw as Record<string, unknown>);
   const type = plan.type as ExerciseType;
   const allowed = new Set(Object.keys(DRAFT_PROPS[type]));
   const issues: ValidationIssue[] = [];
@@ -205,6 +210,8 @@ export function assembleExercise(raw: unknown, plan: ItemPlan, ctx: { exerciseId
       if (options.some((o) => CYRILLIC.test(o))) issues.push(issue("NOT_ENGLISH", "/options", "options must be English"));
       const ci = Number(d.correct_index);
       if (!Number.isInteger(ci) || ci < 0 || ci >= options.length) issues.push(issue("KEY_OUT_OF_RANGE", "/correct_index", "correct_index must point at one of the options"));
+      const article = articleMismatch(sentence.split(GAP)[0] ?? "", options);
+      if (article) issues.push(issue("ARTICLE_GIVES_ANSWER", "/sentence", `the article "${article}" before the gap must fit every option, otherwise it gives the answer away`));
       promptEn = sentence.replace(GAP, "___");
       payload = { options: options.map((text, i) => ({ id: ids[i]!, text })), accepted_option_ids: [ids[ci] ?? "a"], multiple: false };
       break;
@@ -300,7 +307,7 @@ export function assembleExercise(raw: unknown, plan: ItemPlan, ctx: { exerciseId
     additional_skills: [],
     dimension: DIMENSION_BY_TYPE[type],
     difficulty: plan.level ?? "B2",
-    context_level: plan.level === "C1" ? "C1" : "B2",
+    context_level: plan.level === "C2" ? "C2" : plan.level === "C1" ? "C1" : "B2",
     topic: plan.topic,
     context_id: plan.context_id,
     template_cluster: `gen-${type}-${plan.target_skill}-${fingerprint}`,

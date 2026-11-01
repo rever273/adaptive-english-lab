@@ -24,6 +24,9 @@ export interface TutorDraft {
   uncertainty_note: string;
 }
 
+/** explanation_ru is shown as light Markdown (bold, lists, paragraphs), so it must be short and structured. */
+const TUTOR_FORMAT = "Format explanation_ru as Markdown: short paragraphs separated by a blank line, **bold** for key words, a numbered or '-' list with each item on its own line; at most about 600 characters in total, plain simple Russian.";
+
 export const TUTOR_PARAMS = { numCtx: RESIDENT_NUM_CTX, temperature: 0.3, seed: 42, numPredict: 900 } as const;
 const CYRILLIC = /[Ѐ-ӿ]/;
 const norm = (s: string) => s.toLowerCase().replace(/[^\p{L}\p{N} ]/gu, "").replace(/\s+/g, " ").trim();
@@ -113,10 +116,10 @@ export class TutorJobRunner implements JobRunner<TutorPayload> {
       message_id: messageId,
       request:
         kind === "more_examples"
-          ? "Give new examples of this rule."
+          ? "Give new examples of how this grammar is used in OTHER sentences (examples_en, 3 varied short sentences, in different contexts). explanation_ru is only one or two short Russian sentences introducing them (what to notice in the structure); do NOT explain the rule again. " + TUTOR_FORMAT
           : kind === "explain_ru"
-            ? "Explain this rule again in Russian, in more detail than verified_rule_ru: step by step, when to use it and when not, and the most common mistake. Do not just repeat verified_rule_ru."
-            : "Answer the learner's question about this rule.",
+            ? "Explain in simple Russian the mistake or point of THIS exercise (see learner_answer and exercise_prompt_en), in this order: **Что здесь не так** (1-2 sentences), **Как правильно** (the structure as a short formula plus the corrected sentence), **Запомните** (one short tip). Then give 2 short examples of the same structure in other sentences in examples_en. Do not repeat verified_rule_ru word for word, no long theory. " + TUTOR_FORMAT
+            : "Answer the learner's question about this rule. " + TUTOR_FORMAT,
       learner_question: question,
       learner_answer: attempt ? JSON.parse(attempt.answer) : null,
       verified_rule_ru: content.explanation_ru,

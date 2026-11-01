@@ -34,7 +34,7 @@ describe("GET /api/v1/health and /capabilities", () => {
     const res = await get("/api/v1/health");
     expect(res.statusCode).toBe(200);
     const h = HealthSchema.parse(res.json());
-    expect(h.db).toMatchObject({ ready: true, schemaVersion: 19, driver: "better-sqlite3", jsonSupport: true });
+    expect(h.db).toMatchObject({ ready: true, schemaVersion: 21, driver: "better-sqlite3", jsonSupport: true });
     expect(h.db.pragmas).toEqual({ journal_mode: "wal", foreign_keys: 1, busy_timeout: 5000, synchronous: 2 });
     expect(h.instanceId).toBe("inst-1");
     expect(h.node.version).toBe(process.version);
@@ -44,7 +44,7 @@ describe("GET /api/v1/health and /capabilities", () => {
     const c = CapabilitiesSchema.parse((await get("/api/v1/capabilities")).json());
     expect(c.ai).toEqual({ ollama: "not_implemented", model: "not_implemented", modelTag: "gemma4:12b", modelState: "unloaded" });
     expect(c.stt.status).toBe("not_implemented");
-    expect(c.versions.schema).toBe(19);
+    expect(c.versions.schema).toBe(21);
     expect(JSON.stringify(c)).not.toMatch(/token|secret|[A-Z]:\\/i); // no secrets, no paths
   });
 
@@ -56,6 +56,7 @@ describe("GET /api/v1/health and /capabilities", () => {
     const res = await get("/api/v1/health");
     expect(res.headers["cache-control"]).toBe("no-store");
     expect(res.headers["content-security-policy"]).toContain("default-src 'self'");
+    expect(res.headers["content-security-policy"]).toContain("media-src 'self' blob:");
     expect(res.headers["x-content-type-options"]).toBe("nosniff");
   });
 });

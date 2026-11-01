@@ -8,7 +8,7 @@ import { createDiagnosticBlock } from "../../../apps/server/src/domain/diagnosti
 import type { ChatClient, ChatResult, CallStats } from "../../../apps/server/src/domain/ai/clients.js";
 import { AI_CONFIG_V3 } from "../../../apps/server/src/domain/ai/config.js";
 import { getReport } from "../../../apps/server/src/domain/reports/report.js";
-import { VocabularyJobRunner } from "../../../apps/server/src/domain/vocabulary/enrichment.js";
+import { VocabularyJobRunner, type VocabularyRunnerOptions } from "../../../apps/server/src/domain/vocabulary/enrichment.js";
 import { addWord, getEntry, listWords, lookupWord, patchWord, queueMissingLevels, recoverLegacyVocabularyFailures, removeWord, revisionHistory, vocabularyTotals } from "../../../apps/server/src/domain/vocabulary/repository.js";
 import { enqueue, getJob } from "../../../apps/server/src/queue/jobs.js";
 import { GpuScheduler } from "../../../apps/server/src/queue/scheduler.js";
@@ -154,28 +154,30 @@ describe("the learner's text is never silently overwritten", () => {
 const stats: CallStats = { totalMs: 10, loadMs: null, promptTokens: 5, evalTokens: 5, evalMs: 5 };
 class ScriptedChat implements ChatClient {
   calls = 0;
+  lastUser: Record<string, unknown> = {};
   constructor(public respond: (call: number, entryId: string) => string) {}
   async chat(req: { messages: Array<{ role: string; content: string }> }): Promise<ChatResult> {
     const user = JSON.parse(req.messages[1]!.content) as { entry_id: string };
+    this.lastUser = user;
     return { text: this.respond(++this.calls, user.entry_id), stats };
   }
 }
-const goodDraft = (entryId: string, o: Record<string, unknown> = {}) => JSON.stringify({ schema_version: "vocabulary-v2", entry_id: entryId, translation_ru: "собрание", part_of_speech: "noun", cefr_level: "B1", example_en: "The meeting was moved to Friday.", collocations: ["hold a meeting"], ...o });
+const goodDraft = (entryId: string, o: Record<string, unknown> = {}) => JSON.stringify({ schema_version: "vocabulary-v3", entry_id: entryId, translation_ru: "собрание", part_of_speech: "noun", cefr_level: "B1", transcription: "[ˈmiːtɪŋ]", definition_ru: "Встреча людей для обсуждения дел.", synonyms: ["gathering", "meeting"], irregular_forms: [], example_en: "The meeting was moved to Friday.", collocations: ["hold a meeting"], ...o });
 
-async function aiRig(respond: (call: number, entryId: string) => string) {
+async function aiRig(respond: (call: number, entryId: string) => string, hints?: VocabularyRunnerOptions["hints"]) {
   env = await makeEnv();
   const clock = new FakeClock();
   const gpu = new FakeGpu(clock);
   const chat = new ScriptedChat(respond);
-  const runner = new VocabularyJobRunner({ db: env.db, chat, installedDigest: async () => AI_CONFIG_V3.analysis.digest, runtimeVersion: async () => "test", deps: deps(), sleep: async () => {} });
+  const runner = new VocabularyJobRunner({ db: env.db, hints, chat, installedDigest: async () => AI_CONFIG_V3.analysis.digest, runtimeVersion: async () => "test", deps: deps(), sleep: async () => {} });
   await runner.prepare();
   const sched = new GpuScheduler({ db: env.db, newId: randomUUID, clock, telemetry: gpu, control: gpu, runners: [runner], instanceId: "A", config: { admission: "spike", idleUnloadMs: 600_000 } });
-  const settle = async (entryId: string) => {
+  const settle = async (entryId: string, key = `vocab:${entryId}:%`) => {
     for (let i = 0; i < 60; i++) {
       await sched.tick();
       await flush();
       await flush();
-      const j = env!.db.prepare("SELECT state FROM jobs WHERE idempotency_key LIKE ?").get(`vocab:${entryId}:%`) as { state: string };
+      const j = env!.db.prepare("SELECT state FROM jobs WHERE idempotency_key LIKE ?").get(key) as { state: string };
       if (["completed", "failed", "cancelled"].includes(j.state)) return j.state;
       clock.advance(1500);
     }
@@ -194,6 +196,38 @@ describe("the AI draft (the local model through the dispatcher)", () => {
     const h = revisionHistory(env!.db, w.id);
     expect(h).toEqual([expect.objectContaining({ revision: 1, source: "model", status: "draft", basedOnUserRev: 0 })]);
     expect(one<{ pos: string }>(env!.db, "SELECT pos FROM vocabulary_entries WHERE id = ?", w.id).pos).toBe("unknown"); // the stored entry was not rewritten by the model
+  });
+
+  it("stores reference facts (transcription, definition, synonyms, irregular forms) with the old word-list row only as a hint; the model's bad fields are dropped, not the draft", async () => {
+    const hint = { partOfSpeech: "noun", transcription: "[wrong]", definitionRu: "Старое.", synonyms: ["x"], irregularForms: "", translationsRu: "встреча", frequency: 12.5 };
+    const r = await aiRig(
+      (_c, id) => goodDraft(id, { transcription: "ˈmiːtɪŋ", synonyms: ["gathering", "Meeting", "gathering", "собрание"], irregular_forms: ["a", "b"], definition_ru: "meeting" }),
+      { lookup: async (l) => (l === "meeting" ? hint : null) },
+    );
+    const w = addWord(env!.db, deps(), { word: "meeting" }).entry;
+    expect(await r.settle(w.id)).toBe("completed");
+    expect(r.chat.lastUser.reference_hint).toMatchObject({ transcription: "[wrong]", translations_ru: "встреча" });
+    // IPA gets its brackets, the word itself and duplicates and Russian are not synonyms, two irregular forms are not three, an English "definition" is not Russian
+    expect(getEntry(env!.db, w.id).lexicon).toEqual({ transcription: "[ˈmiːtɪŋ]", definitionRu: "", synonyms: ["gathering"], irregularForms: [], frequency: 12.5 });
+    expect(getEntry(env!.db, w.id).translation.text).toBe("собрание");
+    const other = addWord(env!.db, deps(), { word: "nohint" }).entry;
+    expect(await r.settle(other.id)).toBe("completed");
+    expect(r.chat.lastUser.reference_hint).toBeNull(); // not in the old list: the model works alone and still fills the facts
+    expect(getEntry(env!.db, other.id).lexicon).toMatchObject({ frequency: null });
+    expect(() => env!.db.prepare("UPDATE vocabulary_lexicon SET transcription = 'x'").run()).toThrow(/append-only/);
+  });
+
+  it("a word that already has a draft and a level but no reference facts is re-queued once for the facts, and its translation is untouched", async () => {
+    const r = await aiRig((_c, id) => goodDraft(id));
+    const w = addWord(env!.db, deps(), { word: "meeting" }).entry;
+    expect(await r.settle(w.id)).toBe("completed");
+    env!.db.prepare("DROP TRIGGER vocabulary_lexicon_no_delete").run();
+    env!.db.prepare("DELETE FROM vocabulary_lexicon").run(); // the state before migration 022
+    expect(queueMissingLevels(env!.db, deps())).toBe(1);
+    expect(queueMissingLevels(env!.db, deps())).toBe(0);
+    expect(await r.settle(w.id, `vocab:${w.id}:lex`)).toBe("completed");
+    expect(getEntry(env!.db, w.id).lexicon?.transcription).toBe("[ˈmiːtɪŋ]");
+    expect(revisionHistory(env!.db, w.id)).toHaveLength(1);
   });
 
   it("old words without any text draft get one full enrichment instead of a level-only job", async () => {

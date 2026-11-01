@@ -57,6 +57,7 @@ describe("asking the tutor", () => {
     const { sessionId, slots } = await practised();
     const slot = slots[0]!;
     const rule = (JSON.parse(one<{ c: string }>(env!.db, "SELECT content_json AS c FROM exercise_revisions WHERE id = ?", slot.revision).c) as { explanation_ru: string }).explanation_ru;
+    // "Why?" answers once per task: pressing it again returns the same reply and adds nothing
     for (let i = 0; i < 2; i++) {
       const r = askTutor(env!.db, sessionDeps(env!), { sessionId, slotId: slot.id, kind: "why" });
       expect(r.jobId).toBeNull();
@@ -64,7 +65,7 @@ describe("asking the tutor", () => {
       expect(last).toMatchObject({ role: "assistant", source: "approved_exercise", status: "approved", text: rule });
     }
     expect(rows(env!.db, "SELECT id FROM jobs WHERE kind = 'tutor'")).toEqual([]);
-    expect(getThread(env!.db, slot.id).messages.map((m) => m.role)).toEqual(["user", "assistant", "user", "assistant"]);
+    expect(getThread(env!.db, slot.id).messages.map((m) => m.role)).toEqual(["user", "assistant"]);
   });
 
   it("D64: 'Explain in Russian' is a longer AI explanation (a queued job), and pressing it again while it waits queues nothing new", async () => {
@@ -273,8 +274,15 @@ describe("bounded export and the Copy Agent Task text", () => {
       expect(t).toContain(sessionId);
       expect(t).toContain("content/review-guidelines.md");
       expect(t).toContain("npm run pack -- check");
-      expect(t).toContain("npm run pack -- publish");
-      expect(t).toContain("DIFFERENT reviewer");
+      if (kind === "progress") {
+        expect(t).toContain("npm run pack -- publish");
+        expect(t).toContain("DIFFERENT reviewer");
+      } else {
+        expect(t).toContain("node scripts/content-pack.mjs publish");
+        expect(t).toContain("items: []");
+        expect(t).toContain("Do not generate exercises");
+        expect(t.endsWith("Number of new lessons: 5")).toBe(true);
+      }
       expect(t).not.toMatch(/[A-Za-z]:\\/);
       expect(t).not.toContain("raw_answer");
     }

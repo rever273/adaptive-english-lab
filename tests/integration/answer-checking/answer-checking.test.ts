@@ -175,9 +175,9 @@ describe("undecided answers are unresolved and collect in the queue (D65)", () =
   it("the notice appears only when the queue reaches reviewNoticeThreshold (default 5), and the one task names the sessions", async () => {
     const r = await rig(reply({ judgement: "abstain", reason_code: "insufficient_evidence" }));
     await settle(r);
-    r.env.db.prepare("INSERT INTO settings_revisions(id, revision, values_json, created_at) VALUES (?,?,?,?)").run(randomUUID(), 2, JSON.stringify(DEFAULT_SETTINGS_V1), "2026-10-31T00:00:00.000Z");
+    r.env.db.prepare("INSERT INTO settings_revisions(id, revision, values_json, created_at) VALUES (?,?,?,?)").run(randomUUID(), 3, JSON.stringify(DEFAULT_SETTINGS_V1), "2026-10-31T00:00:00.000Z");
     expect(reviewStatus(r.env.db)).toEqual({ unresolved: 1, threshold: 5, notice: false });
-    r.env.db.prepare("INSERT INTO settings_revisions(id, revision, values_json, created_at) VALUES (?,?,?,?)").run(randomUUID(), 3, JSON.stringify({ ...DEFAULT_SETTINGS_V1, reviewNoticeThreshold: 1 }), "2026-10-31T00:00:01.000Z");
+    r.env.db.prepare("INSERT INTO settings_revisions(id, revision, values_json, created_at) VALUES (?,?,?,?)").run(randomUUID(), 4, JSON.stringify({ ...DEFAULT_SETTINGS_V1, reviewNoticeThreshold: 1 }), "2026-10-31T00:00:01.000Z");
     expect(reviewStatus(r.env.db)).toEqual({ unresolved: 1, threshold: 1, notice: true });
 
     const text = agentTask(r.env.db, "review");

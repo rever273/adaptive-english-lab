@@ -1,5 +1,7 @@
 import { afterAll, afterEach, describe, expect, it } from "vitest";
 import { randomUUID } from "node:crypto";
+import Fastify from "fastify";
+import { registerVocabularySpeechRoutes } from "../../../apps/server/src/routes/vocabularySpeech.js";
 import path from "node:path";
 import { pathToFileURL } from "node:url";
 import { REVIEW_CHECKLIST_KEYS } from "../../../packages/contracts/src/index.js";
@@ -79,6 +81,102 @@ function play(e: SliceEnv, sessionId: string, items: Item[], o: { wrong?: (i: nu
 }
 
 describe("Vocabulary Practice (vocabulary TZ)", () => {
+  it("caches ElevenLabs speech, shares it across restarts and keeps manual playback available", async () => {
+    env = openSliceCopy();
+    await publishStarter(env);
+    const entry = addWord(env.db, env.deps, { word: "dog" }).entry;
+    const session = createVocabularySession(env.db, env.deps, { timezone: "Australia/Brisbane", count: 3 });
+    takeLease(env.db, env.deps, session.sessionId, "tab-1");
+    const slot = session.snapshot.slots[0]!.slotId;
+    revealSlot(env.db, env.deps, session.sessionId, slot, "tab-1");
+    const cacheDir = path.join(env.root, "speech-cache");
+    let calls = 0;
+    const mock: typeof fetch = async (_url, init) => {
+      calls++;
+      expect(JSON.parse(String(init?.body)).text).toBe("dog");
+      return new Response("audio", { status: 200 });
+    };
+    let app = Fastify();
+    const options = { key: "test-key", voiceId: "test-voice", cacheDir, request: mock };
+    registerVocabularySpeechRoutes(app, env.db, env.deps, options);
+    try {
+      expect((await app.inject({ method: "POST", url: `/api/v1/vocabulary-speech/${session.sessionId}/${slot}` })).statusCode).toBe(409);
+      const url = `/api/v1/vocabulary-speech/word/${entry.id}`;
+      const [a, b] = await Promise.all([app.inject({ method: "POST", url }), app.inject({ method: "POST", url })]);
+      expect(a.body).toBe("audio"); expect(b.body).toBe("audio"); expect(calls).toBe(1);
+      recordAttempt(env.db, env.deps, { slotId: slot, submissionId: randomUUID(), idk: true, inputMode: "text" });
+      expect((await app.inject({ method: "POST", url: `/api/v1/vocabulary-speech/${session.sessionId}/${slot}` })).body).toBe("audio");
+      expect(calls).toBe(1); // practice and dictionary share the same word and voice
+
+      await app.close();
+      app = Fastify();
+      registerVocabularySpeechRoutes(app, env.db, env.deps, options);
+      expect((await app.inject({ method: "POST", url })).body).toBe("audio");
+      await app.inject({ method: "POST", url: "/api/v1/vocabulary-speech/settings", payload: { enabled: false } });
+      expect((await app.inject({ method: "POST", url })).body).toBe("audio");
+      expect(calls).toBe(1);
+      expect((await app.inject({ url: "/api/v1/vocabulary-speech" })).json()).toMatchObject({ enabled: false, requests: 1 });
+    } finally { await app.close(); }
+  });
+
+  it("reports the ElevenLabs credits, and says why when they cannot be read", async () => {
+    env = openSliceCopy();
+    const cacheDir = path.join(env.root, "speech-cache");
+    const urls: string[] = [];
+    let status = 200;
+    const mock: typeof fetch = async (url) => { urls.push(String(url)); return status === 200 ? Response.json({ character_count: 1200, character_limit: 10000, next_character_count_reset_unix: 1_800_000_000, tier: "starter" }) : new Response("no", { status }); };
+    const app = Fastify();
+    registerVocabularySpeechRoutes(app, env.db, env.deps, { key: "k", voiceId: "v", cacheDir, request: mock });
+    try {
+      expect((await app.inject({ url: "/api/v1/vocabulary-speech/credits" })).json()).toMatchObject({ available: true, used: 1200, limit: 10000, remaining: 8800, tier: "starter", appCharacters30d: 0 });
+      expect(urls).toEqual(["https://api.elevenlabs.io/v1/user/subscription"]);
+      status = 401;
+      expect((await app.inject({ url: "/api/v1/vocabulary-speech/credits" })).json()).toMatchObject({ available: false, reason: expect.stringContaining("User") });
+    } finally { await app.close(); }
+    const bare = Fastify();
+    registerVocabularySpeechRoutes(bare, env.db, env.deps, { cacheDir });
+    try { expect((await bare.inject({ url: "/api/v1/vocabulary-speech/credits" })).json()).toMatchObject({ available: false }); } finally { await bare.close(); }
+  });
+
+  it("reveals vocabulary letters individually and records help before the answer", async () => {
+    env = openSliceCopy();
+    await publishStarter(env);
+    addWord(env.db, env.deps, { word: "dog" });
+    const session = createVocabularySession(env.db, env.deps, { timezone: "Australia/Brisbane", count: 3 });
+    takeLease(env.db, env.deps, session.sessionId, "tab-1");
+    const slotId = session.snapshot.slots[0]!.slotId;
+    revealSlot(env.db, env.deps, session.sessionId, slotId, "tab-1");
+    const event = (letterIndex?: number) => recordSessionEvent(env!.db, env!.deps, session.sessionId, { slotId, type: "vocabulary_letters", clientEventId: randomUUID(), ...(letterIndex === undefined ? {} : { letterIndex }) });
+    const first = event().body.letters!;
+    expect(first.some((c) => c === null)).toBe(true);
+    const index = first.indexOf(null);
+    const second = event(index).body.letters!;
+    expect(second[index]).toMatch(/^\p{L}$/u);
+    expect(second.filter((c) => c === null)).toHaveLength(first.filter((c) => c === null).length - 1);
+    expect(() => event(499)).toThrow(/letter index/);
+    recordAttempt(env.db, env.deps, { slotId, submissionId: randomUUID(), idk: true, inputMode: "text" });
+    expect((env.db.prepare("SELECT hints_before AS n FROM attempts WHERE slot_id = ?").get(slotId) as { n: number }).n).toBe(2);
+  });
+
+  it("records a requested translation as a hint without skipping the normal hint", async () => {
+    env = openSliceCopy();
+    await publishStarter(env);
+    addWord(env.db, env.deps, { word: "dog" });
+    const session = createVocabularySession(env.db, env.deps, { timezone: "Australia/Brisbane", count: 3 });
+    takeLease(env.db, env.deps, session.sessionId, "tab-1");
+    const slot = session.snapshot.slots[0]!.slotId;
+    revealSlot(env.db, env.deps, session.sessionId, slot, "tab-1");
+    const req = { slotId: slot, type: "vocabulary_translation" as const, clientEventId: randomUUID() };
+    const translation = recordSessionEvent(env.db, env.deps, session.sessionId, req);
+    expect(translation.body.hint).toBeTruthy();
+    expect(recordSessionEvent(env.db, env.deps, session.sessionId, req).body.hint).toBe(translation.body.hint);
+    const regular = recordSessionEvent(env.db, env.deps, session.sessionId, { slotId: slot, type: "hint", clientEventId: randomUUID() });
+    const row = env.db.prepare("SELECT er.content_json AS c FROM session_slots ss JOIN exercise_revisions er ON er.id = ss.exercise_revision_id WHERE ss.id = ?").get(slot) as { c: string };
+    expect(regular.body.hint).toBe(JSON.parse(row.c).hints_ru?.[0] ?? null);
+    recordAttempt(env.db, env.deps, { slotId: slot, submissionId: randomUUID(), idk: true, inputMode: "text" });
+    expect((env.db.prepare("SELECT hints_before AS n FROM attempts WHERE slot_id = ?").get(slot) as { n: number }).n).toBe(2);
+  });
+
   it("offers approved exercises only for words in the dictionary, fresh sentences first (shown ones return only as labelled repeats); never an empty session", async () => {
     env = openSliceCopy();
     const items = await publishStarter(env);
@@ -200,6 +298,7 @@ describe("Vocabulary Practice (vocabulary TZ)", () => {
     const missedUnits = (env.db.prepare("SELECT unit_id AS u FROM revision_prompt_units WHERE revision_id = ?").all(missedRevs[0]!) as Array<{ u: string }>).map((x) => x.u);
 
     const st = vocabularyPracticeStatus(env.db, env.deps.now());
+    expect(st.wordQueue).toEqual({ due: 2, newWords: 0, recent: 0 });
     expect(st.repeatsAvailable).toBeGreaterThan(0); // the repeat is counted
     expect(st.available).toBeLessThanOrEqual(st.taskCount);
     expect(st.freshAvailable).toBe(2);
@@ -210,12 +309,12 @@ describe("Vocabulary Practice (vocabulary TZ)", () => {
     const s2 = createVocabularySession(env.db, env.deps, { timezone: "Australia/Brisbane", count: 3, seed: "two" });
     const repeatSlots = env.db.prepare("SELECT id, exercise_revision_id AS r, cohort_json AS c FROM session_slots WHERE session_id = ? AND json_extract(cohort_json, '$.repeat') = 1").all(s2.sessionId) as Array<{ id: string; r: string; c: string }>;
     const first = env.db.prepare("SELECT exercise_revision_id AS r FROM session_slots WHERE session_id = ? AND ordinal = 0").get(s2.sessionId) as { r: string };
-    expect(missedRevs).toContain(first.r); // a missed sentence is the first choice
+    expect(missedRevs).not.toContain(first.r); // another sentence is preferred for the missed word
     expect(repeatSlots).toHaveLength(1); // repeats fill at most 60% of a 3-task session
     const rep = repeatSlots[0]!;
     const answerUnitsBefore = (env.db.prepare("SELECT DISTINCT unit_id AS u FROM revision_prompt_units WHERE revision_id = ? AND unit_id NOT IN (SELECT unit_id FROM exposures)").all(rep.r) as Array<{ u: string }>).map((x) => x.u);
-    expect(rep.r).toBe(first.r);
-    expect(JSON.parse(rep.c)).toMatchObject({ repeat: true, reason: "missed", repeatOfSlotId: missedSlots[missedRevs.indexOf(first.r)] });
+    expect(missedRevs).toContain(rep.r);
+    expect(JSON.parse(rep.c)).toMatchObject({ repeat: true, reason: "missed", repeatOfSlotId: missedSlots[missedRevs.indexOf(rep.r)] });
     expect(s2.snapshot.slots.find((x) => x.slotId === rep.id)?.repeat).toEqual({ reason: "missed" });
     // a repeat reserves exactly the units of its revision that were never exposed (the answer sentence); shown ones are not touched
     const reservedFor = (env.db.prepare("SELECT unit_id AS u FROM prompt_reservations WHERE slot_id = ?").all(rep.id) as Array<{ u: string }>).map((x) => x.u).sort();
@@ -239,11 +338,11 @@ describe("Vocabulary Practice (vocabulary TZ)", () => {
 
     // the scheduling decision carries the v2 transparency fields; the algorithm row is v2
     const dec = env.db.prepare("SELECT algorithm_id AS a, choices_json AS c FROM scheduling_decisions WHERE session_id = ?").get(s2.sessionId) as { a: string; c: string };
-    expect(dec.a).toBe("vocabulary-selection-v2");
+    expect(dec.a).toBe("vocabulary-selection-v4");
     const choice = (JSON.parse(dec.c) as { slots: Array<Record<string, unknown>> }).slots.find((x) => x.slotId === rep.id)!;
     expect(choice).toMatchObject({ repeat: true, reason: "missed", state: "learning", streak: 0 });
     for (const k of ["lemma", "family", "priority", "dueAt"]) expect(choice).toHaveProperty(k);
-    expect(count(env, "SELECT COUNT(*) AS n FROM algorithm_versions WHERE id = 'vocabulary-selection-v2'")).toBe(1);
+    expect(count(env, "SELECT COUNT(*) AS n FROM algorithm_versions WHERE id = 'vocabulary-selection-v4'")).toBe(1);
 
     // analytics v2: the repeat is summarised apart and stays out of the fresh-sentence rates
     const a = vocabularyAnalytics(env.db, { days: null, now: env.deps.now(), timezone: "Australia/Brisbane" });

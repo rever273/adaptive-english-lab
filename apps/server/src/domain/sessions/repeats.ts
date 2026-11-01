@@ -65,11 +65,11 @@ export interface RepeatState {
 
 /**
  * Applies the D68 repeat rules to the bank candidates of a lesson: a revision shown in an earlier ended grammar session is dropped while
- * it is not due (missed / assisted / skipped: the next session; correct: after 14 days) and otherwise offered as a repeat whose
+ * it is not due (missed / assisted / skipped: the next session; correct: normally after 3 days, or 1 day when filling a shortage) and otherwise offered as a repeat whose
  * `unitFingerprints` are only the units never exposed. A revision held by another slot (an unexposed unit reserved) stays out.
  * `horizon: "eventually"` (stock planning) treats every shown revision as reusable, whatever the interval.
  */
-export function withRepeats(db: Db, all: readonly BankCandidate[], now: Date, horizon: "now" | "eventually" = "now"): RepeatState {
+export function withRepeats(db: Db, all: readonly BankCandidate[], now: Date, horizon: "now" | "shortage" | "eventually" = "now"): RepeatState {
   const shown = shownGrammarRevisions(db);
   const exposed = new Set((db.prepare("SELECT unit_id AS id FROM exposures").all() as Array<{ id: string }>).map((r) => r.id));
   const reserved = new Set((db.prepare("SELECT unit_id AS id FROM prompt_reservations").all() as Array<{ id: string }>).map((r) => r.id));
@@ -92,7 +92,7 @@ export function withRepeats(db: Db, all: readonly BankCandidate[], now: Date, ho
       candidates.push(c);
       continue;
     }
-    const due = horizon === "eventually" || seen.outcome !== "correct" || now.getTime() - Date.parse(seen.at) >= GRAMMAR_REPEAT_CONFIG.correctAfterDays * DAY_MS;
+    const due = horizon === "eventually" || seen.outcome !== "correct" || now.getTime() - Date.parse(seen.at) >= (horizon === "shortage" ? GRAMMAR_REPEAT_CONFIG.shortageAfterDays : GRAMMAR_REPEAT_CONFIG.correctAfterDays) * DAY_MS;
     const mine = units.get(c.revisionId) ?? [];
     const unexposed = mine.filter((u) => !exposed.has(u.id));
     if (!due || mine.length === 0 || unexposed.some((u) => reserved.has(u.id))) {

@@ -7,7 +7,7 @@ import type { Dimension, EvidenceOpportunity } from "@english-lab/learning";
  */
 export interface Cohort {
   criterionVersion: string;
-  difficulty: "A2" | "B1" | "B2" | "C1";
+  difficulty: "A2" | "B1" | "B2" | "C1" | "C2";
   protocol?: "practice" | "diagnostic-v1";
 }
 

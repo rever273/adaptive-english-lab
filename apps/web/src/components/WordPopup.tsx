@@ -37,21 +37,24 @@ export function readWordSelection(): { text: string; slotId?: string } | null {
 /**
  * Select an English word or a short phrase ANYWHERE in the app and a small panel (bottom left, like the AI panel on the right) offers to save
  * it, or shows what is already saved. A whole sentence is ignored. Saving is instant and never waits for the AI; the task the word was met
- * in (when there is one) becomes the context for its translation. The panel never takes focus and keeps the selection while it is used.
+ * in (when there is one) becomes the context for its translation. The selected form remains separate from the editable word to save.
  */
 export function WordCatcher() {
   const [pick, setPick] = useState<{ text: string; slotId?: string } | null>(null);
+  const [word, setWord] = useState("");
   const [known, setKnown] = useState<VocabEntry | null>(null);
   const [saved, setSaved] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
   const timer = useRef<ReturnType<typeof setTimeout> | null>(null);
 
   const read = useCallback(() => {
+    if (document.activeElement?.closest(".word-panel")) return;
     const r = readWordSelection();
     setPick((cur) => {
       if (r?.text === cur?.text && r?.slotId === cur?.slotId) return cur;
       setSaved(null);
       setError(null);
+      setWord(r?.text ?? "");
       return r;
     });
   }, []);
@@ -68,7 +71,7 @@ export function WordCatcher() {
     };
   }, [read]);
 
-  const text = pick?.text ?? null;
+  const text = pick ? word.trim() : "";
   useEffect(() => {
     let off = false;
     setKnown(null);
@@ -84,7 +87,7 @@ export function WordCatcher() {
   const add = async () => {
     if (!pick) return;
     try {
-      const e = await addVocabulary(pick.text.toLowerCase(), pick.text, pick.slotId);
+      const e = await addVocabulary(word.trim().toLowerCase(), pick.text, pick.slotId);
       setKnown(e);
       setSaved(`Saved “${e.lemma}”. The translation is filled in later if the local AI is free.`);
     } catch (e) {
@@ -94,22 +97,23 @@ export function WordCatcher() {
 
   if (!pick) return null;
   return (
-    <aside className="word-panel" aria-label="Save a word" aria-live="polite" data-testid="word-bar" onMouseDown={(e) => e.preventDefault()}>
+    <aside className="word-panel" aria-label="Save a word" aria-live="polite" data-testid="word-bar" onMouseDown={(e) => { if (!(e.target instanceof HTMLInputElement)) e.preventDefault(); }}>
       <header className="word-panel-head">
         <span><i className="pi pi-bookmark" aria-hidden="true" /> Vocabulary</span>
         <button type="button" className="icon-btn" onClick={() => setPick(null)} aria-label="Close" title="Close"><i className="pi pi-times" aria-hidden="true" /></button>
       </header>
-      <p className="word-panel-word">{pick.text}</p>
-      {!known && !saved && (
-        <button type="button" className="btn btn-ok btn-small" onClick={() => void add()} data-testid="add-word">
-          <i className="pi pi-plus" aria-hidden="true" /> Add to vocabulary
-        </button>
-      )}
+      <label className="word-panel-label" htmlFor="word-to-save">Word to save</label>
+      <input id="word-to-save" className="word-panel-word" value={word} maxLength={60} onChange={(e) => { setWord(e.target.value); setSaved(null); setError(null); }} data-testid="word-to-save" />
       {known && !saved && (
         <p className="small" data-testid="known-word">
           <i className="pi pi-bookmark-fill" aria-hidden="true" /> Already saved{known.learned ? " · learned" : ""}.{" "}
           {known.translation.text ? <span className={known.translation.source === "ai_draft" ? "ai-text" : undefined}>{known.translation.text}</span> : <span className="muted">No translation yet.</span>}
         </p>
+      )}
+      {!saved && (
+        <button type="button" className="btn btn-ok btn-small" disabled={!word.trim()} onClick={() => void add()} data-testid="add-word">
+          <i className="pi pi-plus" aria-hidden="true" /> Add to vocabulary
+        </button>
       )}
       {saved && <p className="small" role="status" data-testid="word-saved">{saved}</p>}
       {error && <p className="small notice notice-error" role="alert">{error}</p>}

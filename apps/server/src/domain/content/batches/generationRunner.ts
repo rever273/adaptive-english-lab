@@ -11,12 +11,12 @@ import { runStructured } from "../../ai/structured.js";
 import type { Validated } from "../../ai/validate.js";
 import { enqueue } from "../../../queue/jobs.js";
 import { SCREEN_PROMPT } from "./advisoryRunner.js";
-import { registerRevision, submitForReview, taxonomyForNewRevisions } from "../repository.js";
+import { checkDuplicates, registerRevision, submitForReview, taxonomyForNewRevisions } from "../repository.js";
 import { validateExercise } from "../validator.js";
 import { GENERATION_PROMPT } from "./repository.js";
-import { GENERATION_SYSTEM_V3, GENERATION_SYSTEM_V4, GENERATION_SYSTEM_V5, assembleExercise, buildGenerationUser, buildGenerationUserV4, draftFormat, draftFormatsText, type Built } from "./draftFormats.js";
+import { GENERATION_SYSTEM_V3, GENERATION_SYSTEM_V4, GENERATION_SYSTEM_V5, GENERATION_SYSTEM_V6, assembleExercise, buildGenerationUser, buildGenerationUserV4, draftFormat, draftFormatsText, type Built } from "./draftFormats.js";
 import type { ItemPlan } from "./plan.js";
-import { VOCABULARY_SYSTEM, VOCABULARY_SYSTEM_V2, assembleVocabulary, vocabularyFormat } from "./vocabularyDrafts.js";
+import { VOCABULARY_SYSTEM, VOCABULARY_SYSTEM_V2, VOCABULARY_SYSTEM_V3, VOCABULARY_SYSTEM_V4, assembleVocabulary, vocabularyFormat } from "./vocabularyDrafts.js";
 
 export interface GenerationPayload {
   batchId: string;
@@ -108,14 +108,26 @@ export class GenerationJobRunner implements JobRunner<GenerationPayload> {
 
     const skills = taxonomyForNewRevisions(this.o.db).skills;
     const version = (this.o.db.prepare("SELECT prompt_version_id AS v FROM batches WHERE id = ?").get(payload.batchId) as { v: string } | undefined)?.v;
-    const vocabulary = version === "vocabulary-generation-v1" || version === "vocabulary-generation-v2";
-    const targetedRetry = version === "generation-v5" || version === "vocabulary-generation-v2";
-    if (version !== "generation-v3" && version !== "generation-v4" && version !== "generation-v5" && !vocabulary) throw new RunnerError("unsupported_prompt_version", "This batch uses an unavailable historical generation prompt.", false);
+    const vocabulary = version === "vocabulary-generation-v1" || version === "vocabulary-generation-v2" || version === "vocabulary-generation-v3" || version === "vocabulary-generation-v4";
+    const targetedRetry = (version === "generation-v5" || version === "generation-v6") || version === "vocabulary-generation-v2" || version === "vocabulary-generation-v3" || version === "vocabulary-generation-v4";
+    if (version !== "generation-v3" && version !== "generation-v4" && version !== "generation-v5" && version !== "generation-v6" && !vocabulary) throw new RunnerError("unsupported_prompt_version", "This batch uses an unavailable historical generation prompt.", false);
     const first = items[0]!.plan;
     const model = { tag: m.tag, digest: m.digest };
-    const user = vocabulary ? JSON.stringify({ batch_id: payload.batchId, items: items.map(i => i.plan), count: items.length }) : (version === "generation-v4" || version === "generation-v5" ? buildGenerationUserV4 : buildGenerationUser)(payload.batchId, items.map((i) => i.plan));
-    const system = vocabulary ? (version === "vocabulary-generation-v2" ? VOCABULARY_SYSTEM_V2 : VOCABULARY_SYSTEM) : version === "generation-v5" ? GENERATION_SYSTEM_V5 : version === "generation-v4" ? GENERATION_SYSTEM_V4 : GENERATION_SYSTEM_V3;
-    const build = (raw: unknown, item: QueuedItem): Built => vocabulary ? assembleVocabulary(raw, item.plan, exerciseIdFor(payload.batchId, item.ordinal), model, skills, version) : assembleExercise(raw, item.plan, { exerciseId: exerciseIdFor(payload.batchId, item.ordinal), model, promptVersion: version!, taxonomySkillIds: skills });
+    const v4 = version === "vocabulary-generation-v4";
+    const withAvoid = (plan: ItemPlan): ItemPlan => v4 ? { ...plan, avoid_sentences: this.avoidSentences(plan) } as ItemPlan : plan;
+    const user = vocabulary ? JSON.stringify({ batch_id: payload.batchId, items: items.map(i => withAvoid(i.plan)), count: items.length }) : (version === "generation-v4" || version === "generation-v5" || version === "generation-v6" ? buildGenerationUserV4 : buildGenerationUser)(payload.batchId, items.map((i) => i.plan));
+    const system = vocabulary ? (version === "vocabulary-generation-v4" ? VOCABULARY_SYSTEM_V4 : version === "vocabulary-generation-v3" ? VOCABULARY_SYSTEM_V3 : version === "vocabulary-generation-v2" ? VOCABULARY_SYSTEM_V2 : VOCABULARY_SYSTEM) : version === "generation-v6" ? GENERATION_SYSTEM_V6 : version === "generation-v5" ? GENERATION_SYSTEM_V5 : version === "generation-v4" ? GENERATION_SYSTEM_V4 : GENERATION_SYSTEM_V3;
+    const buildVocabulary = (raw: unknown, item: QueuedItem): Built => {
+      const built = assembleVocabulary(raw, item.plan, exerciseIdFor(payload.batchId, item.ordinal), model, skills, version);
+      if (!built.ok || !v4) return built;
+      // an exact repeat of a sentence already in the bank would be refused at registration: let the targeted retry fix it now
+      const v = validateExercise(built.exercise, { taxonomySkillIds: skills });
+      if (!v.ok) return built;
+      const c = built.exercise as { template_cluster: string; target_skill: string };
+      const dups = checkDuplicates(this.o.db, { exerciseId: exerciseIdFor(payload.batchId, item.ordinal), templateCluster: c.template_cluster, targetSkill: c.target_skill, units: v.units });
+      return dups.errors.length > 0 ? { ok: false, issues: [{ code: "DUPLICATE_SENTENCE", path: "", message: "This sentence is already in the bank. Write a different sentence in a different situation." }] } : built;
+    };
+    const build = (raw: unknown, item: QueuedItem): Built => vocabulary ? buildVocabulary(raw, item) : assembleExercise(raw, item.plan, { exerciseId: exerciseIdFor(payload.batchId, item.ordinal), model, promptVersion: version!, taxonomySkillIds: skills });
 
     const parse = (text: string): { ok: true; list: unknown[] } | { ok: false; issues: ValidationIssue[] } => {
       let v: unknown;
@@ -162,7 +174,7 @@ export class GenerationJobRunner implements JobRunner<GenerationPayload> {
     const rawText = result.ok ? (result.usage.rawOutputs.at(-1) ?? "") : (result.usage.rawOutputs.at(-1) ?? "");
     const parsed = parse(rawText);
     // A shorter array cannot identify which requested ordinal was omitted. Quarantine the whole unit.
-    const ambiguousCount = (version === "generation-v4" || version === "generation-v5" || vocabulary) && parsed.ok && parsed.list.length !== items.length;
+    const ambiguousCount = (version === "generation-v4" || version === "generation-v5" || version === "generation-v6" || vocabulary) && parsed.ok && parsed.list.length !== items.length;
     const proposals: Array<{ item: QueuedItem; built: Built; proposal?: unknown }> = items.map((item, i) => ({
       item,
       proposal: parsed.ok && !ambiguousCount ? parsed.list[i] : undefined,
@@ -174,13 +186,13 @@ export class GenerationJobRunner implements JobRunner<GenerationPayload> {
     if (targetedRetry) for (const candidate of proposals) {
       if (candidate.built.ok) continue;
       const item = candidate.item;
-      const retryUser = vocabulary ? JSON.stringify({ batch_id: payload.batchId, items: [item.plan], count: 1 }) : buildGenerationUserV4(payload.batchId, [item.plan]);
+      const retryUser = vocabulary ? JSON.stringify({ batch_id: payload.batchId, items: [withAvoid(item.plan)], count: 1 }) : buildGenerationUserV4(payload.batchId, [item.plan]);
       const failure = candidate.built.issues.map(i => `${i.code}: ${i.message}`).join("; ");
       const retry = await runStructured<unknown>({
         client: this.o.chat, model: m.tag,
         messages: [{ role: "system", content: system }, { role: "user", content: retryUser }, { role: "user", content: `Previous validation failed: ${failure}. Generate one corrected draft for this item.` }],
         format: vocabulary ? vocabularyFormat(1) : draftFormat(item.plan.type as ExerciseType, 1),
-        options: { num_ctx: GENERATION_PARAMS.numCtx, num_predict: GENERATION_PARAMS.numPredict, temperature: GENERATION_PARAMS.temperature, seed: GENERATION_PARAMS.seed },
+        options: { num_ctx: GENERATION_PARAMS.numCtx, num_predict: GENERATION_PARAMS.numPredict, temperature: GENERATION_PARAMS.temperature, seed: GENERATION_PARAMS.seed + 1 + item.ordinal },
         validate: text => {
           try {
             const drafts = (JSON.parse(text) as { drafts?: unknown }).drafts;
@@ -201,6 +213,19 @@ export class GenerationJobRunner implements JobRunner<GenerationPayload> {
       metrics: { ...usage, stats: result.usage.stats },
       alsoCommit: (db) => this.commit(db, payload, proposals, { tag: m.tag, digest: m.digest, modelVersionId }),
     };
+  }
+
+  /** Up to 5 existing bank sentences with the item's word, evenly sampled, so a local model sees what to avoid without a long list. */
+  private avoidSentences(plan: ItemPlan): string[] {
+    const lemma = plan.vocabulary?.lemma;
+    if (!lemma) return [];
+    const rows = this.o.db.prepare(
+      `SELECT DISTINCT u.canonical_text AS text FROM prompt_units u JOIN revision_prompt_units rpu ON rpu.unit_id = u.id
+        WHERE u.canonical_text LIKE ? AND u.canonical_text NOT LIKE '%⟦%' ORDER BY u.canonical_text`,
+    ).all(`%${lemma.replace(/[%_]/g, "")}%`) as Array<{ text: string }>;
+    const cap = 5, step = rows.length / cap;
+    const picked = rows.length <= cap ? rows : Array.from({ length: cap }, (_, k) => rows[Math.floor(k * step)]!);
+    return picked.map(r => r.text.length > 140 ? r.text.slice(0, 140) : r.text);
   }
 
   private clustersFor(items: QueuedItem[]): string[] {

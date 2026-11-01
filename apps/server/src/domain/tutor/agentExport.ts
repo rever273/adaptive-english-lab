@@ -1,6 +1,8 @@
 import type { Db } from "../../db/open.js";
 import { ApiError } from "../../errors.js";
 import { unresolvedAttempts } from "../sessions/reviewQueue.js";
+import { courseLessons } from "../sessions/course.js";
+import { MAX_LESSON_PLAYS } from "@english-lab/contracts";
 
 /**
  * Read-only, bounded exports of ONE session or ONE exercise revision for an external reviewer (spec/06, spec/11), plus the short "Copy Agent Task" text.
@@ -157,7 +159,9 @@ function vocabularyTask(): string {
 /** Copy-and-paste tasks for the learner's coding agent: complete instructions with IDs and allowlisted commands only, never learner data (D62). */
 function workflowTask(db: Db, kind: "progress" | "lessons"): string {
   const sessions = (db.prepare("SELECT id FROM sessions WHERE status IN ('completed','ended_early') ORDER BY created_at DESC LIMIT 10").all() as Array<{ id: string }>).map((r) => r.id);
-  const lessons = (db.prepare("SELECT COUNT(*) AS n FROM blueprints").get() as { n: number }).n;
+  const course = courseLessons(db);
+  const lessons = course.length;
+  const finished = course.filter((l) => l.completed >= MAX_LESSON_PLAYS).length;
   const list = sessions.length ? sessions.join(" ") : "(none yet)";
   if (kind === "progress") {
     return [
@@ -174,11 +178,11 @@ function workflowTask(db: Db, kind: "progress" | "lessons"): string {
   return [
     "English Lab: create the next lessons for me.",
     COMMON,
-    `Published lessons now: ${lessons}. Recent sessions, newest first: ${list}`,
-    "1. Find what I need: npm run lab:export -- coverage, npm run lab:export -- findings --status tentative --limit 100, and npm run lab:export -- session <id> for the recent sessions. Prefer my weak and recurring skills; keep about 35% new skills.",
-    "2. Write a pack content/packs/lessons-<yyyymmdd>/ with the number of lessons specified at the end of this task. Per lesson: 5 skills from the taxonomy (content/taxonomy/taxonomy-v1.json), at least 24 exercises (6 choose_form, 6 choose_missing_fragment, 6 detect_error of which at least 2 are No mistake, 3 guided_short_answer, 3 russian_to_english_short; optionally 2 reading passages with readingBlocks 1), only skills from the lesson pool. Adult, abstract everyday/work/public topics, about 15% AI/IT, Australian English, A2-B2 grammar in B2 context, Russian hints and explanations. New sentences only. Blueprint key pack-<name>-lNN, policy blueprint-policy-v1 like content/first10/index.mjs, title continuing the numbering.",
-    PACK_STEPS,
-    "3. Reply in Russian, briefly: which skills the new lessons target and why, how many exercises were approved / flagged / rejected, and how many ready sessions each new lesson has.",
+    `Published lessons now: ${lessons}, of which ${finished} are finished (a lesson is played at most ${MAX_LESSON_PLAYS} times, so new lessons are needed when every lesson is finished). Recent sessions, newest first: ${list}`,
+    "1. Run node scripts/lab-export.mjs lesson-priorities --lessons <number at end of task> and npm run lab:export -- coverage. Use the report's computed lesson skill lists; do not read individual sessions or ask a model to calculate statistics. Keep cohorts separate and describe small samples as uncertain. If there are not enough skills, explain the fallback.",
+    "2. Write a pack content/packs/lessons-<yyyymmdd>/ with the number of lessons specified at the end of this task. Each lesson is a blueprint-policy-v1 with a title and 5 taxonomy skills; continue existing numbering, using unique keys ending in lNN. Export items: [] and blueprints: [...]. Do not generate exercises: Content Studio supplies them separately. Follow content/first10/index.mjs for policy structure and use readingBlocks: 0 unless suitable reading stock already exists.",
+    "3. Run npm run pack -- check <name>. For this structure-only pack provide a valid content-review-v1 manifest with an empty items array and an independent reviewer identity; stop the server, publish with node scripts/content-pack.mjs publish <name> --review <manifest>, and restart it. No exercise review is claimed or bypassed. Existing independently reviewed exercises are selectable by skill; a lesson may have zero ready sessions until Content Studio replenishes it.",
+    "4. Reply in Russian: the skills and evidence behind each lesson, data limitations, and ready sessions or shortages. Do not create exercise batches automatically; tell me that a new lesson opens in the app only after Content Studio has supplied its exercises (the app then offers the batch size).",
     "Number of new lessons: 5",
   ].join("\n");
 }

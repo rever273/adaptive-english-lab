@@ -14,7 +14,8 @@ export function ContentStockNotice({ onOpen }: { onOpen: (category: Category) =>
     const load = async () => { try { setStock(await fetchContentStock()); } catch { /* Keep the previous stock; connection errors have their own UI. */ } };
     void load(); const t = setInterval(() => void load(), 15000); return () => clearInterval(t);
   }, []);
-  const category = (["grammar", "vocabulary"] as const).find(c => stock?.[c].low && !dismissed.has(c));
+  /** grammar is gated when a lesson is opened (LESSON_STOCK_LOW), never announced during a lesson */
+  const category = (["vocabulary"] as const).find(c => stock?.[c].low && !dismissed.has(c));
   useEffect(() => { if (category) markSeen(category); }, [category]);
   if (!category || !stock) return null;
   const close = () => setDismissed(p => new Set([...p, category]));

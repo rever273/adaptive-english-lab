@@ -16,7 +16,7 @@ const CohortQuery = z
     asOf: z.string().min(1).max(40).optional(),
     timezone: z.string().min(1).max(64).default(DEFAULT_TIMEZONE),
     criterionVersion: z.string().min(1).max(40).default("rubric-v1"),
-    difficulty: z.enum(["A2", "B1", "B2", "C1"]).default("B2"),
+    difficulty: z.enum(["A2", "B1", "B2", "C1", "C2"]).default("B2"),
     protocol: z.enum(["practice", "diagnostic-v1"]).default("practice"),
     reportId: z.string().min(1).max(64).optional(),
   })

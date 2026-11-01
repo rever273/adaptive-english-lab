@@ -27,7 +27,7 @@ describe("planning and queuing", () => {
     expect(jobs.every((j) => j.kind === "generation" && j.state === "queued" && j.priority === 3 && j.batch_id === c.batchId)).toBe(true);
     expect(jobs.every((j) => (JSON.parse(j.payload_json) as { ordinals: number[] }).ordinals.length <= 2)).toBe(true);
     expect(r.model.calls).toBe(0);
-    expect(one<{ prompt_version_id: string }>(r.env.db, "SELECT prompt_version_id FROM batches").prompt_version_id).toBe("generation-v5");
+    expect(one<{ prompt_version_id: string }>(r.env.db, "SELECT prompt_version_id FROM batches").prompt_version_id).toBe("generation-v6");
   });
 
   it("is deterministic, covers the thinnest skills first in adaptive mode and refuses unknown skills", async () => {
@@ -58,7 +58,7 @@ describe("generation through the dispatcher produces DRAFTS only", () => {
     expect(one<{ n: number }>(r.env.db, "SELECT COUNT(*) AS n FROM content_reviews").n).toBe(0);
     // provenance is written by the server from the pinned model, and the exercise belongs to the batch
     const content = JSON.parse(one<{ c: string }>(r.env.db, "SELECT content_json AS c FROM exercise_revisions WHERE id = ?", rev).c) as { provenance: { origin: string; model_tag: string; model_digest: string; prompt_version: string }; status: string; bank_role: string };
-    expect(content).toMatchObject({ status: "draft", bank_role: "practice", provenance: { origin: "qwen", model_tag: "gemma4:12b", prompt_version: "generation-v5" } });
+    expect(content).toMatchObject({ status: "draft", bank_role: "practice", provenance: { origin: "qwen", model_tag: "gemma4:12b", prompt_version: "generation-v6" } });
     expect(content.provenance.model_digest).toMatch(/^[0-9a-f]{64}$/);
     expect(one<{ n: number }>(r.env.db, "SELECT COUNT(*) AS n FROM exercises WHERE source_batch_id = ?", batchId).n).toBe(24);
     expect(r.model.calls).toBe(14);

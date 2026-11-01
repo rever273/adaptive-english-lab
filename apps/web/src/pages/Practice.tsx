@@ -1,7 +1,9 @@
 import type { Dashboard, FeedbackResponse, RevealResponse, SessionSnapshot, SessionSummary } from "@english-lab/contracts";
+import { MAX_LESSON_PLAYS } from "@english-lab/contracts";
 import { useCallback, useEffect, useRef, useState } from "react";
 import * as api from "../api";
 import { ApiRequestError } from "../api";
+import { WordImage } from "../components/WordImage";
 import { PromptView } from "../components/PromptView";
 import { useVoice } from "../voice";
 import { Kbd, isPressable, isTextField, useKeys } from "../components/hotkeys";
@@ -31,18 +33,21 @@ type SlotUi = {
   reveal: RevealResponse | null;
   feedback: FeedbackResponse | null;
   hint: string | null;
+  translation: string | null;
+  letters: Array<string | null> | null;
   /** the attempt id of a submission that has not been confirmed yet; reused on retry so it never double-counts */
   pendingSubmission: { id: string; answer?: string | string[]; idk?: boolean; transcriptId?: string } | null;
   busy: boolean;
   error: string | null;
 };
-const emptySlot: SlotUi = { reveal: null, feedback: null, hint: null, pendingSubmission: null, busy: false, error: null };
+const emptySlot: SlotUi = { reveal: null, feedback: null, hint: null, translation: null, letters: null, pendingSubmission: null, busy: false, error: null };
 
 /**
  * The practice screen for both journeys. `grammar` (default) is the lesson dashboard and its sessions; `vocabulary` runs one vocabulary
  * session started from the Vocabulary page and hands control back with `onExit` (the two never resume each other's session).
  */
-export function Practice({ category = "grammar", onExit, onNavigate }: { category?: api.SessionCategory; onExit?: () => void; onNavigate?: (page: "vocabulary" | "analytics") => void } = {}) {
+export function Practice({ category = "grammar", onExit, onNavigate }: { category?: api.SessionCategory; onExit?: () => void; onNavigate?: (page: "vocabulary" | "analytics" | "studio") => void } = {}) {
+  const [stockBlock, setStockBlock] = useState<string | null>(null);
   const [view, setView] = useState<View>({ kind: "loading" });
   const [otherActive, setOtherActive] = useState<{ sessionId: string; category: api.SessionCategory } | null>(null);
   const [slotUi, setSlotUi] = useState<SlotUi>(emptySlot);
@@ -83,6 +88,24 @@ export function Practice({ category = "grammar", onExit, onNavigate }: { categor
   // keep the practice lease alive while a session is open (heartbeat 15 s, D09)
   const sessionId = view.kind === "session" ? view.session.sessionId : null;
   const voice = useVoice(sessionId, tabId(), stt.ready);
+  const spokenSlots = useRef(new Set<string>());
+  const speechSlot = category === "vocabulary" && slotUi.feedback?.correct && slotUi.feedback.vocabulary ? slotUi.feedback.slotId : null;
+  useEffect(() => {
+    if (!sessionId || !speechSlot || spokenSlots.current.has(speechSlot)) return;
+    const controller = new AbortController();
+    let objectUrl: string | null = null;
+    let audio: HTMLAudioElement | null = null;
+    const timer = window.setTimeout(() => {
+      spokenSlots.current.add(speechSlot);
+      void api.vocabularySpeech(sessionId, speechSlot, controller.signal).then((blob) => {
+      if (!blob || controller.signal.aborted) return;
+      objectUrl = URL.createObjectURL(blob);
+      audio = new Audio(objectUrl);
+      void audio.play().catch(() => {});
+      }).catch(() => {});
+    }, 0);
+    return () => { window.clearTimeout(timer); controller.abort(); audio?.pause(); if (objectUrl) URL.revokeObjectURL(objectUrl); };
+  }, [sessionId, speechSlot]);
   useEffect(() => {
     if (!sessionId) return;
     let stopped = false;
@@ -166,9 +189,11 @@ export function Practice({ category = "grammar", onExit, onNavigate }: { categor
   async function start(blueprintRevisionId: string) {
     try {
       const { snapshot } = await api.createSession(blueprintRevisionId);
+      setStockBlock(null);
       setView({ kind: "session", session: snapshot });
     } catch (e) {
       if (e instanceof ApiRequestError && e.code === "SESSION_ACTIVE") return loadDashboard();
+      if (e instanceof ApiRequestError && e.code === "LESSON_STOCK_LOW") { setStockBlock(e.message); return loadDashboard(); }
       await loadDashboard(e instanceof ApiRequestError && e.code === "CONTENT_SHORTAGE" ? null : errorText(e));
     }
   }
@@ -207,12 +232,14 @@ export function Practice({ category = "grammar", onExit, onNavigate }: { categor
     }
   }
 
-  async function act(type: "hint" | "reveal_answer" | "skip" | "continue") {
+  async function act(type: "hint" | "vocabulary_translation" | "vocabulary_letters" | "reveal_answer" | "skip" | "continue", letterIndex?: number) {
     if (!sessionId || !slotUi.reveal) return;
     setSlotUi((u) => ({ ...u, busy: true, error: null }));
     try {
-      const ev = await api.sendEvent(sessionId, slotUi.reveal.slotId, type);
+      const ev = await api.sendEvent(sessionId, slotUi.reveal.slotId, type, letterIndex);
       if (type === "hint") setSlotUi((u) => ({ ...u, busy: false, hint: ev.hint ?? "No more hints for this exercise." }));
+      else if (type === "vocabulary_letters") setSlotUi((u) => ({ ...u, busy: false, letters: ev.letters ?? null }));
+      else if (type === "vocabulary_translation") setSlotUi((u) => ({ ...u, busy: false, translation: ev.hint ?? "Translation unavailable for this exercise." }));
       else if (type === "reveal_answer") {
         const feedback = await api.fetchFeedback(sessionId, slotUi.reveal.slotId);
         setSlotUi((u) => ({ ...u, busy: false, feedback }));
@@ -221,7 +248,8 @@ export function Practice({ category = "grammar", onExit, onNavigate }: { categor
         if (type === "continue") api.announceXp(); // a finished task may have earned XP: the header refreshes now
       }
     } catch (e) {
-      setSlotUi((u) => ({ ...u, busy: false, error: errorText(e) }));
+      if (type === "vocabulary_translation" && e instanceof ApiRequestError && e.code === "TRANSLATION_UNAVAILABLE") setSlotUi((u) => ({ ...u, busy: false, translation: "Translation unavailable for this exercise." }));
+      else setSlotUi((u) => ({ ...u, busy: false, error: errorText(e) }));
     }
   }
 
@@ -297,7 +325,7 @@ export function Practice({ category = "grammar", onExit, onNavigate }: { categor
         <i className="pi pi-bookmark" aria-hidden="true" /> A vocabulary session is still open. Finish it in Vocabulary before starting a grammar lesson.
         {onNavigate && <div className="actions"><button className="btn btn-primary" onClick={() => onNavigate("vocabulary")}><i className="pi pi-arrow-right" aria-hidden="true" /> Continue the vocabulary session</button></div>}
       </div>
-    )}<DashboardScreen dashboard={view.dashboard} message={view.message} onStart={(id) => void start(id)} onStartCheck={(p) => void startCheck(p)} />{recent && <div className="actions page-actions"><button className="btn" data-testid="review-recent" onClick={() => setView({ kind: "summary", summary: recent })}><i className="pi pi-history" aria-hidden="true" /> Review last session</button></div>}</>;
+    )}{stockBlock && <aside className="notice notice-error" role="alert" data-testid="lesson-stock-low"><strong>More grammar exercises needed</strong><p className="small">{stockBlock}</p>{onNavigate && <div className="actions"><button className="btn btn-primary" onClick={() => onNavigate("studio")}>Open Content Studio</button><button className="link" onClick={() => setStockBlock(null)}>Dismiss</button></div>}</aside>}<DashboardScreen dashboard={view.dashboard} message={view.message} onStart={(id) => void start(id)} onStartCheck={(p) => void startCheck(p)} />{recent && <div className="actions page-actions"><button className="btn" data-testid="review-recent" onClick={() => setView({ kind: "summary", summary: recent })}><i className="pi pi-history" aria-hidden="true" /> Review last session</button></div>}</>;
   }
 
   const session = view.session;
@@ -339,7 +367,8 @@ export function Practice({ category = "grammar", onExit, onNavigate }: { categor
           </button>
         </div>
       ) : slotUi.reveal ? (
-        <div className={`card task ${category === "vocabulary" ? `vfmt-${slotUi.reveal.format}` : `fmt-${slotUi.reveal.format}`}`} data-testid="slot" data-format={slotUi.reveal.format} data-slot-id={slotUi.reveal.slotId}>
+        <div className={`card task ${category === "vocabulary" ? `vocab-task vfmt-${slotUi.reveal.format}` : `fmt-${slotUi.reveal.format}`}`} data-testid="slot" data-format={slotUi.reveal.format} data-slot-id={slotUi.reveal.slotId}>
+          <div className={category === "vocabulary" ? "vocab-task-content" : undefined}>
           {slotUi.reveal.inputPreference === "voice" && isShortFormat(slotUi.reveal.format) && (
             <p className="badge badge-info" data-testid="voice-note">
               <i className={`pi ${stt.ready ? "pi-microphone" : "pi-ban"}`} aria-hidden="true" /> {stt.ready ? "You can speak this one: press “Speak instead”." : "Voice is not available on this computer right now. Please type your answer."}
@@ -358,11 +387,15 @@ export function Practice({ category = "grammar", onExit, onNavigate }: { categor
             busy={slotUi.busy || readOnly !== null}
             locked={answered && !slotUi.pendingSubmission}
             hint={slotUi.hint}
+            letters={slotUi.letters}
+            onLetter={(index) => void act("vocabulary_letters", index)}
+            translation={slotUi.translation}
+            onTranslation={() => void act("vocabulary_translation")}
             voice={isShortFormat(slotUi.reveal.format) && voiceUsable ? voice : undefined}
             onSubmit={(a, d) => void submit(a, false, d)}
             onIdk={() => void submit(undefined, true)}
             onSkip={() => void act("skip")}
-            onHint={() => void act("hint")}
+            onHint={() => void act(category === "vocabulary" ? "vocabulary_letters" : "hint")}
             onShowAnswer={() => void showAnswerAndContinue()}
           />
           {slotUi.feedback && <FeedbackPanel feedback={slotUi.feedback} busy={slotUi.busy} onTryAgain={tryAgain} onContinue={goOn} autoAdvance={autoPending} onStay={() => setStay(slotUi.feedback!.slotId)} />}
@@ -371,6 +404,8 @@ export function Practice({ category = "grammar", onExit, onNavigate }: { categor
               {slotUi.error}
             </div>
           )}
+          </div>
+          {category === "vocabulary" && <aside className="vocab-task-image"><WordImage slotId={slotUi.reveal.slotId} /></aside>}
         </div>
       ) : slotUi.error ? (
         <div className="notice notice-error" role="alert">
@@ -427,6 +462,38 @@ function VocabSentence({ v }: { v: NonNullable<FeedbackResponse["vocabulary"]> }
       )}
     </div>
   );
+}
+
+/** The flag is an explicit dictionary choice, separate from the answer and its score. */
+function MarkWordLearned({ lemma }: { lemma: string }) {
+  const [entry, setEntry] = useState<api.VocabEntry | null>(null);
+  const [loading, setLoading] = useState(true);
+  const [saving, setSaving] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+  useEffect(() => {
+    let cancelled = false;
+    setEntry(null); setLoading(true); setError(null);
+    void api.fetchVocabulary(lemma).then(({ words }) => {
+      const matches = words.filter(w => w.lemma.trim().toLocaleLowerCase() === lemma.trim().toLocaleLowerCase());
+      if (!cancelled) {
+        if (matches.length === 1) setEntry(matches[0]!);
+        else setError(matches.length ? "More than one dictionary entry matches this word. Update it in Vocabulary." : "This word is no longer in your dictionary.");
+      }
+    }).catch(() => { if (!cancelled) setError("Could not load the dictionary entry."); }).finally(() => { if (!cancelled) setLoading(false); });
+    return () => { cancelled = true; };
+  }, [lemma]);
+  const toggle = async (learned: boolean) => {
+    if (!entry) return;
+    setSaving(true); setError(null);
+    try { setEntry(await api.patchVocabulary(entry.id, { learned })); }
+    catch { setError("Could not update the dictionary. Please try again."); }
+    finally { setSaving(false); }
+  };
+  return <div className="small" data-testid="mark-word-learned">
+    <label><input type="checkbox" checked={entry?.learned ?? false} disabled={loading || saving || !entry} onChange={e => void toggle(e.target.checked)} /> Mark this word as learned</label>
+    {entry && <span className="muted"> ? Your choice; this increases its review interval.</span>}
+    {error && <p role="alert">{error}</p>}
+  </div>;
 }
 
 const FAMILY_NAME: Record<string, string> = { recognition: "word in context", guided_recall: "recall", collocation: "collocation" };
@@ -502,6 +569,7 @@ function FeedbackPanel({ feedback, busy, onTryAgain, onContinue, autoAdvance = f
       {feedback.explanation_ru && <p lang="ru" className="ru">{feedback.explanation_ru}</p>}
       {feedback.vocabulary && <VocabSentence v={feedback.vocabulary} />}
       {feedback.vocabulary && <VocabWhy v={feedback.vocabulary} />}
+      {feedback.vocabulary && feedback.verdict === "correct" && <MarkWordLearned key={`${feedback.slotId}:${feedback.vocabulary.lemma}`} lemma={feedback.vocabulary.lemma} />}
       {autoAdvance && <p className="muted small" data-testid="auto-advance">Next exercise in a moment. <button type="button" className="link" onClick={onStay} data-testid="stay">Stay here</button> (Esc)</p>}
       <div className="actions">
         {incorrect && (
@@ -562,8 +630,14 @@ function ReviewNotice({ unresolved }: { unresolved: number }) {
 function DashboardScreen({ dashboard, message, onStart, onStartCheck }: { dashboard: Dashboard; message: string | null; onStart: (blueprintRevisionId: string) => void; onStartCheck: (purpose: "diagnostic" | "heldout") => void }) {
   // lessons in course order: the first one that can still build a session is offered; the others stay one click away
   const [chosen, setChosen] = useState<string | null>(null);
-  const bp = dashboard.blueprints.find((b) => b.blueprintRevisionId === chosen) ?? dashboard.blueprints.find((b) => b.readySessions > 0) ?? dashboard.blueprints[0];
-  const others = dashboard.blueprints.filter((b) => b !== bp);
+  const next = dashboard.blueprints.find((b) => b.unlocked && b.completed === 0) ?? dashboard.blueprints.find((b) => b.unlocked && b.completed < MAX_LESSON_PLAYS) ?? dashboard.blueprints.at(-1);
+  const bp = dashboard.blueprints.find((b) => b.blueprintRevisionId === chosen) ?? next;
+  const pathRef = useRef<HTMLDivElement>(null);
+  const dragRef = useRef<{ x: number; left: number; moved: boolean } | null>(null);
+  useEffect(() => {
+    if (!next) return;
+    pathRef.current?.querySelector<HTMLElement>(`[data-lesson-id="${next.blueprintRevisionId}"]`)?.scrollIntoView({ block: "nearest", inline: "center" });
+  }, [next?.blueprintRevisionId]);
   return (
     <section aria-labelledby="dash-h">
       <h2 id="dash-h">Start practice</h2>
@@ -575,6 +649,11 @@ function DashboardScreen({ dashboard, message, onStart, onStartCheck }: { dashbo
       {message && (
         <div className="notice notice-error" role="alert">
           {message}
+        </div>
+      )}
+      {dashboard.blueprints.length > 0 && dashboard.blueprints.every((b) => b.completed >= MAX_LESSON_PLAYS) && (
+        <div className="notice notice-info" data-testid="all-lessons-finished" role="status">
+          <strong>All {dashboard.blueprints.length} lessons are finished ({MAX_LESSON_PLAYS}/{MAX_LESSON_PLAYS}).</strong> Press “Copy task: create new lessons” at the bottom of this page and paste it into your coding agent: it builds the next 5 lessons from your results. You can do the same any time to prepare lessons in advance.
         </div>
       )}
       {dashboard.review?.notice && <ReviewNotice unresolved={dashboard.review.unresolved} />}
@@ -589,6 +668,21 @@ function DashboardScreen({ dashboard, message, onStart, onStartCheck }: { dashbo
             </button>
           </div>
         </div>
+      )}
+      {bp && (
+          <div className="lesson-path" ref={pathRef} role="group" aria-label="Lesson path" onMouseDown={(e) => { if (e.button === 0) dragRef.current = { x: e.clientX, left: e.currentTarget.scrollLeft, moved: false }; }} onMouseMove={(e) => { const d = dragRef.current; if (!d || !(e.buttons & 1)) return; if (Math.abs(e.clientX - d.x) > 5) d.moved = true; if (d.moved) { e.currentTarget.scrollLeft = d.left - (e.clientX - d.x); e.preventDefault(); } }} onClickCapture={(e) => { if (dragRef.current?.moved) { e.preventDefault(); e.stopPropagation(); } dragRef.current = null; }} onMouseLeave={() => { dragRef.current = null; }}>
+            <div className="lesson-path-track">
+              {dashboard.blueprints.map((lesson, i) => (
+                <div className="lesson-path-stop" key={lesson.blueprintRevisionId} data-lesson-id={lesson.blueprintRevisionId}>
+                  <span className="lesson-path-scenery" aria-hidden="true">{i % 2 === 0 ? "🌳" : "🏠"}</span>
+                  <button className={`lesson-path-node${bp?.blueprintRevisionId === lesson.blueprintRevisionId ? " selected" : ""}`} disabled={!lesson.unlocked} onClick={() => setChosen(lesson.blueprintRevisionId)} aria-label={`${lesson.title}, ${lesson.completed} of ${MAX_LESSON_PLAYS} plays${lesson.unlocked ? "" : ", locked"}`} aria-pressed={bp?.blueprintRevisionId === lesson.blueprintRevisionId}>
+                    <strong>{/l(\d+)$/i.exec(lesson.key)?.[0].toUpperCase() ?? `L${String(i + 1).padStart(2, "0")}`}</strong><small>{lesson.unlocked ? `${Math.min(lesson.completed, MAX_LESSON_PLAYS)}/${MAX_LESSON_PLAYS}` : "Locked"}</small>
+                  </button>
+                  <span className="lesson-path-title">{lesson.title.replace(/^L\d+\s+/i, "")}</span>
+                </div>
+              ))}
+            </div>
+          </div>
       )}
       {!bp ? (
         <div className="card">
@@ -618,25 +712,10 @@ function DashboardScreen({ dashboard, message, onStart, onStartCheck }: { dashbo
             </div>
           ) : null}
           <div className="actions">
-            <button className="btn btn-primary" disabled={bp.readySessions === 0} onClick={() => onStart(bp.blueprintRevisionId)} data-testid="start">
-              <i className="pi pi-play" aria-hidden="true" /> Start practice
+            <button className="btn btn-primary" disabled={!bp.unlocked || bp.readySessions === 0 || bp.completed >= MAX_LESSON_PLAYS} onClick={() => onStart(bp.blueprintRevisionId)} data-testid="start">
+              <i className="pi pi-play" aria-hidden="true" /> {bp.completed >= MAX_LESSON_PLAYS ? `Lesson finished (${MAX_LESSON_PLAYS}/${MAX_LESSON_PLAYS})` : "Start practice"}
             </button>
           </div>
-          {others.length > 0 && (
-            <details className="lessons" data-testid="other-lessons">
-              <summary>Other lessons</summary>
-              <ul>
-                {others.map((o) => (
-                  <li key={o.blueprintRevisionId}>
-                    <button className="btn" disabled={o.readySessions === 0} onClick={() => setChosen(o.blueprintRevisionId)}>
-                      {o.title}
-                    </button>{" "}
-                    <span className="muted small">{o.readySessions === 0 ? "no fresh exercises left" : `${o.readySessions} ready session${o.readySessions === 1 ? "" : "s"}`}</span>
-                  </li>
-                ))}
-              </ul>
-            </details>
-          )}
         </div>
       )}
       <ChecksCard dashboard={dashboard} onStartCheck={onStartCheck} />

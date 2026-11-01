@@ -1,4 +1,4 @@
-import { createHash } from "node:crypto";
+﻿import { createHash } from "node:crypto";
 import { copyFileSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import path from "node:path";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
@@ -80,7 +80,8 @@ describe("migration 001 content", () => {
 
     const settings = d.prepare("SELECT revision, values_json FROM settings_revisions").all() as Array<{ revision: number; values_json: string }>;
     expect(settings).toHaveLength(1);
-    expect(SettingsV1Schema.parse(JSON.parse(settings[0]!.values_json))).toEqual(DEFAULT_SETTINGS_V1);
+    const { difficultyMin: _min, difficultyMax: _max, ...legacyDefaults } = DEFAULT_SETTINGS_V1;
+    expect(SettingsV1Schema.parse(JSON.parse(settings[0]!.values_json))).toEqual(legacyDefaults);
 
     expect(d.pragma("foreign_key_check")).toEqual([]);
     const ids = (d.prepare("SELECT id FROM taxonomy_versions UNION ALL SELECT id FROM settings_revisions").all() as Array<{ id: string }>).map((x) => x.id);
@@ -91,7 +92,7 @@ describe("migration 001 content", () => {
     const d = open();
     await runMigrations(d, { migrationsDir: realMigrations, appVersion: "test" });
     const before = d.prepare("SELECT * FROM schema_migrations").all();
-    expect(before).toHaveLength(19);
+    expect(before).toHaveLength(22);
     const r = await runMigrations(d, { migrationsDir: realMigrations, appVersion: "other" });
     expect(r.applied).toEqual([]);
     expect(r.backupSkippedReason).toBe("nothing_pending");
@@ -198,13 +199,14 @@ describe("settings survive reopen (restart durability)", () => {
     const d = open();
     await runMigrations(d, { migrationsDir: realMigrations, appVersion: "test" });
     const v2 = JSON.stringify({ ...DEFAULT_SETTINGS_V1, taskCount: 12 });
-    d.prepare("INSERT INTO settings_revisions(id,revision,values_json,created_at) VALUES ('rev2',2,?,?)").run(v2, new Date().toISOString());
+    d.prepare("INSERT INTO settings_revisions(id,revision,values_json,created_at) VALUES ('rev3',3,?,?)").run(v2, new Date().toISOString());
     d.close();
     db = null;
     const again = open();
     const rows = again.prepare("SELECT revision, values_json FROM settings_revisions ORDER BY revision").all() as Array<{ revision: number; values_json: string }>;
-    expect(rows.map((r) => r.revision)).toEqual([1, 2]);
-    expect(SettingsV1Schema.parse(JSON.parse(rows[1]!.values_json)).taskCount).toBe(12);
+    expect(rows.map((r) => r.revision)).toEqual([1, 2, 3]);
+    expect(SettingsV1Schema.parse(JSON.parse(rows[2]!.values_json)).taskCount).toBe(12);
     expect(checkDatabaseFile(path.join(scratch.root, "db", "t.sqlite"))).toEqual({ integrity: "ok", foreignKeyViolations: 0 });
   });
 });
+

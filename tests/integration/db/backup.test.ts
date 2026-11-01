@@ -25,7 +25,7 @@ afterEach(() => {
 describe("SQLite backup API", () => {
   it("includes data that is still only in the WAL and yields a standalone, verified file", async () => {
     // Insert after open without checkpointing: rows live in the -wal file, which a plain file copy would miss.
-    db!.prepare("INSERT INTO settings_revisions(id,revision,values_json,created_at) VALUES ('wal-row',2,'{}',?)").run(new Date().toISOString());
+    db!.prepare("INSERT INTO settings_revisions(id,revision,values_json,created_at) VALUES ('wal-row',3,'{}',?)").run(new Date().toISOString());
     expect(existsSync(path.join(scratch.root, "db", "t.sqlite-wal"))).toBe(true);
 
     const m = await createBackup(db!, { backupsDir: backupsDir(), kind: "manual", schemaVersion: 1, appVersion: "test" });
@@ -36,7 +36,8 @@ describe("SQLite backup API", () => {
 
     const copy = openDatabase(path.join(backupsDir(), m.file), { readonly: true });
     try {
-      expect((copy.prepare("SELECT COUNT(*) AS n FROM settings_revisions").get() as { n: number }).n).toBe(2);
+      expect((copy.prepare("SELECT COUNT(*) AS n FROM settings_revisions").get() as { n: number }).n).toBe(3);
+      expect(copy.prepare("SELECT id FROM settings_revisions WHERE id = 'wal-row'").get()).toEqual({ id: "wal-row" });
       expect((copy.prepare("SELECT COUNT(*) AS n FROM skills").get() as { n: number }).n).toBe(80);
     } finally {
       copy.close();
@@ -91,7 +92,7 @@ describe("startup preparation", () => {
     const cfg = testConfig(path.join(scratch.root, "app"), 4999);
     const first = await prepareDatabase(cfg);
     expect(first.createdNewDatabase).toBe(true);
-    expect(first.migration.applied).toEqual([1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16, 17, 18, 19]);
+    expect(first.migration.applied).toEqual([1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16, 17, 18, 19, 20, 21, 22]);
     expect(first.dailyBackup).toBeNull();
     first.db.close();
 

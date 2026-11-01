@@ -24,9 +24,26 @@ const input = (o: Partial<PickInput> & Pick<PickInput, "n">): PickInput => ({ fr
 const lemmasOf = (p: ReturnType<typeof pickVocabulary>) => p.map((x) => x.candidate.lemma);
 
 describe("vocabulary-selection-v2 word state", () => {
-  it("interval table is 1/2/4/7/14/30 days and doubles for learned words", () => {
-    expect([1, 2, 3, 4, 5, 6, 9].map((s) => intervalFor(s, false))).toEqual([1, 2, 4, 7, 14, 30, 30]);
-    expect([1, 3, 6].map((s) => intervalFor(s, true))).toEqual([2, 8, 60]);
+  it("intervals cap at 21 days, or 30 for learned words", () => {
+    expect([1, 2, 3, 4, 5, 6, 9].map((s) => intervalFor(s, false))).toEqual([1, 2, 4, 7, 14, 21, 21]);
+    expect([1, 3, 6].map((s) => intervalFor(s, true))).toEqual([2, 8, 30]);
+  });
+
+  it("only an independent success separated by 24 hours advances; repeats do not postpone the due date", () => {
+    const initial = ev("success", 4, "one");
+    const sameDay = ev("success", 3.5, "two");
+    const repeat = { ...ev("success", 2, "repeat"), independent: false };
+    const a = wordState("a", [initial, sameDay, repeat], false, NOW);
+    expect(a.streak).toBe(1);
+    expect(a.dueAt).toBe(new Date(Date.parse(initial.at) + 86_400_000).toISOString());
+    expect(wordState("a", [initial, sameDay, repeat, ev("success", 1, "three")], false, NOW).streak).toBe(2);
+  });
+
+  it("keeps room for a new word when there are many due words", () => {
+    const events = new Map(["a", "b", "c"].map(l => [l, [ev("miss", 1, l)]]));
+    const result = pickVocabulary(input({ n: 3, fresh: [fresh("a", "a"), fresh("b", "b"), fresh("c", "c"), fresh("new", "new")], events }));
+    expect(lemmasOf(result)).toContain("new");
+    expect(lemmasOf(result).filter(l => l !== "new")).toHaveLength(2);
   });
 
   it("a success grows the streak and the due date; a miss resets it and makes the word due at once", () => {
@@ -102,14 +119,20 @@ describe("vocabulary-selection-v2 picking", () => {
     expect(lemmasOf(p).sort()).toEqual(["a", "b"]);
   });
 
+  it("a skipped sentence with no confirmed word events may return in a later session", () => {
+    const old = shown("w", "skipped", daysAgo(0), null);
+    const p = pickVocabulary(input({ n: 1, shown: [old] }));
+    expect(p[0]).toMatchObject({ repeat: { reason: "missed", ofSlotId: "slot-skipped" } });
+  });
+
   it("after a miss the first choice is a repeat of the missed sentence, labelled with the reason", () => {
     const events = new Map([["w", [ev("miss", 2, "rm")]]]);
     const p = pickVocabulary(input({ n: 2, fresh: [fresh("w", "f1")], shown: [shown("w", "rm", daysAgo(2), "miss")], events }));
-    expect(p[0]).toMatchObject({ repeat: { reason: "missed", ofSlotId: "slot-rm" } });
-    expect(p[0]!.candidate.revisionId).toBe("rm");
-    expect(p[1]!.repeat).toBeNull();
+    expect(p[0]!.repeat).toBeNull();
+    expect(p[1]).toMatchObject({ repeat: { reason: "missed", ofSlotId: "slot-rm" } });
     const assisted = pickVocabulary(input({ n: 2, fresh: [fresh("w", "f1")], shown: [shown("w", "ra", daysAgo(2), "assisted")], events: new Map([["w", [ev("assisted", 2, "ra")]]]) }));
-    expect(assisted[0]!.repeat?.reason).toBe("assisted");
+    expect(assisted[0]!.repeat).toBeNull();
+    expect(assisted[1]!.repeat?.reason).toBe("assisted");
   });
 
   it("after a success a fresh sentence is preferred; a repeat only when none is left and the word is due, oldest correct one first", () => {
@@ -120,8 +143,16 @@ describe("vocabulary-selection-v2 picking", () => {
     const noFresh = pickVocabulary(input({ n: 2, shown: shownList, events }));
     expect(noFresh[0]!.candidate.revisionId).toBe("o1");
     expect(noFresh[0]!.repeat?.reason).toBe("review");
-    const notDue = pickVocabulary(input({ n: 2, shown: shownList, events: new Map([["w", [ev("success", 1, "o1"), ev("success", 0.5, "o2")]]]) }));
+    const notDue = pickVocabulary(input({ n: 2, shown: [shown("w", "o1", daysAgo(0.5), "success"), shown("w", "o2", daysAgo(0.5), "success")], events: new Map([["w", [ev("success", 1, "o1"), ev("success", 0.5, "o2")]]]) }));
     expect(notDue).toHaveLength(0);
+  });
+
+  it("correct sentences can return after one day only to fill a shortage, preferring fresh items", () => {
+    const events = new Map([["w", [ev("success", 1.5, "old")]]]);
+    const previous = shown("w", "old", daysAgo(1.5), "success");
+    expect(pickVocabulary(input({ n: 1, fresh: [fresh("w", "new")], shown: [previous], events }))[0]!.repeat).toBeNull();
+    expect(pickVocabulary(input({ n: 1, shown: [previous], events }))[0]!.repeat?.reason).toBe("review");
+    expect(pickVocabulary(input({ n: 1, shown: [shown("w", "old", daysAgo(0.5), "success")], events }))).toHaveLength(0);
   });
 
   it("with no fresh stock, missed sentences come back before correct ones, oldest first, and rotate across sessions", () => {
@@ -138,9 +169,9 @@ describe("vocabulary-selection-v2 picking", () => {
   it("a miss on A followed by a success on another sentence: A is still offered once the word is due, even with fresh stock", () => {
     const events = new Map([["w", [ev("miss", 5, "A"), ev("success", 2, "B")]]]);
     const p = pickVocabulary(input({ n: 2, fresh: [fresh("w", "F")], shown: [shown("w", "A", daysAgo(5), "miss"), shown("w", "B", daysAgo(2), "success")], events }));
-    expect(p[0]).toMatchObject({ repeat: { reason: "missed" } });
-    expect(p[0]!.candidate.revisionId).toBe("A");
-    expect(p[1]!.candidate.revisionId).toBe("F");
+    expect(p[0]!.candidate.revisionId).toBe("F");
+    expect(p[1]).toMatchObject({ repeat: { reason: "missed" } });
+    expect(p[1]!.candidate.revisionId).toBe("A");
     // not due yet: fresh first, A waits
     const wait = pickVocabulary(input({ n: 1, fresh: [fresh("w", "F")], shown: [shown("w", "A", daysAgo(5), "miss"), shown("w", "B", daysAgo(0.2), "success")], events: new Map([["w", [ev("miss", 5, "A"), ev("success", 0.2, "B")]]]) }));
     expect(wait[0]!.candidate.revisionId).toBe("F");
@@ -149,8 +180,9 @@ describe("vocabulary-selection-v2 picking", () => {
   it("a missed sentence answered only with a hint stays open: it is offered ahead of fresh once the word is due", () => {
     const events = new Map([["w", [ev("miss", 6, "A"), ev("assisted", 4, "A"), ev("success", 2, "F")]]]);
     const p = pickVocabulary(input({ n: 2, fresh: [fresh("w", "G")], shown: [shown("w", "A", daysAgo(4), "assisted"), shown("w", "F", daysAgo(2), "success")], events }));
-    expect(p[0]!.candidate.revisionId).toBe("A");
-    expect(p[0]!.repeat?.reason).toBe("assisted");
+    expect(p[0]!.candidate.revisionId).toBe("G");
+    expect(p[1]!.candidate.revisionId).toBe("A");
+    expect(p[1]!.repeat?.reason).toBe("assisted");
   });
 
   it("a repeat answered correctly without help is no longer offered ahead of fresh sentences; skipped ones rank below helped ones", () => {
@@ -178,7 +210,7 @@ describe("vocabulary-selection-v2 picking", () => {
     const shownList = lemmas.map((l) => shown(l, `r-${l}`, daysAgo(2), "miss"));
     const p = pickVocabulary(input({ n: 5, fresh: lemmas.map((l) => fresh(l, `f-${l}`)), shown: shownList, events }));
     expect(p).toHaveLength(5);
-    expect(p.filter((x) => x.repeat).length).toBe(3); // floor(0.6 * 5); the other two places go to fresh sentences
+    expect(p.filter((x) => x.repeat).length).toBe(0); // different sentences are preferred for those words
     const noFresh = pickVocabulary(input({ n: 5, shown: shownList, events }));
     expect(noFresh).toHaveLength(5);
     expect(noFresh.every((x) => x.repeat?.reason === "missed")).toBe(true); // repeat-only stock fills the whole session

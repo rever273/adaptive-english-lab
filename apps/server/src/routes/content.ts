@@ -2,7 +2,7 @@ import type { FastifyInstance } from "fastify";
 import { CreateBatchRequestSchema, ExerciseReportRequestSchema, PublishReleaseRequestSchema, type ExerciseReportResponse } from "@english-lab/contracts";
 import type { Db } from "../db/open.js";
 import { planRelease, publishRelease, reportExercise, type ContentDeps } from "../domain/content/repository.js";
-import { coverage, createBatch, getBatch, listBatches, trialGate } from "../domain/content/batches/repository.js";
+import { coverage, createBatch, getBatch, listBatches, listStudioBatches, trialGate } from "../domain/content/batches/repository.js";
 import { importReviewManifest } from "../domain/content/batches/reviewImport.js";
 import { ApiError } from "../errors.js";
 import { completeBatch } from "../domain/content/batches/completion.js";
@@ -37,6 +37,7 @@ export function registerContentRoutes(app: FastifyInstance, db: Db, deps: Conten
     return reply.code(202).send(created);
   });
   app.get("/api/v1/content/batches", async () => ({ batches: listBatches(db), trialGate: trialGate(db) }));
+  app.get("/api/v1/content/batch-summaries", async () => ({ batches: listStudioBatches(db) }));
   app.get<{ Params: { id: string } }>("/api/v1/content/batches/:id", idParams, async (req) => ({ ...getBatch(db, req.params.id), trialGate: trialGate(db) }));
   app.get("/api/v1/content/coverage", async () => coverage(db));
   app.get("/api/v1/content/stock", async () => replenishmentStock(db));

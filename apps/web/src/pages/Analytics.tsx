@@ -199,7 +199,7 @@ function GrammarAnalytics() {
           </label>
           <label className="inline"><span className="small">Level</span>
             <select value={difficulty} onChange={(e) => setDifficulty(e.target.value)} aria-label="Level">
-              {["A2", "B1", "B2", "C1"].map((d) => <option key={d}>{d}</option>)}
+              {["A2", "B1", "B2", "C1", "C2"].map((d) => <option key={d}>{d}</option>)}
             </select>
           </label>
           <button className="btn" onClick={() => void doExport()} data-testid="export">Export CSV, JSON and summary</button>

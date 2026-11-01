@@ -1,6 +1,7 @@
 import type { Db } from "../../../db/open.js";
 import { loadBlockedFingerprints, loadCandidates } from "../../sessions/bank.js";
 import { loadBlueprint, loadSettings } from "../../sessions/policy.js";
+import { vocabularyReplenishment } from "./vocabularyPlan.js";
 import { vocabularyPracticeStatus } from "../../vocabulary/practice.js";
 import { difficultyLevels } from "@english-lab/contracts";
 import { scaleQuotas, DEFAULT_QUOTAS } from "@english-lab/learning";
@@ -13,8 +14,14 @@ import { lessonPlanView, needMessage } from "./lessonNeeds.js";
  */
 export function replenishmentStock(db: Db, now: Date = new Date()) {
   const plan = lessonPlanView(db, now);
+  const vocabularyDemand = vocabularyReplenishment(db);
+  const vocabPlan = { words: vocabularyDemand.words.length, deficit: vocabularyDemand.deficit, recommended: vocabularyDemand.recommended, targetPerWord: vocabularyDemand.targetPerWord };
   if (plan) {
     const next = plan.lessons[plan.nextIndex]!;
+    // Per-lesson estimates share the same bank, so this is a planning estimate, not a guarantee.
+    const upcoming = [...plan.lessons.slice(plan.nextIndex), ...plan.lessons.slice(0, plan.nextIndex)];
+    const courseDeficit = upcoming.reduce((sum, lesson) => sum + lesson.deficit, 0);
+    const courseRecommended = upcoming.reduce((sum, lesson) => sum + lesson.recommended, 0);
     const vocab = vocabularyPracticeStatus(db);
     const low = next.deficit > 0;
     const grammar = {
@@ -25,10 +32,11 @@ export function replenishmentStock(db: Db, now: Date = new Date()) {
       lesson: { key: next.key, label: next.label, title: next.title, range: next.range, sessions: next.sessions, fresh: next.fresh, reusable: next.reusable },
       deficits: [...next.formats.filter((f) => f.deficit > 0).map((f) => ({ kind: "format" as const, name: f.format, need: f.need, have: f.have, deficit: f.deficit })), ...next.skills.filter((k) => k.deficit > 0).map((k) => ({ kind: "skill" as const, name: k.skill, need: k.target, have: k.have, deficit: k.deficit }))],
       recommended: next.recommended,
+      course: { lessons: upcoming.length, deficit: courseDeficit, recommended: courseRecommended, sessionsPerLesson: next.sessions },
       message: low ? needMessage(next) : `Lesson ${next.label} at ${next.range} has enough exercises for the next ${next.sessions} sessions (${next.available} usable).`,
       bySkill: next.skills.map((k) => ({ skill: k.skill, available: k.have })),
     };
-    return { grammar, vocabulary: { available: vocab.freshAvailable, threshold: vocab.taskCount * 2, low: vocab.words > 0 && vocab.freshAvailable < vocab.taskCount * 2 } };
+    return { grammar, vocabulary: { available: vocab.freshAvailable, threshold: vocab.taskCount * 2, low: vocab.words > 0 && vocab.freshAvailable < vocab.taskCount * 2, plan: vocabPlan } };
   }
   const settings = loadSettings(db).values;
   const last = db.prepare("SELECT blueprint_revision_id AS id FROM sessions WHERE purpose = 'practice' AND blueprint_revision_id IS NOT NULL ORDER BY created_at DESC, rowid DESC LIMIT 1").get() as { id: string } | undefined;
@@ -50,6 +58,6 @@ export function replenishmentStock(db: Db, now: Date = new Date()) {
   const vocab = vocabularyPracticeStatus(db);
   const vocabFresh = vocab.freshAvailable;
   const grammar = { available, threshold, low: available < threshold || formatLow, scope: last ? "current lesson skills" : "all grammar skills", bySkill: [...new Set(usable.map(c => c.skillId))].map(skill => ({ skill, available: usable.filter(c => c.skillId === skill).length })) };
-  const vocabulary = { available: vocabFresh, threshold: vocab.taskCount * 2, low: vocab.words > 0 && vocabFresh < vocab.taskCount * 2 };
+  const vocabulary = { available: vocabFresh, threshold: vocab.taskCount * 2, low: vocab.words > 0 && vocabFresh < vocab.taskCount * 2, plan: vocabPlan };
   return { grammar, vocabulary };
 }

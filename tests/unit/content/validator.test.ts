@@ -35,6 +35,11 @@ describe("complete fixtures of every format are valid drafts - and still not app
     expect(Object.keys(r).sort()).toEqual(["contentHash", "errors", "ok", "units", "warnings"]);
   });
 
+  it.each(FIXTURE_NAMES)("%s accepts C2 difficulty and context without approving it", (name) => {
+    const c = { ...fixture(name), difficulty: "C2", context_level: "C2" };
+    expect(check(c)).toMatchObject({ ok: true, errors: [] });
+  });
+
   it("covers all six formats", () => {
     expect(new Set(FIXTURE_NAMES.map((n) => fixture(n).type)).size).toBe(6);
   });

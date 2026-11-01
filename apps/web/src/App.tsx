@@ -16,15 +16,18 @@ import { ContentStockNotice } from "./components/ContentStockNotice";
 
 type Page = "practice" | "vocabulary" | "tutor" | "analytics" | "studio" | "tasks" | "settings";
 
-const PAGES: Array<{ id: Page; label: string; icon: string }> = [
-  { id: "practice", label: "Practice", icon: "pi-play-circle" },
-  { id: "vocabulary", label: "Vocabulary", icon: "pi-bookmark" },
-  { id: "tutor", label: "Tutor", icon: "pi-comments" },
-  { id: "analytics", label: "Analytics", icon: "pi-chart-line" },
-  { id: "studio", label: "Content Studio", icon: "pi-box" },
-  { id: "tasks", label: "AI Tasks", icon: "pi-microchip" },
-  { id: "settings", label: "Settings & Status", icon: "pi-cog" },
+const PAGES: Array<{ id: Page; label: string; icon: string; path: string }> = [
+  { id: "practice", label: "Practice", icon: "pi-play-circle", path: "/practice" },
+  { id: "vocabulary", label: "Vocabulary", icon: "pi-bookmark", path: "/vocabulary" },
+  { id: "tutor", label: "Tutor", icon: "pi-comments", path: "/tutor" },
+  { id: "analytics", label: "Analytics", icon: "pi-chart-line", path: "/analytics" },
+  { id: "studio", label: "Content Studio", icon: "pi-box", path: "/content-studio" },
+  { id: "tasks", label: "AI Tasks", icon: "pi-microchip", path: "/ai-tasks" },
+  { id: "settings", label: "Settings & Status", icon: "pi-cog", path: "/settings" },
 ];
+
+/** each tab has its own address (e.g. /vocabulary), so a reload or a bookmark opens the same tab; an unknown address shows Practice */
+const pageAtPath = (pathname: string): Page => PAGES.find((p) => p.path === pathname.replace(/\/+$/, ""))?.id ?? "practice";
 
 /**
  * One small event stream to the server keeps this tab linked to it. When the server stops the browser keeps retrying by itself; the moment a
@@ -49,13 +52,24 @@ function useServerLink(): boolean {
 
 export function App() {
   const serverDown = useServerLink();
-  const [page, setPage] = useState<Page>("practice");
+  const [page, setPage] = useState<Page>(() => pageAtPath(window.location.pathname));
   // a link from one page to a sub-view of another (Vocabulary -> Content Studio's vocabulary category, a vocabulary summary -> its analytics)
   const [focus, setFocus] = useState<"grammar" | "vocabulary">("grammar");
   const go = (p: Page, sub: "grammar" | "vocabulary" = "grammar") => {
     setFocus(sub);
     setPage(p);
+    const path = PAGES.find((x) => x.id === p)!.path;
+    if (window.location.pathname !== path) window.history.pushState(null, "", path);
   };
+  // the browser's Back and Forward buttons move between tabs
+  useEffect(() => {
+    const onPop = () => {
+      setFocus("grammar");
+      setPage(pageAtPath(window.location.pathname));
+    };
+    window.addEventListener("popstate", onPop);
+    return () => window.removeEventListener("popstate", onPop);
+  }, []);
   // Alt+1 ... Alt+7 open the tabs
   useKeys((e) => {
     if (!e.altKey || e.ctrlKey || e.metaKey || e.repeat) return;

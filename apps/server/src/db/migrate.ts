@@ -103,8 +103,16 @@ export async function runMigrations(db: Db, opts: MigrateOptions): Promise<Migra
 
   const applied: number[] = [];
   for (const mig of pending) {
-    db.exec("BEGIN IMMEDIATE");
+    // SQLite requires foreign_keys to be disabled outside the transaction when rebuilding a referenced parent.
+    // The entire copy and FK verification remain atomic, and the setting is restored on every exit path.
+    const rebuildReferencedTable = mig.version === 20 && mig.name === "exercise_c2";
     try {
+      if (rebuildReferencedTable) {
+        db.pragma("foreign_keys = OFF");
+        if (db.pragma("foreign_keys", { simple: true }) !== 0) throw new Error("could not disable foreign keys for table rebuild");
+        db.pragma("legacy_alter_table = ON");
+      }
+      db.exec("BEGIN IMMEDIATE");
       db.exec(mig.sql);
       db.prepare("INSERT INTO schema_migrations(version, checksum, applied_at, app_version) VALUES (?, ?, ?, ?)").run(
         mig.version,
@@ -118,6 +126,11 @@ export async function runMigrations(db: Db, opts: MigrateOptions): Promise<Migra
     } catch (err) {
       if (db.inTransaction) db.exec("ROLLBACK");
       throw new MigrationError("MIGRATION_FAILED", `migration ${mig.version} (${mig.name}) failed and was rolled back: ${(err as Error).message}`);
+    } finally {
+      if (rebuildReferencedTable) {
+        db.pragma("legacy_alter_table = OFF");
+        db.pragma("foreign_keys = ON");
+      }
     }
     applied.push(mig.version);
   }

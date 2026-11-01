@@ -87,6 +87,7 @@ describe("vocabulary in a browser", () => {
     expect(await page.getByTestId("vocab-row").count()).toBe(1);
     await shot("03-vocabulary-page");
 
+    await page.getByTestId("vocab-row").locator(".word").hover(); // the actions live in the card that opens on hover
     await page.getByRole("button", { name: "Edit" }).click();
     await page.getByLabel("Translation (Russian)").fill("слово");
     await page.getByRole("button", { name: "Save", exact: true }).last().click();

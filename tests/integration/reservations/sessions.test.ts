@@ -101,12 +101,12 @@ describe("a default snapshot (N=18, 5/5/5/1/2)", () => {
 
     // pinned versions and the audit decision
     const s = one<{ settings_revision_id: string; plan_id: string; selection_version: string; random_seed: string; blueprint_revision_id: string }>("SELECT * FROM sessions WHERE id = ?", sessionId);
-    expect(s).toMatchObject({ selection_version: "grammar-selection-v2", random_seed: "seed-1", blueprint_revision_id: env.blueprintRevisionId });
-    expect(one<{ revision: number }>("SELECT revision FROM settings_revisions WHERE id = ?", s.settings_revision_id).revision).toBe(1);
+    expect(s).toMatchObject({ selection_version: "grammar-selection-v3", random_seed: "seed-1", blueprint_revision_id: env.blueprintRevisionId });
+    expect(one<{ revision: number }>("SELECT revision FROM settings_revisions WHERE id = ?", s.settings_revision_id).revision).toBe(2);
     expect(one<{ reviewer: string }>("SELECT reviewer FROM learning_plans WHERE id = ?", s.plan_id).reviewer).toBe("system:baseline");
     const d = one<{ choices_json: string; deficits_json: string; algorithm_id: string; candidate_hash: string }>("SELECT * FROM scheduling_decisions WHERE session_id = ?", sessionId);
     const choices = JSON.parse(d.choices_json) as { seed: string; stats: { weakTarget: number; weakActual: number }; slots: unknown[]; discovery: { version: string; qualificationIds: string[] } };
-    expect(d.algorithm_id).toBe("grammar-selection-v2");
+    expect(d.algorithm_id).toBe("grammar-selection-v3");
     expect(d.candidate_hash).toMatch(/^[0-9a-f]{64}$/);
     expect(choices).toMatchObject({ seed: "seed-1", stats: { weakTarget: 12, weakActual: 12 }, discovery: { version: "discovery-v1", qualificationIds: [] } });
     expect(choices.slots).toHaveLength(18);
@@ -436,7 +436,7 @@ describe("no-repeat across sessions, readiness and shortage (the 45-exercise sli
     if (d.largestFeasibleN !== null) {
       expect(d.largestFeasibleN).toBeLessThan(18);
       const settings = one<{ values_json: string }>("SELECT values_json FROM settings_revisions WHERE revision = 1");
-      env.db.prepare("INSERT INTO settings_revisions(id, revision, values_json, created_at) VALUES (?,?,?,?)").run(randomUUID(), 2, JSON.stringify({ ...JSON.parse(settings.values_json), taskCount: d.largestFeasibleN }), "now");
+      env.db.prepare("INSERT INTO settings_revisions(id, revision, values_json, created_at) VALUES (?,?,?,?)").run(randomUUID(), 3, JSON.stringify({ ...JSON.parse(settings.values_json), taskCount: d.largestFeasibleN }), "now");
       expect(begin(env, "smaller").snapshot.taskCount).toBe(d.largestFeasibleN);
     }
   });
@@ -445,13 +445,13 @@ describe("no-repeat across sessions, readiness and shortage (the 45-exercise sli
     env = openSliceCopy();
     const a = begin(env);
     const v1 = JSON.parse(one<{ values_json: string }>("SELECT values_json FROM settings_revisions WHERE revision = 1").values_json);
-    env.db.prepare("INSERT INTO settings_revisions(id, revision, values_json, created_at) VALUES (?,?,?,?)").run(randomUUID(), 2, JSON.stringify({ ...v1, taskCount: 10, weakRatio: 0.5 }), "now");
+    env.db.prepare("INSERT INTO settings_revisions(id, revision, values_json, created_at) VALUES (?,?,?,?)").run(randomUUID(), 3, JSON.stringify({ ...v1, taskCount: 10, weakRatio: 0.5 }), "now");
     expect(getSnapshot(env.db, a.sessionId).taskCount).toBe(18);
     finishSession(env.db, env.deps, a.sessionId, "ended_early");
     const b = begin(env, "ten");
     expect(b.snapshot.taskCount).toBe(10);
     expect(JSON.parse(one<{ choices_json: string }>("SELECT choices_json FROM scheduling_decisions WHERE session_id = ?", b.sessionId).choices_json).stats).toMatchObject({ weakTarget: 5, weakActual: 5 });
-    expect(one<{ revision: number }>("SELECT sr.revision FROM sessions s JOIN settings_revisions sr ON sr.id = s.settings_revision_id WHERE s.id = ?", b.sessionId).revision).toBe(2);
-    expect(one<{ revision: number }>("SELECT sr.revision FROM sessions s JOIN settings_revisions sr ON sr.id = s.settings_revision_id WHERE s.id = ?", a.sessionId).revision).toBe(1);
+    expect(one<{ revision: number }>("SELECT sr.revision FROM sessions s JOIN settings_revisions sr ON sr.id = s.settings_revision_id WHERE s.id = ?", b.sessionId).revision).toBe(3);
+    expect(one<{ revision: number }>("SELECT sr.revision FROM sessions s JOIN settings_revisions sr ON sr.id = s.settings_revision_id WHERE s.id = ?", a.sessionId).revision).toBe(2);
   });
 });

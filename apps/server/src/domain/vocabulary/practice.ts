@@ -7,9 +7,9 @@ import { loadBlockedFingerprints } from "../sessions/bank.js";
 import { loadPlan, loadSettings, type SessionDeps } from "../sessions/policy.js";
 import { getSnapshot } from "../sessions/snapshot.js";
 import { normalizeWord } from "./forms.js";
-import { FAMILY_WEIGHT, SELECTION_CONFIG, VOCABULARY_SELECTION_V2, pickVocabulary, wordState, type Outcome, type ShownCandidate, type VocabularyCandidate, type WordEvent } from "./schedule.js";
+import { FAMILY_WEIGHT, SELECTION_CONFIG, VOCABULARY_SELECTION_V4, pickVocabulary, wordState, type Outcome, type ShownCandidate, type VocabularyCandidate, type WordEvent } from "./schedule.js";
 
-export const VOCABULARY_SELECTION = VOCABULARY_SELECTION_V2;
+export const VOCABULARY_SELECTION = VOCABULARY_SELECTION_V4;
 export type { VocabularyCandidate, ShownCandidate } from "./schedule.js";
 const sha256 = (s: string): string => createHash("sha256").update(s).digest("hex");
 
@@ -59,14 +59,14 @@ export function wordEvents(db: Db): Map<string, WordEvent[]> {
   const rows = db
     .prepare(
       `SELECT t.submitted_at AS at, t.hints_before AS hints, t.answer_seen_before AS seen, t.idk AS idk, ss.id AS slotId, ss.exercise_revision_id AS revisionId,
-              json_extract(er.content_json, '$.vocabulary.target.lemma') AS lemma,
+              json_extract(er.content_json, '$.vocabulary.target.lemma') AS lemma, COALESCE(json_extract(ss.cohort_json, '$.repeat'), 0) AS repeat,
               (SELECT a.verdict FROM assessment_revisions a WHERE a.attempt_id = t.id ORDER BY a.sequence DESC LIMIT 1) AS verdict,
               (SELECT a.confirmation FROM assessment_revisions a WHERE a.attempt_id = t.id ORDER BY a.sequence DESC LIMIT 1) AS confirmation
          FROM attempts t JOIN session_slots ss ON ss.id = t.slot_id JOIN vocabulary_sessions vs ON vs.session_id = ss.session_id
          JOIN exercise_revisions er ON er.id = ss.exercise_revision_id
         WHERE t.attempt_no = 1 ORDER BY t.submitted_at, t.id`,
     )
-    .all() as Array<{ at: string; hints: number; seen: number; idk: number; slotId: string; revisionId: string; lemma: string | null; verdict: string | null; confirmation: string | null }>;
+    .all() as Array<{ at: string; hints: number; seen: number; idk: number; slotId: string; revisionId: string; lemma: string | null; repeat: number; verdict: string | null; confirmation: string | null }>;
   const out = new Map<string, WordEvent[]>();
   for (const r of rows) {
     if (!r.lemma) continue;
@@ -75,7 +75,7 @@ export function wordEvents(db: Db): Map<string, WordEvent[]> {
     if (!result) continue; // pending or ambiguous: not evidence yet
     const outcome: Outcome = r.hints > 0 || r.seen === 1 ? "assisted" : result === "correct" ? "success" : "miss";
     const lemma = normalizeWord(r.lemma);
-    (out.get(lemma) ?? out.set(lemma, []).get(lemma)!).push({ at: r.at, outcome, revisionId: r.revisionId, slotId: r.slotId });
+    (out.get(lemma) ?? out.set(lemma, []).get(lemma)!).push({ at: r.at, outcome, revisionId: r.revisionId, slotId: r.slotId, independent: r.repeat !== 1 });
   }
   return out;
 }
@@ -110,8 +110,9 @@ export function vocabularyCandidates(db: Db): { usable: VocabularyCandidate[]; s
   const exposed = new Set((db.prepare("SELECT unit_id AS id FROM exposures").all() as Array<{ id: string }>).map((r) => r.id));
   const reserved = new Set((db.prepare("SELECT unit_id AS id FROM prompt_reservations").all() as Array<{ id: string }>).map((r) => r.id));
   const events = wordEvents(db);
-  const lastOutcomeByRev = new Map<string, Outcome>();
-  for (const evs of events.values()) for (const e of evs) lastOutcomeByRev.set(e.revisionId, e.outcome); // events are in time order per word
+  const attempted = new Set((db.prepare("SELECT slot_id AS id FROM attempts WHERE attempt_no = 1").all() as Array<{ id: string }>).map(r => r.id));
+  const outcomeBySlot = new Map<string, Outcome>();
+  for (const evs of events.values()) for (const e of evs) outcomeBySlot.set(e.slotId, e.outcome);
   const usable: VocabularyCandidate[] = [];
   const shown: ShownCandidate[] = [];
   let approvedForWords = 0;
@@ -130,7 +131,7 @@ export function vocabularyCandidates(db: Db): { usable: VocabularyCandidate[]; s
       // a repeat reserves the units never exposed (so they enter the ledger when shown); one held by another slot makes it ineligible
       const unexposedUnits = cand.units.filter((x) => !exposed.has(x));
       if (unexposedUnits.some((x) => reserved.has(x))) continue;
-      shown.push({ ...cand, unexposedUnits, lastShownAt: seen.at, lastSlotId: seen.slotId, lastOutcome: lastOutcomeByRev.get(r.revisionId) ?? null });
+      shown.push({ ...cand, unexposedUnits, lastShownAt: seen.at, lastSlotId: seen.slotId, lastOutcome: outcomeBySlot.get(seen.slotId) ?? (attempted.has(seen.slotId) ? "success" : null) });
     } else if (!u.some((x) => blocked.has(x.fingerprint))) usable.push(cand);
   }
   return { usable, shown, approvedForWords, approvedTotal: all.length };
@@ -154,6 +155,7 @@ export interface VocabularyPracticeStatus {
   draftsNotReleased: number;
   shortage: { available: number; requested: number; message: string } | null;
   activeSessionId: string | null;
+  wordQueue: { due: number; newWords: number; recent: number };
 }
 
 export function vocabularyPracticeStatus(db: Db, now: Date = new Date()): VocabularyPracticeStatus {
@@ -173,10 +175,19 @@ export function vocabularyPracticeStatus(db: Db, now: Date = new Date()): Vocabu
   // `available` = the largest session (up to the configured size) the picker can really build with the soft repeat cap and the new-word cap
   const events = wordEvents(db);
   const newWords = vocabularyNewWordsPerSession(settings.values);
+  const candidateLemmas = new Set([...usable, ...shown].map(c => c.lemma));
+  const wordQueue = { due: 0, newWords: 0, recent: 0 };
+  for (const lemma of candidateLemmas) {
+    const state = wordState(lemma, events.get(lemma) ?? [], entries.get(lemma)?.learned ?? false, now);
+    if (state.state === "new") wordQueue.newWords++;
+    else if (state.due) wordQueue.due++;
+    else wordQueue.recent++;
+  }
   const { n: available, picks } = largestFeasible((m) => pickVocabulary({ fresh: usable, shown, events, now, n: m, seed: "status", newWordsPerSession: newWords }), n);
   const freshAvailable = pickVocabulary({ fresh: usable, shown: [], events: new Map(), now, n: all, seed: "status", newWordsPerSession: all }).length;
   return {
     taskCount: n,
+    wordQueue,
     available,
     freshAvailable,
     repeatsAvailable: picks.filter((p) => p.repeat).length,

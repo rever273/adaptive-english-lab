@@ -1,5 +1,13 @@
 import { MAX_PCM_BYTES, MIN_PCM_BYTES, SttError, type SttReady, type Transcription } from "./sttWorker.js";
 
+/** the rate-limit headers Groq sent with the latest transcription (memory only, lost on restart); Groq has no credits endpoint */
+export const groqLimits: { capturedAt: string | null; status: number | null; headers: Record<string, string> } = { capturedAt: null, status: null, headers: {} };
+function rememberLimits(response: Response): void {
+  const headers: Record<string, string> = {};
+  response.headers.forEach((v, k) => { if (/^(x-ratelimit-|retry-after$)/.test(k)) headers[k] = v; });
+  groqLimits.capturedAt = new Date().toISOString(); groqLimits.status = response.status; groqLimits.headers = headers;
+}
+
 /** Sends memory-only PCM as a WAV to Groq. No audio files or API responses are logged. */
 export class GroqWorker {
   private controller: AbortController | null = null;
@@ -29,6 +37,7 @@ export class GroqWorker {
     const started = Date.now();
     try {
       const response = await this.request("https://api.groq.com/openai/v1/audio/transcriptions", { method: "POST", headers: { Authorization: `Bearer ${this.key}` }, body, signal: controller.signal });
+      rememberLimits(response);
       if (!response.ok) throw new SttError(response.status === 429 ? "rate_limited" : response.status === 401 ? "authentication_failed" : "provider_error", "Groq transcription failed");
       const data: unknown = await response.json();
       if (!data || typeof data !== "object" || !("text" in data) || typeof data.text !== "string" || data.text.length > 10000) throw new SttError("bad_response", "Groq returned an invalid response");

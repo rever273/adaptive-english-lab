@@ -67,8 +67,9 @@ export type AttemptResponse = z.infer<typeof AttemptResponseSchema>;
 export const SessionEventRequestSchema = z
   .object({
     slotId: Id,
-    type: z.enum(["hint", "reveal_answer", "skip", "continue"]),
+    type: z.enum(["hint", "vocabulary_translation", "vocabulary_letters", "reveal_answer", "skip", "continue"]),
     clientEventId: ClientKey,
+    letterIndex: z.number().int().min(0).max(499).optional(),
   })
   .strict();
 export type SessionEventRequest = z.infer<typeof SessionEventRequestSchema>;
@@ -82,6 +83,7 @@ export const SessionEventResponseSchema = z
     replayed: z.boolean(),
     /** Russian hint text for a `hint` event (never the answer); null for other events or when hints run out */
     hint: z.string().nullable().optional(),
+    letters: z.array(z.string().nullable()).max(500).optional(),
   })
   .strict();
 export type SessionEventResponse = z.infer<typeof SessionEventResponseSchema>;

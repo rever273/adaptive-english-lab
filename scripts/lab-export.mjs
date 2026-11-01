@@ -15,8 +15,8 @@ const config = loadConfig();
 const dbPath = path.resolve(opt("--db", config.dbPath));
 const outDir = path.resolve(opt("--out", path.join(config.dataRoot, "exports")));
 
-if (!["batch", "session", "exercise", "coverage", "findings", "vocabulary", "verdicts"].includes(what)) {
-  console.error("usage: npm run lab:export -- batch <UUID> | session <UUID> | exercise <UUID> (revision id) | coverage | vocabulary | verdicts [--include-ai-correct] | findings [--status tentative] [--limit 100]  [--db <file>] [--out <dir>]");
+if (!["batch", "session", "exercise", "coverage", "findings", "vocabulary", "verdicts", "lesson-priorities"].includes(what)) {
+  console.error("usage: npm run lab:export -- batch <UUID> | session <UUID> | exercise <UUID> (revision id) | coverage | lesson-priorities | vocabulary | verdicts [--include-ai-correct] | findings [--status tentative] [--limit 100]  [--db <file>] [--out <dir>]");
   process.exit(2);
 }
 if (["batch", "session", "exercise"].includes(what) && !/^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(id ?? "")) {
@@ -29,6 +29,7 @@ const { findingsForReview } = await loadServerModule("domain/reports/findingRevi
 const { exportSession, exportExercise } = await loadServerModule("domain/tutor/agentExport.js");
 const { attemptsForVerdictReview } = await loadServerModule("domain/reports/attemptVerdictReview.js");
 const { exportVocabulary } = await loadServerModule("domain/vocabulary/practice.js");
+const { exportLessonPriorities } = await loadServerModule("domain/reports/lessonPriorities.js");
 const db = openDatabase(dbPath, { readonly: true });
 try {
   let out;
@@ -43,9 +44,10 @@ try {
     const template = { schema_version: "attempt-verdict-review-v1", reviewer: "agent:<name>@<version> | human:<name>", review_version: "<review pass id>", items: items.map((a) => ({ attempt_id: a.attempt_id, expected_sequence: a.expected_sequence, verdict: "correct | incorrect", rationale: "" })) };
     out = { json: { schema_version: "attempt-verdict-export-v1", exportedAt: new Date().toISOString(), attempts: items, reviewManifestTemplate: template }, markdown: ["# Answers waiting for a decision", "", "Judge EVERY answer against its task and the approved alternatives. Return an attempt-verdict-review-v1 manifest (echo attempt_id and expected_sequence unchanged) and apply it with: npm run lab:verdicts -- apply <manifest.json>. Do not modify the database any other way.", "", ...items.flatMap((a) => [`## ${a.attempt_id}`, `session ${a.session_id} / now: ${a.current.verdict} (${a.current.source}, ${a.current.confirmation}) / expected_sequence ${a.expected_sequence}`, `task: ${a.prompt}`, `approved alternatives: ${JSON.stringify(a.accepted_answers)}`, `answer: ${JSON.stringify(a.answer)}`, ""])].join(String.fromCharCode(10)) };
   } else if (what === "vocabulary") out = exportVocabulary(db);
+  else if (what === "lesson-priorities") out = exportLessonPriorities(db, new Date().toISOString(), Number(opt("--lessons", "5")));
   else out = what === "batch" ? exportBatch(db, id) : what === "session" ? exportSession(db, id) : what === "exercise" ? exportExercise(db, id) : exportCoverage(db);
   mkdirSync(outDir, { recursive: true });
-  const base = path.join(outDir, id ? `${what}-${id}` : what === "findings" ? "findings" : what === "verdicts" ? "verdicts" : what === "vocabulary" ? "vocabulary" : "coverage");
+  const base = path.join(outDir, id ? `${what}-${id}` : ["findings", "verdicts", "vocabulary", "lesson-priorities"].includes(what) ? what : "coverage");
   writeFileSync(`${base}.json`, JSON.stringify(out.json, null, 2));
   writeFileSync(`${base}.md`, out.markdown);
   console.log(`exported ${what}${id ? ` ${id}` : ""}\n  ${base}.json\n  ${base}.md`);

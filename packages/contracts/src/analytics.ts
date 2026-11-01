@@ -1,12 +1,12 @@
 import { z } from "zod";
 
-export const CohortSchema = z.object({ criterionVersion: z.string().min(1).max(100), difficulty: z.enum(["A2", "B1", "B2", "C1"]) }).strict();
+export const CohortSchema = z.object({ criterionVersion: z.string().min(1).max(100), difficulty: z.enum(["A2", "B1", "B2", "C1", "C2"]) }).strict();
 
 /** GET /api/v1/analytics/skills query. `asOf` defaults to now (truncated to the UTC hour so identical requests reuse one run). */
 export const SkillAnalyticsQuerySchema = z
   .object({
     criterionVersion: z.string().min(1).max(100),
-    difficulty: z.enum(["A2", "B1", "B2", "C1"]),
+    difficulty: z.enum(["A2", "B1", "B2", "C1", "C2"]),
     asOf: z.string().datetime().optional(),
     watermark: z.coerce.number().int().min(0).optional(),
     /** D65: "1" = mastery-v2, which also counts AI-checked (never confirmed) verdicts at a lower weight; absent = mastery-v1 (confirmed only) */

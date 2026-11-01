@@ -149,7 +149,7 @@ describe("errors and shortage are explicit", () => {
         await post(`/api/v1/sessions/${sessionId}/reveal`, { slotId: s.slotId, tabId: "t" });
         await post(`/api/v1/sessions/${sessionId}/events`, { slotId: s.slotId, type: "skip", clientEventId: `skip-${seed}-${s.ordinal}` });
       }
-      expect((await post(`/api/v1/sessions/${sessionId}/finish`, { mode: "completed" })).statusCode).toBe(200);
+      expect((await post(`/api/v1/sessions/${sessionId}/finish`, { mode: "ended_early" })).statusCode).toBe(200);
     }
     const res = await post("/api/v1/sessions", { purpose: "practice", blueprintRevisionId: env.blueprintRevisionId, seed: "s3" });
     expect(res.statusCode).toBe(409);
@@ -160,6 +160,23 @@ describe("errors and shortage are explicit", () => {
     expect(d.deficits.length).toBeGreaterThan(0); // D68: skipped exercises are due repeats (capped at 30%), which still cannot fill 18 slots
     const dash = DashboardSchema.parse((await get("/api/v1/dashboard")).json());
     expect(dash.blueprints[0]).toMatchObject({ readySessions: 0, shortage: { requestedN: 18 } });
+  });
+
+  it("a lesson is played at most twice: the third start is refused with LESSON_DONE and the dashboard counts 2", async () => {
+    for (const seed of ["s1", "s2"]) {
+      const { sessionId, snapshot } = await start(seed);
+      await post(`/api/v1/sessions/${sessionId}/lease`, { tabId: "t" });
+      for (const s of snapshot.slots) {
+        await post(`/api/v1/sessions/${sessionId}/reveal`, { slotId: s.slotId, tabId: "t" });
+        await post(`/api/v1/sessions/${sessionId}/events`, { slotId: s.slotId, type: "skip", clientEventId: `skip-${seed}-${s.ordinal}` });
+      }
+      expect((await post(`/api/v1/sessions/${sessionId}/finish`, { mode: "completed" })).statusCode).toBe(200);
+    }
+    const res = await post("/api/v1/sessions", { purpose: "practice", blueprintRevisionId: env.blueprintRevisionId, seed: "s3" });
+    expect(res.statusCode).toBe(409);
+    expect(ErrorEnvelopeSchema.parse(res.json()).error).toMatchObject({ code: "LESSON_DONE", details: { completed: 2, max: 2 } });
+    const dash = DashboardSchema.parse((await get("/api/v1/dashboard")).json());
+    expect(dash.blueprints[0]).toMatchObject({ completed: 2 });
   });
 
   it("every session mutation is protected by cookie + CSRF + Origin and validated strictly", async () => {

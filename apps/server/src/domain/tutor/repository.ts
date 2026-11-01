@@ -73,6 +73,8 @@ export function askTutor(db: Db, deps: SessionDeps, raw: unknown): { threadId: s
   if (!rule) throw new ApiError(409, "TUTOR_NOT_AVAILABLE", "No explanation is available for this task.");
   // D64: "Why?" is the approved rule (instant); "Explain in Russian" is a longer step-by-step explanation written by the local AI
   const needsModel = b.kind === "more_examples" || b.kind === "question" || b.kind === "explain_ru";
+  // each button answers once per task: an existing reply of this kind is returned instead of asking the model again (for the model-bound kinds the approved rule shown with the first press is not that reply)
+  if (b.kind !== "question" && db.prepare("SELECT 1 FROM tutor_messages WHERE thread_id = ? AND role = 'assistant' AND kind = ? AND (kind = 'why' OR source <> 'approved_exercise') LIMIT 1").get(b.slotId, b.kind) !== undefined) return { threadId: b.slotId, jobId: null, messages: getThread(db, b.slotId).messages };
   // the same request is not queued twice: a second press while the first is waiting returns the thread as it is
   if (needsModel && b.kind !== "question") {
     const waiting = db.prepare("SELECT id FROM jobs WHERE kind = 'tutor' AND idempotency_key LIKE ? AND json_extract(payload_json, '$.kind') = ? AND state IN ('queued','waiting_for_gpu','running','paused') LIMIT 1").get(`tutor:${b.slotId}:%`, b.kind) as { id: string } | undefined;

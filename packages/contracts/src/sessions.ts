@@ -202,6 +202,9 @@ export const DeficitSchema = z.object({ kind: z.string(), format: z.string().opt
 export const ShortageDetailsSchema = z.object({ deficits: z.array(DeficitSchema), largestFeasibleN: z.number().int().nullable(), requestedN: z.number().int() });
 export type ShortageDetails = z.infer<typeof ShortageDetailsSchema>;
 
+/** A lesson is played at most this many times (completed sessions); the next lesson comes from the new statistics. */
+export const MAX_LESSON_PLAYS = 2;
+
 export const BlueprintListItemSchema = z
   .object({
     blueprintRevisionId: z.string(),
@@ -209,6 +212,8 @@ export const BlueprintListItemSchema = z
     title: z.string(),
     status: z.string(),
     readySessions: z.number().int(),
+    completed: z.number().int().nonnegative(),
+    unlocked: z.boolean(),
     shortage: ShortageDetailsSchema.nullable(),
   })
   .strict();

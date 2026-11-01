@@ -16,15 +16,18 @@ export const SELECTION_VERSION = "selection-v1";
  * `selection-v1` seed prefix, so a bank without repeats gives the same sessions); only the recorded algorithm id is new.
  */
 export const GRAMMAR_SELECTION_V2 = "grammar-selection-v2";
+export const GRAMMAR_SELECTION_V3 = "grammar-selection-v3";
 
-/** repeat limits of grammar-selection-v2 (stored in algorithm_versions) */
+/** repeat limits of grammar-selection-v3 (stored in algorithm_versions) */
 export const GRAMMAR_REPEAT_CONFIG = {
   /** missed / assisted / skipped exercises return from the next session on; they may take at most this share of the slots */
   soonShare: 0.3,
   /** all repeats together never take more than this share */
   totalShare: 0.6,
-  /** an exercise answered correctly (unaided) is due again only after this many days */
-  correctAfterDays: 14,
+  /** an exercise answered correctly (unaided) normally returns after this many days */
+  correctAfterDays: 3,
+  /** correct answers may return sooner only if the normal pool cannot fill a session */
+  shortageAfterDays: 1,
 } as const;
 
 export type Format = "choose_form" | "choose_missing_fragment" | "detect_error" | "guided_short_answer" | "russian_to_english_short" | "context_reading";

@@ -20,6 +20,8 @@ import { registerAnalyticsRoutes } from "./routes/analytics.js";
 import { registerReportRoutes } from "./routes/reports.js";
 import { registerBackupRoutes } from "./routes/backups.js";
 import { registerVocabularyRoutes } from "./routes/vocabulary.js";
+import { registerVocabularySpeechRoutes } from "./routes/vocabularySpeech.js";
+import { registerGroqStatusRoute } from "./routes/groqStatus.js";
 import { registerVocabularyImageRoutes } from "./routes/vocabularyImages.js";
 import { registerVocabularyPracticeRoutes } from "./routes/vocabularyPractice.js";
 import { registerUiRoutes } from "./routes/ui.js";
@@ -56,6 +58,9 @@ export interface AppDeps {
   /** residency of the one local model (D67); absent = no model endpoints (tests without a model server) */
   residency?: ModelResidency | null;
   /** live AI component status; absent = nothing wired (tests, TASK_003 behaviour) */
+  elevenLabsKey?: string;
+  elevenLabsVoiceId?: string;
+  groqKey?: string;
   aiStatus?: () => Capabilities["ai"] | Promise<Capabilities["ai"]>;
   /** HMAC key for the session cookie / CSRF token; random per start when omitted. */
   csrfSecret?: Buffer;
@@ -106,7 +111,9 @@ export async function buildApp(deps: AppDeps): Promise<FastifyInstance> {
   const base = { now: deps.attempts?.now ?? (() => new Date()), newId: deps.attempts?.newId ?? randomUUID };
   registerSessionRoutes(app, db, base, { ...(deps.sessions ?? {}), onLease: () => deps.scheduler?.kick(), onSessionEnd: (id) => void deps.stt?.stopForSession(id), onVoiceDone: async (id) => { deps.scheduler?.releaseVoiceHold(id); await deps.stt?.stopForSession(id); deps.scheduler?.kick(); } });
   registerVocabularyPracticeRoutes(app, db, base);
-  registerVocabularyImageRoutes(app, config.vocabularyImagesDir);
+  registerVocabularyImageRoutes(app, config.vocabularyImagesDir, db);
+  registerVocabularySpeechRoutes(app, db, base, { key: deps.elevenLabsKey, voiceId: deps.elevenLabsVoiceId, cacheDir: path.join(config.dataRoot, "vocabulary-speech") });
+  registerGroqStatusRoute(app, { key: deps.groqKey });
   registerUiRoutes(app);
   registerQueueRoutes(app, db, base, deps.scheduler ?? null);
   registerTutorRoutes(app, db, base, { onQueued: () => deps.scheduler?.kick() });

@@ -21,14 +21,14 @@ function WaveRow({ w, a }: { w: AiWave; a: Activity }) {
     <li className="ai-wave">
       <div className="ai-wave-head">
         <strong>{KIND_LABEL[w.kind] ?? w.kind}</strong>
-        <span className="ai-count">{finished} / {w.total}</span>
+        <span className="ai-count" title="One task may write several exercises at once">{finished} / {w.total} tasks</span>
       </div>
       <div className="ai-bar" role="progressbar" aria-valuemin={0} aria-valuemax={w.total} aria-valuenow={finished} aria-label={`${KIND_LABEL[w.kind] ?? w.kind}: ${finished} of ${w.total}`}>
         <span className={running ? "ai-bar-live" : ""} style={{ width: `${pct}%` }} />
       </div>
       <div className="ai-wave-meta small">
         <span className={running ? "ai-live" : "muted"}>{running && <i className="pi pi-spin pi-spinner" aria-hidden="true" />} {state}</span>
-        {w.msPerItem !== null && <span className="muted">~{minutes(w.msPerItem)} each · ≈ {minutes(w.msPerItem * w.open)} left</span>}
+        {w.msPerItem !== null && <span className="muted">~{minutes(w.msPerItem)} per task · ≈ {minutes(w.msPerItem * w.open)} left</span>}
         {w.failed > 0 && <span className="ai-failed">{w.failed} failed</span>}
       </div>
     </li>

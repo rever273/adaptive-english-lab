@@ -4,6 +4,7 @@ import { createBatch, getBatch } from "../../../apps/server/src/domain/content/b
 import { completeBatch, completionPlanTemplate, prepareCompletion } from "../../../apps/server/src/domain/content/batches/completion.js";
 import { vocabularyCoverage } from "../../../apps/server/src/domain/vocabulary/practice.js";
 import { loadCandidates } from "../../../apps/server/src/domain/sessions/bank.js";
+import { vocabularyReplenishment } from "../../../apps/server/src/domain/content/batches/vocabularyPlan.js";
 import { replenishmentStock } from "../../../apps/server/src/domain/content/batches/stock.js";
 import { batchJobsSettled, checklistAllTrue, closeRigs, drive, makeRig } from "./fixtures.js";
 import { applyAction, enqueue, getJob } from "../../../apps/server/src/queue/jobs.js";
@@ -24,7 +25,9 @@ describe("vocabulary replenishment through the shared queue", () => {
     const r=await makeRig();
     expect(()=>createBatch(r.env.db,r.deps,{count:5,mode:"adaptive",category:"vocabulary"})).toThrow("dictionary");
     r.env.db.prepare("INSERT INTO vocabulary_entries(id,lemma,pos,language,surface_forms_json,learned,created_at) VALUES (?,?,?,?,?,?,?)").run(randomUUID(),"endeavour","noun","en",'["endeavour"]',0,r.deps.now().toISOString());
+    expect(vocabularyReplenishment(r.env.db)).toMatchObject({deficit:5,recommended:6,targetPerWord:5});
     const {batchId}=createBatch(r.env.db,r.deps,{count:5,mode:"adaptive",category:"vocabulary"});
+    expect(vocabularyReplenishment(r.env.db).deficit).toBe(5); // queued drafts are not approved stock
     r.model.behave=(_n,u)=>JSON.stringify({drafts:u.items.map(i=>({sentence:`Despite the difficult conditions, the field team's scientific ___ continued at site ${i.ordinal} throughout the winter.`,hint_ru:"Подумайте о значении серьёзного начинания.",explanation_ru:"Endeavour здесь означает серьёзное научное начинание, требующее усилий.",part_of_speech:"noun",sense_id:"endeavour.noun.effort",surface_form:"endeavour",sentence_ru:"Несмотря на сложные условия, научная работа продолжалась всю зиму.",word_ru:"начинание",options:[{text:"endeavour",rationale_ru:"Научное начинание."},{text:"receipt",rationale_ru:"Квитанция не подходит к этому контексту."},{text:"suitcase",rationale_ru:"Чемодан не может продолжаться."}],correct_index:0,pattern:"scientific endeavour",cue_ru:"Одно слово на e: серьёзное научное начинание.",accepted_answers:["endeavour","endeavor"]}))});
     await drive(r,()=>batchJobsSettled(r,batchId));
     expect(getBatch(r.env.db,batchId)).toMatchObject({category:"vocabulary",generationDone:true,counts:{ready_for_review:5}});
@@ -36,7 +39,12 @@ describe("vocabulary replenishment through the shared queue", () => {
     expect(completeBatch(r.env.db,r.deps,{plan,review})).toMatchObject({accepted:5});
     expect(vocabularyCoverage(r.env.db).available).toBe(5);
     expect(loadCandidates(r.env.db,"practice")).toHaveLength(0);
-    expect(replenishmentStock(r.env.db).vocabulary).toMatchObject({available:5,low:true});
+    expect(replenishmentStock(r.env.db).vocabulary).toMatchObject({available:5,low:true,plan:{words:1,deficit:0,recommended:0}});
+    r.env.db.prepare("INSERT INTO vocabulary_entries(id,lemma,pos,language,surface_forms_json,learned,created_at) VALUES (?,?,?,?,?,?,?)").run(randomUUID(),"resolve","verb","en",'["resolve"]',0,r.deps.now().toISOString());
+    expect(vocabularyReplenishment(r.env.db)).toMatchObject({deficit:5,recommended:6});
+    const next = createBatch(r.env.db,r.deps,{count:6,mode:"adaptive",category:"vocabulary"});
+    expect(getBatch(r.env.db,next.batchId).items!.every(i => i.plan.vocabulary?.lemma === "resolve")).toBe(true); // the extra starts with the word that lacks stock
+    expect(getBatch(r.env.db,next.batchId).items!.slice(0,5).every(i => i.plan.vocabulary?.lemma === "resolve")).toBe(true);
   });
   it("settles cancelled generation as reviewable failure and a retry after completion cannot generate new content", async () => {
     const r=await makeRig();

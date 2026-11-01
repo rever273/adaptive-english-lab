@@ -24,28 +24,32 @@ export function computeReadiness(db: Db, deps: SessionDeps, blueprintRevisionId:
   const settings = loadSettings(db);
   const plan = loadPlan(db, deps);
   // D68: fresh exercises plus the repeats that are due now (the same set createPracticeSession would use)
-  let candidates = withRepeats(db, loadCandidates(db, "practice", blueprint.policy.skillPool, difficultyLevels(settings.values)), deps.now()).candidates;
+  const bank = loadCandidates(db, "practice", blueprint.policy.skillPool, difficultyLevels(settings.values));
+  let candidates = withRepeats(db, bank, deps.now()).candidates;
+  let shortageCandidates = withRepeats(db, bank, deps.now(), "shortage").candidates;
   const blocked = loadBlockedFingerprints(db);
   const n = settings.values.taskCount;
   const quotas = scaleQuotas(blueprint.policy.quotas, n);
-  const byId = new Map<string, Candidate>(candidates.map((c) => [c.revisionId, c]));
+  const byId = new Map<string, Candidate>(shortageCandidates.map((c) => [c.revisionId, c]));
   const exploreSlots = n - Math.round(n * settings.values.weakRatio);
   let ready = 0;
   for (; ready < SIMULATION_CAP; ready++) {
-    const r = selectSession({
+    const solve = (pool: Candidate[]) => selectSession({
       n,
       weakRatio: settings.values.weakRatio,
       voiceTarget: voiceTaskCount(settings.values),
       seed: `readiness-${ready}`,
       quotas,
       readingBlocks: blueprint.policy.readingBlocks,
-      candidates,
+      candidates: pool,
       blocked,
       priority: () => 0.5,
       planMultiplier: (s) => clampMultiplier(plan.multipliers[s]),
       discovery: { bonusBySkill: {}, limit: discoveryProbeLimit(n, exploreSlots) },
       maxNodes: 5000,
     });
+    let r = solve(candidates);
+    if (!r.feasible) r = solve(shortageCandidates);
     if (!r.feasible) {
       return { readySessions: ready, shortage: { deficits: r.deficits, largestFeasibleN: r.largestFeasibleN, requestedN: n } };
     }
@@ -53,6 +57,7 @@ export function computeReadiness(db: Db, deps: SessionDeps, blueprintRevisionId:
     // a repeat keeps no fingerprint to block (its units are already shown), so a simulated exercise is consumed explicitly
     const taken = new Set(r.slots.map((s) => s.revisionId));
     candidates = candidates.filter((c) => !taken.has(c.revisionId));
+    shortageCandidates = shortageCandidates.filter((c) => !taken.has(c.revisionId));
   }
   return { readySessions: ready, shortage: null };
 }

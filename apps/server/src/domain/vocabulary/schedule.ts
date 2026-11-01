@@ -6,6 +6,8 @@ import { createHash } from "node:crypto";
  * Hints and shown answers are never success; a miss makes the word due at once; a shown sentence may come back as a labelled repeat.
  */
 export const VOCABULARY_SELECTION_V2 = "vocabulary-selection-v2";
+export const VOCABULARY_SELECTION_V3 = "vocabulary-selection-v3";
+export const VOCABULARY_SELECTION_V4 = "vocabulary-selection-v4";
 const DAY_MS = 86_400_000;
 
 export type Family = "recognition" | "guided_recall" | "collocation";
@@ -14,10 +16,15 @@ export const FAMILY_WEIGHT: Record<Family, number> = { recognition: 0.5, guided_
 
 /** the algorithm config stored in algorithm_versions (id `vocabulary-selection-v2`) */
 export const SELECTION_CONFIG = {
-  version: VOCABULARY_SELECTION_V2,
+  version: VOCABULARY_SELECTION_V4,
+  correctRepeatDays: 3,
+  shortageRepeatDays: 1,
   familyWeights: FAMILY_WEIGHT,
   /** days until a word is due again, by success streak (1, 2, 3, 4, 5, 6 and more) */
-  intervalDays: { 1: 1, 2: 2, 3: 4, 4: 7, 5: 14, 6: 30 },
+  intervalDays: { 1: 1, 2: 2, 3: 4, 4: 7, 5: 14, 6: 21 },
+  maxIntervalDays: 21,
+  maxLearnedIntervalDays: 30,
+  minSuccessSpacingHours: 24,
   learnedIntervalFactor: 2,
   assistedDueDays: 1,
   learnedWithoutHistoryStreak: 3,
@@ -35,6 +42,8 @@ export interface WordEvent {
   outcome: Outcome;
   revisionId: string;
   slotId: string;
+  /** Labelled repeats are practice, not independent evidence for interval growth. */
+  independent?: boolean;
 }
 
 export interface WordState {
@@ -58,7 +67,7 @@ export interface WordState {
 export function intervalFor(streak: number, learned: boolean): number {
   const t = SELECTION_CONFIG.intervalDays;
   const base = streak <= 0 ? 1 : streak >= 6 ? t[6] : t[streak as 1 | 2 | 3 | 4 | 5];
-  return learned ? base * SELECTION_CONFIG.learnedIntervalFactor : base;
+  return Math.min(learned ? SELECTION_CONFIG.maxLearnedIntervalDays : SELECTION_CONFIG.maxIntervalDays, learned ? base * SELECTION_CONFIG.learnedIntervalFactor : base);
 }
 
 /** The state of one word from its independent first-attempt events in time order (pending answers are not events). */
@@ -69,21 +78,28 @@ export function wordState(lemma: string, events: readonly WordEvent[], learned: 
     return { ...base, state: "review", streak: SELECTION_CONFIG.learnedWithoutHistoryStreak, lastOutcome: null, lastAt: null, dueAt: null, due: false, intervalDays: intervalFor(SELECTION_CONFIG.learnedWithoutHistoryStreak, true), ratio: 0 };
   }
   let streak = 0;
+  let lastAdvance = Number.NEGATIVE_INFINITY;
+  let anchor = events[0]!.at;
   for (const e of events) {
-    if (e.outcome === "success") streak++;
-    else if (e.outcome === "miss") streak = 0;
+    const at = Date.parse(e.at);
+    if (e.outcome === "success" && e.independent !== false && at - lastAdvance >= SELECTION_CONFIG.minSuccessSpacingHours * 3_600_000) {
+      streak++;
+      lastAdvance = at;
+      anchor = e.at;
+    } else if (e.outcome === "miss") { streak = 0; anchor = e.at; }
+    else if (e.outcome === "assisted") anchor = e.at;
   }
   const last = events[events.length - 1]!;
   const recentMisses = events.slice(-SELECTION_CONFIG.recentMissWindow).filter((e) => e.outcome === "miss").length;
   const missed = [...events].reverse().find((e) => e.outcome !== "success") ?? null;
-  const lastMs = Date.parse(last.at);
+  const lastMs = Date.parse(anchor);
   const elapsedDays = Math.max(0, (now.getTime() - lastMs) / DAY_MS);
   let intervalDays: number;
   let dueAt: string;
   let ratio: number;
   if (last.outcome === "miss") {
     intervalDays = 1; // a miss is due for the next session; the ratio only orders words
-    dueAt = last.at;
+    dueAt = anchor;
     ratio = Math.max(1, elapsedDays / intervalDays);
   } else {
     intervalDays = last.outcome === "assisted" ? SELECTION_CONFIG.assistedDueDays * (learned ? SELECTION_CONFIG.learnedIntervalFactor : 1) : intervalFor(streak, learned);
@@ -168,6 +184,11 @@ export interface PickInput {
  * session could not otherwise be filled.
  */
 export function pickVocabulary(input: PickInput): VocabularyPick[] {
+  const normal = pickVocabularyPass(input, false);
+  return normal.length < input.n ? pickVocabularyPass(input, true) : normal;
+}
+
+function pickVocabularyPass(input: PickInput, shortage: boolean): VocabularyPick[] {
   const { n, now } = input;
   const rand = rng(input.seed);
   const byRev = (a: VocabularyCandidate, b: VocabularyCandidate) => (a.revisionId < b.revisionId ? -1 : a.revisionId > b.revisionId ? 1 : 0);
@@ -187,8 +208,9 @@ export function pickVocabulary(input: PickInput): VocabularyPick[] {
   const tie = (a: string, b: string) => jitter.get(a)! - jitter.get(b)!;
   const dueWords = lemmas.filter((l) => states.get(l)!.state !== "new" && states.get(l)!.due).sort((a, b) => states.get(b)!.priority - states.get(a)!.priority || tie(a, b));
   const fillWords = lemmas.filter((l) => states.get(l)!.state !== "new" && !states.get(l)!.due).sort((a, b) => states.get(b)!.ratio - states.get(a)!.ratio || tie(a, b));
-  const newWords = lemmas.filter((l) => states.get(l)!.state === "new" && (fresh.get(l)?.length ?? 0) > 0).sort(tie);
-  const cap = Math.max(0, Math.floor(input.newWordsPerSession));
+  const newWords = lemmas.filter((l) => states.get(l)!.state === "new" && ((fresh.get(l)?.length ?? 0) > 0 || (shown.get(l)?.length ?? 0) > 0)).sort((a, b) => Number((fresh.get(b)?.length ?? 0) > 0) - Number((fresh.get(a)?.length ?? 0) > 0) || tie(a, b));
+  // Leave room for reviews as backlog grows; reserve at least one new word if available.
+  const cap = newWords.length === 0 ? 0 : Math.min(Math.max(1, Math.floor(input.newWordsPerSession)), Math.max(1, n - dueWords.length));
   const newCapped = newWords.slice(0, cap);
   const newExtra = newWords.slice(cap);
 
@@ -211,7 +233,7 @@ export function pickVocabulary(input: PickInput): VocabularyPick[] {
   // repeat pool of a word = ANY of its shown sentences: missed, then helped, then skipped/only shown, then answered correctly; oldest shown first
   const klass = (c: ShownCandidate) => (c.lastOutcome === "miss" ? 0 : c.lastOutcome === "assisted" ? 1 : c.lastOutcome === "success" ? 3 : 2);
   const byPool = (a: ShownCandidate, b: ShownCandidate) => klass(a) - klass(b) || (a.lastShownAt < b.lastShownAt ? -1 : a.lastShownAt > b.lastShownAt ? 1 : byRev(a, b));
-  const reasonOf = (c: ShownCandidate): RepeatReason => (klass(c) === 0 ? "missed" : c.lastOutcome === "assisted" ? "assisted" : "review");
+  const reasonOf = (c: ShownCandidate): RepeatReason => (klass(c) === 0 ? "missed" : c.lastOutcome === "assisted" ? "assisted" : c.lastOutcome === null ? "missed" : "review");
   const takeRepeat = (c: ShownCandidate, st: WordState) => take(c, st, { reason: reasonOf(c), ofSlotId: c.lastSlotId });
 
   const tryWord = (lemma: string): boolean => {
@@ -222,7 +244,7 @@ export function pickVocabulary(input: PickInput): VocabularyPick[] {
     const unresolved = pool.filter((c) => klass(c) < 3); // missed, helped or skipped sentences not yet answered correctly without help
     const lastBad = st.lastOutcome === "miss" || st.lastOutcome === "assisted";
     // after a miss or help, or when a word is due while a missed sentence is still open: that sentence comes back before a fresh one
-    if (canRepeat && st.state !== "new" && unresolved.length > 0 && (lastBad || (st.due && klass(unresolved[0]!) <= 1))) {
+    if (canRepeat && freshList.length === 0 && unresolved.length > 0 && (st.state === "new" || lastBad || (st.due && klass(unresolved[0]!) <= 1))) {
       takeRepeat(unresolved[0]!, st);
       return true;
     }
@@ -232,8 +254,9 @@ export function pickVocabulary(input: PickInput): VocabularyPick[] {
       return true;
     }
     // no fresh sentence left: open sentences first, correctly answered ones only when the word is due
-    if (canRepeat && st.state !== "new") {
-      const r = pool.find((c) => klass(c) < 3 || st.due);
+    if (canRepeat) {
+      const days = shortage ? SELECTION_CONFIG.shortageRepeatDays : SELECTION_CONFIG.correctRepeatDays;
+      const r = pool.find((c) => klass(c) < 3 || (now.getTime() - Date.parse(c.lastShownAt) >= days * DAY_MS && !input.fresh.some(usable)));
       if (r) {
         takeRepeat(r, st);
         return true;
@@ -259,6 +282,11 @@ export function pickVocabulary(input: PickInput): VocabularyPick[] {
       if (!a && !b) break;
     }
   };
+  // One new word remains possible even with a large due backlog; extra new words fill only shortages.
+  if (newCapped.length > 0 && dueWords.length >= n) {
+    round(dueWords.slice(0, Math.max(0, n - 1)));
+    round(newCapped.slice(0, 1));
+  }
   fill([...dueWords, ...newCapped], fillWords);
   if (picked.length < n && newExtra.length > 0) fill([...dueWords, ...newCapped, ...newExtra], fillWords);
   // the 60% repeat share is SOFT: it only prefers fresh sentences for the places beyond it; when no fresh sentence is left,

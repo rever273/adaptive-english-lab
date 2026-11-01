@@ -51,7 +51,7 @@ function schemaValidator(): ValidateFunction {
 }
 
 /** The JSON Schema variant of one output kind, as it is given to the model (`format`) and hashed into prompt_versions. */
-export function schemaVariant(kind: "analysis-v1" | "analysis-v2" | "triage-v1" | "vocabulary-v1" | "vocabulary-v2" | "tutor-v1"): object {
+export function schemaVariant(kind: "analysis-v1" | "analysis-v2" | "triage-v1" | "vocabulary-v1" | "vocabulary-v2" | "vocabulary-v3" | "tutor-v1"): object {
   const all = JSON.parse(readFileSync(path.join(detectProjectRoot(), "content", "schemas", "ai-output.schema.json"), "utf8")) as { oneOf: Array<{ properties: { schema_version: { const: string } } }> };
   const v = all.oneOf.find((o) => o.properties.schema_version.const === kind);
   if (!v) throw new Error(`no schema variant ${kind}`);

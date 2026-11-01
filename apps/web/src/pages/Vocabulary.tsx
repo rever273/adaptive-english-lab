@@ -1,5 +1,6 @@
-import { useCallback, useEffect, useRef, useState } from "react";
-import { ApiRequestError, addVocabulary, createVocabSession, fetchVocabPractice, fetchVocabulary, patchVocabulary, removeVocabulary, type VocabEntry, type VocabPracticeStatus } from "../api";
+import { useCallback, useEffect, useRef, useState, type ReactNode } from "react";
+import { createPortal } from "react-dom";
+import { ApiRequestError, addVocabulary, createVocabSession, fetchVocabPractice, fetchVocabulary, patchVocabulary, removeVocabulary, vocabularyWordSpeech, type VocabEntry, type VocabPracticeStatus } from "../api";
 import { WordImage } from "../components/WordImage";
 import { Practice } from "./Practice";
 import { Kbd, isTextField, useKeys } from "../components/hotkeys";
@@ -14,6 +15,38 @@ const AI_TIP = "Written by the local AI. Edit it to make it yours.";
 function Txt({ text, source, empty }: { text: string; source: "user" | "ai_draft" | null; empty: string }) {
   if (!text) return <span className="muted">{empty}</span>;
   return source === "ai_draft" ? <span className="ai-text" title={AI_TIP}>{text}</span> : <>{text}</>;
+}
+
+/**
+ * The word with a small card that opens on hover or keyboard focus: the actions (edit, remove) and the facts that do not fit in the table.
+ * The card is fixed to the screen, so the table's own scrolling never clips it, and stays open while the pointer is on it.
+ */
+function WordMenu({ trigger, footer, children }: { trigger: ReactNode; footer: ReactNode; children: ReactNode }) {
+  const [at, setAt] = useState<{ top: number; left: number } | null>(null);
+  const timer = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const keep = () => { if (timer.current) clearTimeout(timer.current); };
+  const show = (el: HTMLElement) => {
+    keep();
+    const r = el.getBoundingClientRect();
+    setAt({ top: Math.min(r.bottom - 2, window.innerHeight - 260), left: Math.max(8, Math.min(r.left + r.width / 2 - 140, window.innerWidth - 296)) });
+  };
+  const hide = () => {
+    keep();
+    timer.current = setTimeout(() => setAt(null), 160);
+  };
+  useEffect(() => keep, []);
+  return (
+    <span className="word-menu" tabIndex={0} onMouseEnter={(e) => show(e.currentTarget)} onMouseLeave={hide} onFocus={(e) => show(e.currentTarget)} onBlur={hide}>
+      {trigger}
+      {at && createPortal(
+        <div className="word-card" style={{ top: at.top, left: at.left }} onMouseEnter={keep} onMouseLeave={hide} onFocus={keep} onBlur={hide}>
+          {children}
+          <div className="word-card-actions">{footer}</div>
+        </div>,
+        document.body,
+      )}
+    </span>
+  );
 }
 
 /** the word with six small blocks under it, filled up to its level (A1 = one, C2 = six); hovering shows the level */
@@ -42,6 +75,21 @@ function Row({ w, onChanged }: { w: VocabEntry; onChanged: () => void }) {
   const [pos, setPos] = useState(w.pos === "unknown" ? "" : w.pos);
   const [msg, setMsg] = useState<string | null>(null);
   const [rev, setRev] = useState(w.userRevision);
+  const [speaking, setSpeaking] = useState(false);
+  const [speechError, setSpeechError] = useState<string | null>(null);
+  const play = async () => {
+    setSpeaking(true); setSpeechError(null);
+    try {
+      const blob = await vocabularyWordSpeech(w.id);
+      if (!blob) throw new Error("Pronunciation unavailable.");
+      const url = URL.createObjectURL(blob);
+      const audio = new Audio(url);
+      audio.addEventListener("ended", () => URL.revokeObjectURL(url), { once: true });
+      audio.addEventListener("error", () => URL.revokeObjectURL(url), { once: true });
+      try { await audio.play(); } catch (e) { URL.revokeObjectURL(url); throw e; }
+    } catch (e) { setSpeechError(e instanceof Error ? e.message : "Could not play pronunciation."); }
+    finally { setSpeaking(false); }
+  };
   useEffect(() => setRev(w.userRevision), [w.userRevision]);
 
   const save = async () => {
@@ -81,50 +129,63 @@ function Row({ w, onChanged }: { w: VocabEntry; onChanged: () => void }) {
   return (
     <>
       <tr data-testid="vocab-row" className={w.learned ? "row-learned" : undefined}>
-        <td className="c"><input type="checkbox" checked={w.learned} onChange={(e) => void toggle(e.target.checked)} aria-label={`${w.lemma} learned`} /></td>
+        <td className="c narrow"><input type="checkbox" checked={w.learned} onChange={(e) => void toggle(e.target.checked)} aria-label={`${w.lemma} learned`} /></td>
         <td className="c"><WordImage word={w.lemma} /></td>
         <td className="c">
-          <Word w={w} />
-          {w.surfaceForms.length > 0 && <div className="muted small">{w.surfaceForms.join(", ")}</div>}
-        </td>
-        <td className="c">
-          <Txt text={w.translation.text} source={w.translation.source} empty={w.aiPending ? "waiting for the AI…" : w.aiError ? "AI translation failed — see AI Tasks" : "—"} />
-          {w.draftPredatesEdit && <div className="muted small">The AI draft was written before your last edit.</div>}
-        </td>
-        <td className="c small">{w.pos === "unknown" ? <span className="muted">—</span> : w.posSource === "ai_draft" ? <span className="ai-text" title={AI_TIP}>{w.pos}</span> : w.pos}</td>
-        <td className="small example"><Txt text={w.example.text} source={w.example.source} empty={w.aiExampleOmitted ? "AI example unavailable" : "—"} /></td>
-        <td className="c num" title="How many vocabulary-practice tasks on this word you have answered (first tries)">{w.practised}</td>
-        <td className="c num" title="How many times the word appears in approved exercises">{w.bank.occurrences}</td>
-        <td className="c num" title="How many times you were actually shown it">{w.displayed.occurrences}</td>
-        <td className="c small nowrap">{w.lastSeen ? new Date(w.lastSeen).toLocaleDateString("en-AU") : "—"}</td>
-        <td className="c">
-          <div className="icon-actions">
-            {confirmRemove ? (
-              <>
-                <button className="icon-btn icon-btn-danger" onClick={() => void remove()} title={`Remove “${w.lemma}”`} aria-label={`Remove ${w.lemma}`} data-testid="remove-confirm">
-                  <i className="pi pi-check" aria-hidden="true" />
-                </button>
-                <button className="icon-btn" onClick={() => setConfirmRemove(false)} title="Keep the word" aria-label="Keep the word">
-                  <i className="pi pi-times" aria-hidden="true" />
-                </button>
-              </>
-            ) : (
-              <>
+          <WordMenu
+            trigger={<Word w={w} />}
+            footer={
+              <div className="icon-actions">
                 <button className={`icon-btn${open ? " icon-btn-on" : ""}`} onClick={() => setOpen(!open)} aria-expanded={open} title={open ? "Close" : "Edit"} aria-label={open ? "Close" : `Edit ${w.lemma}`}>
                   <i className={`pi ${open ? "pi-times" : "pi-pencil"}`} aria-hidden="true" />
                 </button>
-                <button className="icon-btn icon-btn-danger" onClick={() => setConfirmRemove(true)} title="Remove" aria-label={`Remove ${w.lemma}`} data-testid="remove-word">
-                  <i className="pi pi-trash" aria-hidden="true" />
-                </button>
-              </>
-            )}
-          </div>
-          {confirmRemove && <div className="small muted">Remove?</div>}
+                {confirmRemove ? (
+                  <>
+                    <span className="small muted">Remove “{w.lemma}”?</span>
+                    <button className="icon-btn icon-btn-danger" onClick={() => void remove()} title={`Remove “${w.lemma}”`} aria-label={`Remove ${w.lemma}`} data-testid="remove-confirm">
+                      <i className="pi pi-check" aria-hidden="true" />
+                    </button>
+                    <button className="icon-btn" onClick={() => setConfirmRemove(false)} title="Keep the word" aria-label="Keep the word">
+                      <i className="pi pi-times" aria-hidden="true" />
+                    </button>
+                  </>
+                ) : (
+                  <button className="icon-btn icon-btn-danger" onClick={() => setConfirmRemove(true)} title="Remove" aria-label={`Remove ${w.lemma}`} data-testid="remove-word">
+                    <i className="pi pi-trash" aria-hidden="true" />
+                  </button>
+                )}
+              </div>
+            }
+          >
+            <dl className="word-facts">
+              {w.surfaceForms.length > 0 && (<><dt>Forms you met</dt><dd>{w.surfaceForms.join(", ")}</dd></>)}
+              {w.lexicon && w.lexicon.irregularForms.length > 0 && (<><dt>Irregular forms</dt><dd>{w.lexicon.irregularForms.join(" · ")}</dd></>)}
+              {w.level && (<><dt>Level</dt><dd>{w.level} · {LEVEL_NAME[w.level] ?? ""} <span className="muted">(AI estimate)</span></dd></>)}
+              {w.lexicon?.frequency != null && (<><dt>Frequency</dt><dd title="Figure from your old word list: higher means more common">{w.lexicon.frequency}</dd></>)}
+              <dt>Last shown</dt><dd>{w.lastSeen ? new Date(w.lastSeen).toLocaleDateString("en-AU") : "never"}</dd>
+              <dt>Saved</dt><dd>{new Date(w.createdAt).toLocaleDateString("en-AU")}</dd>
+            </dl>
+            {w.draftPredatesEdit && <div className="muted small">The AI draft was written before your last edit.</div>}
+          </WordMenu>
+          {w.lexicon?.transcription && <div className="muted small" data-testid="vocab-transcription">{w.lexicon.transcription}</div>}
+          <button type="button" className="icon-btn" onClick={() => void play()} disabled={speaking} title="Play pronunciation" aria-label={`Play pronunciation of ${w.lemma}`}><i className="pi pi-volume-up" aria-hidden="true" /></button>
+          {speechError && <div className="small notice notice-warn" role="alert">{speechError}</div>}
         </td>
+        <td className="c">
+          <Txt text={w.translation.text} source={w.translation.source} empty={w.aiPending ? "waiting for the AI…" : w.aiError ? "AI translation failed — see AI Tasks" : "—"} />
+        </td>
+        <td className="small description" data-testid="vocab-definition">{w.lexicon?.definitionRu ? w.lexicon.definitionRu : <span className="muted">{w.aiPending || !w.lexicon ? "…" : "—"}</span>}</td>
+        <td className="small synonyms">{w.lexicon && w.lexicon.synonyms.length > 0 ? w.lexicon.synonyms.join(", ") : <span className="muted">{w.aiPending || !w.lexicon ? "…" : "—"}</span>}</td>
+        <td className="c small">{w.pos === "unknown" ? <span className="muted">—</span> : w.posSource === "ai_draft" ? <span className="ai-text" title={AI_TIP}>{w.pos}</span> : w.pos}</td>
+        <td className="small collocations"><Txt text={w.collocations.items.join(", ")} source={w.collocations.source} empty="—" /></td>
+        <td className="small example"><Txt text={w.example.text} source={w.example.source} empty={w.aiExampleOmitted ? "AI example unavailable" : "—"} /></td>
+        <td className="c num narrow" title="How many vocabulary-practice tasks on this word you have answered (first tries)">{w.practised}</td>
+        <td className="c num narrow" title="How many times the word appears in approved exercises">{w.bank.occurrences}</td>
+        <td className="c num narrow" title="How many times you were actually shown it">{w.displayed.occurrences}</td>
       </tr>
       {open && (
         <tr className="edit-row">
-          <td colSpan={11}>
+          <td colSpan={12}>
             {msg && <p className="notice notice-warn small" role="alert">{msg}</p>}
             <div className="form-grid">
               <label>Translation (Russian)<input value={tr} onChange={(e) => setTr(e.target.value)} /></label>
@@ -175,6 +236,7 @@ function PracticeBlock({ status, onStart, onStudio, error }: { status: VocabPrac
         <span role="listitem"><strong>{status.learned}</strong> marked learned</span>
         {status.draftsNotReleased > 0 && <span role="listitem" title="Exercises that are not approved and released are never offered"><strong>{status.draftsNotReleased}</strong> not released</span>}
       </div>
+      {status.wordQueue && <p className="small muted" data-testid="vocab-word-queue">Words with eligible contexts: {status.wordQueue.due} due for review ? {status.wordQueue.newWords} new ? {status.wordQueue.recent} not yet due. These are priorities, not a fixed next-session list.</p>}
       {short && (
         <p className="notice notice-warn small" data-testid="vocab-shortage">
           <i className="pi pi-info-circle" aria-hidden="true" /> {short.message}{" "}
@@ -315,17 +377,18 @@ export function Vocabulary({ onNavigate }: { onNavigate?: (page: "vocabulary" | 
           <table className="data-table" data-testid="vocab-table">
             <thead>
               <tr>
-                <th title="Learned"><i className="pi pi-check-square" aria-hidden="true" /><span className="visually-hidden">Learned</span></th>
+                <th className="narrow" title="Learned"><i className="pi pi-check-square" aria-hidden="true" /><span className="visually-hidden">Learned</span></th>
                 <th>Image</th>
-                <th>Word</th>
+                <th title="Hover a word to edit or remove it and to see more about it">Word</th>
                 <th>Translation</th>
+                <th title="Short Russian explanation of the meaning (written by the local AI)">Description</th>
+                <th title="Written by the local AI">Synonyms</th>
                 <th>Part of speech</th>
+                <th>Collocations</th>
                 <th>Example</th>
-                <th title="Vocabulary-practice tasks on this word that you have answered">Practised</th>
-                <th title="Occurrences in approved exercises">In exercises</th>
-                <th title="Times you were actually shown the word">Shown to you</th>
-                <th>Last shown</th>
-                <th><span className="visually-hidden">Actions</span></th>
+                <th className="narrow" title="Vocabulary-practice tasks on this word that you have answered">Tried</th>
+                <th className="narrow" title="Occurrences in approved exercises">In bank</th>
+                <th className="narrow" title="Times you were actually shown the word">Seen</th>
               </tr>
             </thead>
             <tbody>{shown.map((w) => <Row key={`${w.id}:${w.userRevision}:${w.translation.text}`} w={w} onChanged={() => void load()} />)}</tbody>

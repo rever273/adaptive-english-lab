@@ -83,14 +83,17 @@ describe("T5 diagnostic card", () => {
 });
 
 describe("T4 difficulty range", () => {
-  it("unset or the whole range means no restriction", () => {
-    expect(difficultyLevels({})).toBeNull();
-    expect(difficultyLevels({ difficultyMin: "A2", difficultyMax: "C1" })).toBeNull();
+  it("preserves historical A2-C1 and treats the full A2-C2 range as unrestricted", () => {
+    expect(difficultyLevels({})).toEqual(["A2", "B1", "B2", "C1"]);
+    expect(difficultyLevels({ difficultyMin: "A2", difficultyMax: "C1" })).toEqual(["A2", "B1", "B2", "C1"]);
+    expect(difficultyLevels({ difficultyMin: "A2", difficultyMax: "C2" })).toBeNull();
+    expect(difficultyLevels({ difficultyMin: "B1", difficultyMax: "C1" })).toEqual(["B1", "B2", "C1"]);
   });
   it("returns the levels inside the range", () => {
     expect(difficultyLevels({ difficultyMin: "B2", difficultyMax: "C1" })).toEqual(["B2", "C1"]);
     expect(difficultyLevels({ difficultyMin: "B2" })).toEqual(["B2", "C1"]);
     expect(difficultyLevels({ difficultyMax: "B1" })).toEqual(["A2", "B1"]);
     expect(difficultyLevels({ difficultyMin: "C1", difficultyMax: "B1" })).toEqual(["B1", "B2", "C1"]);
+    expect(difficultyLevels({ difficultyMin: "C2", difficultyMax: "C2" })).toEqual(["C2"]);
   });
 });

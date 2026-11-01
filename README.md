@@ -40,7 +40,7 @@ Legend: **Working** = implemented and covered by automated tests · **Partial** 
 | Exercise formats and grading | Working | Six formats validated against a schema; closed answers and approved short-answer variants are graded by code. Other written answers stay "pending" — never marked wrong by code. |
 | Adaptive sessions with no-repeat | Working | Sessions (18 exercises by default) are assembled from the approved bank; a sentence is never shown again as a new exercise. |
 | Practice interface | Working | All formats, "I don't know", skip, hint, show answer, optional retry, Russian explanations, session summary, lesson choice. |
-| Settings | Working | Exercises per session (5–30), weak-skill share, voice tasks per session. Each change is a new revision; past sessions are unaffected. |
+| Settings | Working | Exercises per session (5–30), weak-skill share, voice tasks and sentence difficulty (A2–C2; default B1–C1). Each change is a new revision; past sessions are unaffected. |
 | First ten lessons | Working | 306 exercises: 10 lessons (three with reading passages), a diagnostic and held-out checks. Written by one AI model and reviewed item by item by another. Loaded with `npm run first10:seed`. |
 | Diagnostics and delayed checks | Working | Optional three-block starting diagnostic without hints; skills you miss there get more room in the lessons. Held-out checks on new sentences at least 7 days after practice. |
 | Speech-to-text | Working | Local `faster-whisper` or optional Groq transcription; the app keeps audio in memory and the transcript is editable before submission. Tested with synthetic speech only. |
@@ -120,7 +120,7 @@ Your data lives in `var/` inside the project (git-ignored). To keep the database
 The Practice page has a **Work with your coding agent** card with two buttons. Each copies a complete task for an agent such as Claude Code in VS Code:
 
 - **Review my results** — the agent reads your recent sessions with read-only exports, checks that every exercise and every grade was right, fixes wrong exercises as new revisions and reports your weak and recurring skills.
-- **Create new lessons** — the agent writes a content pack in `content/packs/<name>/` aimed at your weak skills, checks it with `npm run pack -- check <name>`, has a different model review every item, and publishes only the approved ones with `npm run pack -- publish <name> --review <file>`.
+- **Create new lessons** — the agent uses a computed skill-priority report to prepare lesson structures without writing exercises. Change the number at the end of the copied task if needed. The agent validates and publishes the structures; Content Studio separately supplies individually reviewed exercises. A lesson can appear on the path before enough exercises are available to start it.
 
 For routine replenishment, open **Content Studio**, choose **Grammar exercises** or **Vocabulary exercises**, and press **Start batch** (50 by default). The local model writes drafts through the shared GPU queue. When generation finishes, press **Copy** under **Task for the reviewing agent** and give the task to your coding agent. It reviews every item, corrects suitable drafts, obtains independent review of final content and publishes accepted exercises. The batch and coverage update automatically; there is no JSON to paste back or manual publishing step. Stock warnings count unused, approved, released exercises and appear before the supply runs out.
 
