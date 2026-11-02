@@ -84,6 +84,9 @@ export function nearMatch(text: string, accepted: readonly string[], targetMarke
 }
 
 const setKey = (ids: readonly string[]): string => [...new Set(ids)].sort().join("\u0000");
+/** A partly right answer is stored as a "correct" assessment whose rationale starts with this marker (no schema change; mastery-v3 weighs it by partialWeight). */
+export const PARTIAL_MARKER = "partial: ";
+export const isPartialRationale = (rationale: string | null | undefined): boolean => (rationale ?? "").startsWith(PARTIAL_MARKER);
 const confirmed = (verdict: "correct" | "incorrect", rationale: string): AssessmentDecision => ({ verdict, confirmation: "confirmed", source: "deterministic", rationale });
 
 type Content = { payload: Record<string, unknown> };
@@ -109,13 +112,17 @@ export const ClosedFormAssessor: Assessor = {
       }
       case "detect_error": {
         const ids = needOptions(raw);
-        const p = content.payload as { no_mistake: boolean; accepted_segment_ids: string[]; segments: Array<{ id: string }>; accept_any?: boolean };
+        const p = content.payload as { no_mistake: boolean; accepted_segment_ids: string[]; segments: Array<{ id: string }>; accept_any?: boolean; partial_ok?: boolean };
         if (ids.length === 1 && ids[0] === NO_MISTAKE_ID) {
           return confirmed(p.no_mistake ? "correct" : "incorrect", p.no_mistake ? "Correctly identified a sentence with no mistake." : "The sentence does contain a mistake.");
         }
         if (ids.includes(NO_MISTAKE_ID)) throw new ApiError(422, "ANSWER_SHAPE_INVALID", "\"No mistake\" cannot be combined with a segment");
         const segs = new Set(p.segments.map((s) => s.id));
         // accept_any (word-level items): the error spans one to three words and tapping any one of them finds it
+        // partial_ok: the error is made of several separate parts; naming only some of them (and nothing else) is a partly right answer
+        if (p.partial_ok && !p.accept_any && !p.no_mistake && ids.length > 0 && ids.length < p.accepted_segment_ids.length && ids.every((i) => p.accepted_segment_ids.includes(i))) {
+          return confirmed("correct", `${PARTIAL_MARKER}found ${ids.length} of ${p.accepted_segment_ids.length} parts of the mistake.`);
+        }
         const ok = !p.no_mistake && ids.every((i) => segs.has(i)) && (p.accept_any ? ids.length === 1 && p.accepted_segment_ids.includes(ids[0]!) : setKey(ids) === setKey(p.accepted_segment_ids));
         return confirmed(ok ? "correct" : "incorrect", ok ? "Exact match with the faulty segment(s)." : p.no_mistake ? "The sentence has no mistake." : "Selected segment(s) differ from the faulty one(s).");
       }

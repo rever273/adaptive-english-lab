@@ -1,6 +1,7 @@
 import { DIMENSION_BY_TYPE, EXERCISE_TYPES, TRIAL_PER_TYPE, TRIAL_SIZE, type CreateBatchRequest, type ExerciseType } from "@english-lab/contracts";
 import { ApiError } from "../../../errors.js";
 import type { CourseMissing } from "./coursePlanning.js";
+import { isItOrdinal } from "./itContext.js";
 
 /** One requested draft: what the generator is asked for. The server, not the model, decides all of these fields. */
 export interface ItemPlan {
@@ -20,6 +21,9 @@ export interface ItemPlan {
 }
 
 export const TOPICS = ["workplace", "travel", "health", "services", "education", "community", "technology", "household"] as const;
+const OTHER_TOPICS = TOPICS.filter((t) => t !== "technology");
+/** 20% technology (IT/AI work context, see itContext.ts), the rest cycle through the other topics */
+export const planTopic = (ordinal: number): string => (isItOrdinal(ordinal) ? "technology" : OTHER_TOPICS[ordinal % OTHER_TOPICS.length]!);
 /**
  * Inference unit size per format (spec/05 allows 1-4). The real Trial (2026-10-29, evidence/task-010) showed that 4 drafts per call do not
  * fit the 2048-token output cap (every call was cut off mid-JSON): 2 per call, and 1 for the long reading passages (D47).
@@ -31,7 +35,7 @@ export function planCourseMissing(missing: readonly CourseMissing[], count: numb
   if (!missing.length) return [];
   return Array.from({ length: count }, (_, ordinal) => {
     const item = missing[ordinal % missing.length]!;
-    const topic = TOPICS[ordinal % TOPICS.length]!;
+    const topic = planTopic(ordinal);
     return { ordinal, type: item.type, dimension: DIMENSION_BY_TYPE[item.type], target_skill: item.skill, topic, context_id: `${topic}-${tag}-${ordinal}`, lesson: item.lesson, ...(item.noMistake ? { noMistake: true } : {}) };
   });
 }
@@ -84,7 +88,7 @@ export function planBatch(input: PlanInput): ItemPlan[] {
     for (let k = 0; k < perType.get(type)!; k++) {
       // A model call has one target rule. Reading units contain one item; other units contain at most two.
       const skill = compatible[(skillCursor + Math.floor(k / unitSizeFor(type))) % compatible.length]!;
-      const topic = TOPICS[ordinal % TOPICS.length]!;
+      const topic = planTopic(ordinal);
       out.push({ ordinal, type, dimension: DIMENSION_BY_TYPE[type], target_skill: skill, topic, context_id: `${topic}-${tag}-${ordinal}`, ...(type === "detect_error" && k % 4 === 3 ? { noMistake: true } : {}) });
       ordinal++;
     }
@@ -194,7 +198,7 @@ export function planFromDeficits(args: { count: number; lessons: readonly Lesson
       for (let j = 0; j < b.size; j++) {
         const k = seen.get(type) ?? 0;
         seen.set(type, k + 1);
-        const topic = TOPICS[ordinal % TOPICS.length]!;
+        const topic = planTopic(ordinal);
         out.push({ ordinal, type, dimension: DIMENSION_BY_TYPE[type], target_skill: b.skill, topic, context_id: `${topic}-${args.tag}-${ordinal}`, lesson: b.lesson, ...(type === "detect_error" && k % 4 === 3 ? { noMistake: true } : {}) });
         ordinal++;
       }

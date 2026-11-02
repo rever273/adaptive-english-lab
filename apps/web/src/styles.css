@@ -661,3 +661,8 @@ button.letter-hint-tile:hover { background: #365575; }
 /* Content Studio: keep coverage compact and load the next rows near the end. */
 .vocab-coverage-scroll { max-height: 28rem; overflow: auto; }
 .vocab-coverage-scroll thead th { position: sticky; top: 0; z-index: 1; }
+
+.skill-tag { --fmt: #b79cff; margin: 0.1rem 0 0.6rem; }
+.skill-tag span { font-weight: 500; opacity: 0.85; }
+.btn-nomistake { font-style: italic; border-style: dashed; border-color: #d9a441; color: #e9b95a; background: transparent; }
+.btn-nomistake.btn-on { background: #d9a44122; border-style: solid; }

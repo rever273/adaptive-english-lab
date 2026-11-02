@@ -21,6 +21,8 @@ export interface RawEvidenceRow {
   heldout: boolean;
   /** D65: decided by the local AI, never confirmed (only produced when provisional evidence is requested) */
   aiChecked?: boolean;
+  /** a partly right answer (grader PARTIAL_MARKER): counted at PARTIAL_WEIGHT */
+  partial?: boolean;
 }
 
 export const currentWatermark = (db: Db): number => (db.prepare("SELECT COALESCE(MAX(rowid), 0) AS w FROM assessment_revisions").get() as { w: number }).w;
@@ -45,7 +47,7 @@ export function loadEvidence(db: Db, p: { watermark: number; asOf: string; taxon
            FROM assessment_revisions a WHERE a.rowid <= @w
        )
        SELECT o.id AS id, sr.skill_id AS skillId, o.dimension AS dimension, t.submitted_at AS at, t.local_date AS localDate,
-              o.result AS result, s.purpose AS purpose, (la.confirmation <> 'confirmed') AS ai
+              o.result AS result, s.purpose AS purpose, (la.confirmation <> 'confirmed') AS ai, (la.source = 'deterministic' AND substr(la.rationale, 1, 9) = 'partial: ') AS part
          FROM skill_opportunities o
          JOIN la ON la.id = o.assessment_id AND la.rn = 1
          JOIN attempts t ON t.id = la.attempt_id
@@ -70,8 +72,9 @@ export function loadEvidence(db: Db, p: { watermark: number; asOf: string; taxon
     result: string;
     purpose: string;
     ai: number;
+    part: number;
   }>;
-  return rows.map((r) => ({ id: r.id, skillId: r.skillId, dimension: r.dimension, at: r.at, localDate: r.localDate, success: r.result === "success", heldout: r.purpose === "heldout", ...(r.ai === 1 ? { aiChecked: true } : {}) }));
+  return rows.map((r) => ({ id: r.id, skillId: r.skillId, dimension: r.dimension, at: r.at, localDate: r.localDate, success: r.result === "success", heldout: r.purpose === "heldout", ...(r.ai === 1 ? { aiChecked: true } : {}), ...(r.part === 1 ? { partial: true } : {}) }));
 }
 
 /** Every practice moment per skill x dimension (any attempt on a target opportunity, assisted or not): input for delayed-probe detection. */

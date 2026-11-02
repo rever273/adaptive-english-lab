@@ -17,6 +17,7 @@ import { GENERATION_PROMPT } from "./repository.js";
 import { GENERATION_SYSTEM_V3, GENERATION_SYSTEM_V4, GENERATION_SYSTEM_V5, GENERATION_SYSTEM_V6, GENERATION_SYSTEM_V7, GENERATION_SYSTEM_V8, GENERATION_SYSTEM_V9, assembleExercise, buildGenerationUser, buildGenerationUserV4, draftFormat, draftFormatsText, type Built } from "./draftFormats.js";
 import type { ItemPlan } from "./plan.js";
 import { VOCABULARY_SYSTEM, VOCABULARY_SYSTEM_V2, VOCABULARY_SYSTEM_V3, VOCABULARY_SYSTEM_V4, assembleVocabulary, vocabularyFormat } from "./vocabularyDrafts.js";
+import { itContext } from "./itContext.js";
 
 export interface GenerationPayload {
   batchId: string;
@@ -114,7 +115,7 @@ export class GenerationJobRunner implements JobRunner<GenerationPayload> {
     const first = items[0]!.plan;
     const model = { tag: m.tag, digest: m.digest };
     const v4 = version === "vocabulary-generation-v4";
-    const withAvoid = (plan: ItemPlan): ItemPlan => v4 ? { ...plan, avoid_sentences: this.avoidSentences(plan) } as ItemPlan : plan;
+    const withAvoid = (plan: ItemPlan): ItemPlan => v4 ? { ...plan, avoid_sentences: this.avoidSentences(plan), ...(plan.topic === "technology" ? { it_context: itContext(plan.ordinal) } : {}) } as ItemPlan : plan;
     const user = vocabulary ? JSON.stringify({ batch_id: payload.batchId, items: items.map(i => withAvoid(i.plan)), count: items.length }) : (version === "generation-v4" || version === "generation-v5" || version === "generation-v6" || version === "generation-v7" || version === "generation-v8" || version === "generation-v9" ? (b: string, p: ItemPlan[]) => buildGenerationUserV4(b, p, version) : buildGenerationUser)(payload.batchId, items.map((i) => i.plan));
     const system = vocabulary ? (version === "vocabulary-generation-v4" ? VOCABULARY_SYSTEM_V4 : version === "vocabulary-generation-v3" ? VOCABULARY_SYSTEM_V3 : version === "vocabulary-generation-v2" ? VOCABULARY_SYSTEM_V2 : VOCABULARY_SYSTEM) : version === "generation-v9" ? GENERATION_SYSTEM_V9 : version === "generation-v8" ? GENERATION_SYSTEM_V8 : version === "generation-v7" ? GENERATION_SYSTEM_V7 : version === "generation-v6" ? GENERATION_SYSTEM_V6 : version === "generation-v5" ? GENERATION_SYSTEM_V5 : version === "generation-v4" ? GENERATION_SYSTEM_V4 : GENERATION_SYSTEM_V3;
     const buildVocabulary = (raw: unknown, item: QueuedItem): Built => {

@@ -197,7 +197,7 @@ export function PromptView({ reveal, busy, hint, voice, onSubmit, onIdk, onSkip,
           </p>
           <button
             type="button"
-            className={`btn has-kbd${noMistake ? " btn-on" : ""}`}
+            className={`btn btn-nomistake has-kbd${noMistake ? " btn-on" : ""}`}
             aria-pressed={noMistake}
             disabled={locked}
             data-testid="no-mistake"
@@ -224,6 +224,7 @@ export function PromptView({ reveal, busy, hint, voice, onSubmit, onIdk, onSkip,
 
       {p.kind === "short" && !vocabulary && (
         <div className="short">
+          {/starting with/i.test(p.prompt_en) && <p className="prompt">{p.prompt_en}</p>}
           <p lang="ru" className="ru cue" data-testid="prompt">{p.cue_ru}</p>
           <label htmlFor={`${groupId}-t`} className="visually-hidden">Your answer</label>
           <textarea id={`${groupId}-t`} rows={3} maxLength={2000} value={text} readOnly={locked} onChange={(e) => setText(e.target.value)} placeholder="Type your answer" data-testid="answer-text" />

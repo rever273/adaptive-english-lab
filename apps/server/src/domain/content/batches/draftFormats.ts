@@ -6,6 +6,7 @@ import { DIMENSION_BY_TYPE, type ExerciseType, type ValidationIssue } from "@eng
 import { validateExercise } from "../validator.js";
 import type { ItemPlan } from "./plan.js";
 import { articleMismatch, australianDeep } from "./languageChecks.js";
+import { itContext } from "./itContext.js";
 
 /**
  * generation-v2 (D48). The Trial of generation-v1 (a small model asked for a whole Exercise-v1 document) produced 0 usable drafts out of 24.
@@ -150,7 +151,7 @@ export function buildGenerationUser(batchId: string, items: ItemPlan[]): string 
     count: items.length,
     format_rules: FORMAT_RULES[first.type],
     batch_id: batchId,
-    items: items.map((i) => ({ ordinal: i.ordinal, target_skill: i.target_skill, skill_meaning: skillGloss(i.target_skill), skill_card: skillCards()[i.target_skill] ?? null, topic: i.topic, ...(i.level ? { target_level: `CEFR ${i.level}: choose vocabulary, structures and topic complexity typical of ${i.level}` } : {}), ...(first.type === "detect_error" ? { sentence_must_be: i.noMistake ? "fully correct (no mistake)" : "one clear mistake" } : {}) })),
+    items: items.map((i) => ({ ordinal: i.ordinal, target_skill: i.target_skill, skill_meaning: skillGloss(i.target_skill), skill_card: skillCards()[i.target_skill] ?? null, topic: i.topic, ...(i.topic === "technology" ? { it_context: itContext(i.ordinal) } : {}), ...(i.level ? { target_level: `CEFR ${i.level}: choose vocabulary, structures and topic complexity typical of ${i.level}` } : {}), ...(first.type === "detect_error" ? { sentence_must_be: i.noMistake ? "fully correct (no mistake)" : "one clear mistake" } : {}) })),
     output_shape: `{"drafts":[ one object per item, in the same order ]}`,
     example_of_one_draft: EXAMPLES[first.type],
   });

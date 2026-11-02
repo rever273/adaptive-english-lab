@@ -3,8 +3,8 @@ import type { AiModelStatus } from "@english-lab/contracts";
 import * as api from "../api";
 import { modelErrorText } from "../components/AiModelNotice";
 
-type Values = { preloadModelOnStart?: boolean; taskCount: number; weakRatio: number; voiceTarget: 0 | 1 | 2; voiceShare?: number; vocabularyTaskCount?: number; vocabularyNewWordsPerSession?: number; reviewNoticeThreshold?: number; difficultyMin?: api.Level; difficultyMax?: api.Level };
-type Draft = { taskCount: number; weakRatio: number; voiceShare: number; vocabularyTaskCount: number; vocabularyNewWordsPerSession: number; reviewNoticeThreshold: number; difficultyMin: api.Level; difficultyMax: api.Level };
+type Values = { preloadModelOnStart?: boolean; practiceSoundsEnabled?: boolean; taskCount: number; weakRatio: number; voiceTarget: 0 | 1 | 2; voiceShare?: number; vocabularyTaskCount?: number; vocabularyNewWordsPerSession?: number; reviewNoticeThreshold?: number; difficultyMin?: api.Level; difficultyMax?: api.Level };
+type Draft = { taskCount: number; weakRatio: number; voiceShare: number; practiceSoundsEnabled: boolean; vocabularyTaskCount: number; vocabularyNewWordsPerSession: number; reviewNoticeThreshold: number; difficultyMin: api.Level; difficultyMax: api.Level };
 const LEVELS: api.Level[] = ["A2", "B1", "B2", "C1", "C2"];
 
 /** docs/04 §7: only the settings the allocator reads today. A change is a new settings revision and applies to the next session. */
@@ -34,7 +34,7 @@ export function Settings() {
       const s = await api.saveSettings(draft);
       setSaved(s);
       setDraft(pick(s.values));
-      setMsg("Saved. The next session you start uses these settings; the current one keeps its own.");
+      setMsg("Saved. Practice sounds apply immediately; session settings apply when you start the next session.");
     } catch (e) {
       setMsg(e instanceof Error ? e.message : String(e));
     } finally {
@@ -48,6 +48,8 @@ export function Settings() {
       <div className="settings-grid">
         <div className="card settings-card">
           <h3>Practice</h3>
+          <label className="check"><input type="checkbox" checked={draft.practiceSoundsEnabled} onChange={(e) => setDraft({ ...draft, practiceSoundsEnabled: e.target.checked })} data-testid="set-practice-sounds" /> Play answer and completion sounds</label>
+          <span className="muted small">Applies to grammar and vocabulary practice after saving. Vocabulary pronunciation is controlled separately.</span>
           <div className="settings-fields">
             <label>
               Exercises per session
@@ -195,7 +197,7 @@ function VocabularySpeechSettings() {
 }
 
 /** older settings revisions hold a fixed voice count; it is shown as the share of the task count it was */
-const pick = (v: Values): Draft => ({ taskCount: v.taskCount, weakRatio: v.weakRatio, voiceShare: v.voiceShare ?? Math.round((v.voiceTarget / v.taskCount) * 20) / 20, vocabularyTaskCount: v.vocabularyTaskCount ?? 8, vocabularyNewWordsPerSession: v.vocabularyNewWordsPerSession ?? 4, reviewNoticeThreshold: v.reviewNoticeThreshold ?? 5, difficultyMin: v.difficultyMin ?? (v.difficultyMax ? "A2" : "B1"), difficultyMax: v.difficultyMax ?? "C1" });
+const pick = (v: Values): Draft => ({ taskCount: v.taskCount, weakRatio: v.weakRatio, voiceShare: v.voiceShare ?? Math.round((v.voiceTarget / v.taskCount) * 20) / 20, practiceSoundsEnabled: v.practiceSoundsEnabled ?? true, vocabularyTaskCount: v.vocabularyTaskCount ?? 8, vocabularyNewWordsPerSession: v.vocabularyNewWordsPerSession ?? 4, reviewNoticeThreshold: v.reviewNoticeThreshold ?? 5, difficultyMin: v.difficultyMin ?? (v.difficultyMax ? "A2" : "B1"), difficultyMax: v.difficultyMax ?? "C1" });
 const voiceCount = (d: Draft): number => Math.round(d.voiceShare * d.taskCount);
 const clamp = (n: number, lo: number, hi: number) => Math.min(hi, Math.max(lo, n));
 

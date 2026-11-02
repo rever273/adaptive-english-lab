@@ -70,7 +70,7 @@ export function computeGroups(evidence: readonly RawEvidenceRow[], activity: Rea
     const rows = bySkillDim.get(key)!;
     const marked = markDelayedProbes(rows.map((r) => ({ ...r })), activity.get(key) ?? [], cfg);
     const components = computeComponents(
-      marked.map((r) => ({ id: r.id, at: r.at, localDate: r.localDate, success: r.success, heldout: r.heldout, delayedProbe: r.delayedProbe, ...(r.aiChecked ? { weight: cfg.aiCheckedWeight ?? 1 } : {}) })),
+      marked.map((r) => ({ id: r.id, at: r.at, localDate: r.localDate, success: r.success, heldout: r.heldout, delayedProbe: r.delayedProbe, ...(r.aiChecked || (r.partial && cfg.partialWeight !== undefined) ? { weight: (r.aiChecked ? (cfg.aiCheckedWeight ?? 1) : 1) * (r.partial ? (cfg.partialWeight ?? 1) : 1), ...(r.partial ? { partial: true } : {}) } : {}) })),
       asOf,
       cfg,
     );
@@ -107,7 +107,7 @@ export function runMastery(db: Db, req: RunRequest): MasteryRun {
           watermark,
           taxonomyId,
           cohort: req.cohort,
-          evidence: evidence.map((e) => (e.aiChecked ? [e.id, e.skillId, e.dimension, e.at, e.localDate, e.success, e.heldout, "ai"] : [e.id, e.skillId, e.dimension, e.at, e.localDate, e.success, e.heldout])),
+          evidence: evidence.map((e) => [e.id, e.skillId, e.dimension, e.at, e.localDate, e.success, e.heldout, ...(e.aiChecked ? ["ai"] : []), ...(e.partial ? ["partial"] : [])]),
           activity: [...activity.entries()].sort(([a], [b]) => (a < b ? -1 : 1)),
         }),
       );

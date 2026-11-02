@@ -17,6 +17,7 @@ const SettingsPatchSchema = z
     vocabularyNewWordsPerSession: z.number().int().min(1).max(10).optional(),
     reviewNoticeThreshold: z.number().int().min(1).max(50).optional(),
     preloadModelOnStart: z.boolean().optional(),
+    practiceSoundsEnabled: z.boolean().optional(),
     difficultyMin: z.enum(CEFR_RANGE).optional(),
     difficultyMax: z.enum(CEFR_RANGE).optional(),
   })

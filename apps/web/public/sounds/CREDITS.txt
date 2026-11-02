@@ -1,0 +1,7 @@
+Interface Sounds by Kenney — Creative Commons CC0 1.0 Universal.
+https://kenney.nl/assets/interface-sounds
+https://github.com/Calinou/kenney-interface-sounds
+
+correct.wav: confirmation_001.wav
+incorrect.wav: error_001.wav
+complete.wav: confirmation_003.wav

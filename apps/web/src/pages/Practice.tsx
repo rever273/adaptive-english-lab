@@ -1,5 +1,6 @@
 import type { Dashboard, FeedbackResponse, RevealResponse, SessionSnapshot, SessionSummary } from "@english-lab/contracts";
 import { MAX_LESSON_PLAYS } from "@english-lab/contracts";
+import skillLabels from "../skillLabels.json";
 import { useCallback, useEffect, useRef, useState } from "react";
 import * as api from "../api";
 import { ApiRequestError } from "../api";
@@ -9,6 +10,7 @@ import { useVoice } from "../voice";
 import { Kbd, isPressable, isTextField, useKeys } from "../components/hotkeys";
 import { AgentTasks } from "../components/AgentTasks";
 import { AI_CHECK_WAIT_S, AUTO_ADVANCE_MS, diagnosticFinished, isShortFormat, noSpeechLeft, shouldAutoAdvance, shouldPreloadSpeech, unconfirmedLabel } from "../practiceFlow";
+import { feedbackSound, playPracticeSound } from "../practiceSounds";
 
 /** One tab id per browser tab, kept across reloads, so a reload resumes the same practice lease instead of waiting 90 s. */
 function tabId(): string {
@@ -57,6 +59,14 @@ export function Practice({ category = "grammar", onExit, onNavigate }: { categor
   const [retry, setRetry] = useState(0);
   const [stt, setStt] = useState<{ ready: boolean; known: boolean }>({ ready: false, known: false });
   const [recent, setRecent] = useState<SessionSummary | null>(null);
+  const [soundsEnabled, setSoundsEnabled] = useState(false);
+  useEffect(() => {
+    let active = true;
+    const loadSounds = () => { void api.fetchSettings().then(settings => { if (active) setSoundsEnabled(settings.values.practiceSoundsEnabled ?? true); }).catch(() => {}); };
+    loadSounds();
+    window.addEventListener("focus", loadSounds);
+    return () => { active = false; window.removeEventListener("focus", loadSounds); };
+  }, []);
   useEffect(() => {
     void api.fetchCapabilities().then((c) => setStt({ ready: c.stt.status === "ready", known: true })).catch(() => setStt({ ready: false, known: true }));
   }, []);
@@ -105,7 +115,7 @@ export function Practice({ category = "grammar", onExit, onNavigate }: { categor
       audio = new Audio(objectUrl);
       void audio.play().catch(() => {});
       }).catch(() => {});
-    }, 0);
+    }, 350); // let the short feedback chime finish before vocabulary pronunciation
     return () => { window.clearTimeout(timer); controller.abort(); audio?.pause(); if (objectUrl) URL.revokeObjectURL(objectUrl); };
   }, [sessionId, speechSlot]);
   useEffect(() => {
@@ -129,6 +139,10 @@ export function Practice({ category = "grammar", onExit, onNavigate }: { categor
 
   const openSlot = view.kind === "session" ? view.session.slots.find((s) => s.state !== "skipped" && s.state !== "continued") : undefined;
   const openSlotId = openSlot?.slotId ?? null;
+  const activeSlot = useRef<string | null>(null);
+  activeSlot.current = openSlotId;
+  useEffect(() => () => { activeSlot.current = null; }, []);
+  const completionSoundSession = useRef<string | null>(null);
 
   // a new task never inherits the previous task's voice draft
   useEffect(() => {
@@ -239,6 +253,8 @@ export function Practice({ category = "grammar", onExit, onNavigate }: { categor
           feedback = await api.fetchFeedback(sessionId, slotId);
         }
       }
+      const sound = submission.idk ? null : feedbackSound(feedback);
+      if (sound && activeSlot.current === slotId) playPracticeSound(sound, soundsEnabled);
       setSlotUi((u) => (u.reveal?.slotId === slotId ? { ...u, busy: false, checking: false, pendingSubmission: null, feedback } : u));
     } catch (e) {
       // not saved (yet): the same submissionId is retried, so a flaky connection can never double-count an answer
@@ -284,7 +300,12 @@ export function Practice({ category = "grammar", onExit, onNavigate }: { categor
   async function finish(mode: "completed" | "ended_early") {
     if (!sessionId) return;
     try {
-      setView({ kind: "summary", summary: await api.finishSession(sessionId, mode) });
+      const summary = await api.finishSession(sessionId, mode);
+      if (mode === "completed" && summary.status === "completed" && completionSoundSession.current !== sessionId) {
+        completionSoundSession.current = sessionId;
+        playPracticeSound("complete", soundsEnabled);
+      }
+      setView({ kind: "summary", summary });
     } catch (e) {
       setSlotUi((u) => ({ ...u, error: errorText(e) }));
     }
@@ -415,7 +436,7 @@ export function Practice({ category = "grammar", onExit, onNavigate }: { categor
             onShowAnswer={() => void showAnswerAndContinue()}
           />
           {slotUi.checking && <p className="notice notice-info small" role="status" data-testid="ai-checking"><i className="pi pi-spin pi-spinner" aria-hidden="true" /> Checking your answer…</p>}
-          {slotUi.feedback && <FeedbackPanel feedback={slotUi.feedback} busy={slotUi.busy} onTryAgain={tryAgain} onContinue={goOn} autoAdvance={autoPending} onStay={() => setStay(slotUi.feedback!.slotId)} />}
+          {slotUi.feedback && <FeedbackPanel feedback={slotUi.feedback} skill={category === "vocabulary" ? null : slotUi.reveal.skill} busy={slotUi.busy} onTryAgain={tryAgain} onContinue={goOn} autoAdvance={autoPending} onStay={() => setStay(slotUi.feedback!.slotId)} />}
           {slotUi.error && (
             <div className="notice notice-error" role="alert" data-testid="error">
               {slotUi.error}
@@ -559,14 +580,16 @@ function DetailDiff({ d }: { d: NonNullable<FeedbackResponse["detail"]> }) {
   );
 }
 
-function FeedbackPanel({ feedback, busy, onTryAgain, onContinue, autoAdvance = false, onStay }: { feedback: FeedbackResponse; busy: boolean; onTryAgain: () => void; onContinue: () => void; autoAdvance?: boolean; onStay?: () => void }) {
+const SKILL_LABELS = skillLabels as Record<string, { en: string; ru: string }>;
+
+function FeedbackPanel({ feedback, skill = null, busy, onTryAgain, onContinue, autoAdvance = false, onStay }: { feedback: FeedbackResponse; skill?: string | null; busy: boolean; onTryAgain: () => void; onContinue: () => void; autoAdvance?: boolean; onStay?: () => void }) {
   const incorrect = feedback.verdict === "incorrect" || feedback.verdict === "idk";
-  const kind = feedback.state === "pending" && feedback.aiChecked && !incorrect && feedback.verdict !== "correct" ? "pending" : feedback.state === "pending" && !feedback.aiChecked ? "pending" : feedback.detail ? "detail" : feedback.verdict === "correct" ? "ok" : incorrect ? "again" : "info";
+  const kind = feedback.state === "pending" && feedback.aiChecked && !incorrect && feedback.verdict !== "correct" ? "pending" : feedback.state === "pending" && !feedback.aiChecked ? "pending" : feedback.detail || feedback.partial ? "detail" : feedback.verdict === "correct" ? "ok" : incorrect ? "again" : "info";
   return (
     <div className={`feedback feedback-${kind}`} data-testid="feedback" data-state={feedback.state} data-verdict={feedback.verdict ?? ""} aria-live="polite">
       <p className="feedback-title">
-        <i className={`pi ${feedback.state === "closed" ? "pi-save" : feedback.state === "pending" && !feedback.aiChecked ? "pi-hourglass" : feedback.verdict === "correct" ? "pi-check-circle" : feedback.verdict === "idk" ? "pi-info-circle" : feedback.verdict === "incorrect" ? "pi-times-circle" : "pi-info-circle"}`} aria-hidden="true" />{" "}
-        {feedback.state === "closed" ? "Saved" : feedback.aiChecked ? `${feedback.verdict === "correct" ? "Correct" : "Incorrect"} (checked by AI)` : feedback.unresolved ? "Could not be checked automatically" : feedback.state === "pending" ? "Saved — AI review later" : feedback.detail ? "Right construction — check the detail" : feedback.verdict === "correct" ? "Correct" : feedback.verdict === "idk" ? "No problem" : feedback.verdict === "incorrect" ? "Not this time" : feedback.state === "skipped" ? "Skipped" : "Answer"}
+        <i className={`pi ${feedback.state === "closed" ? "pi-save" : feedback.state === "pending" && !feedback.aiChecked ? "pi-hourglass" : feedback.partial ? "pi-exclamation-circle" : feedback.verdict === "correct" ? "pi-check-circle" : feedback.verdict === "idk" ? "pi-info-circle" : feedback.verdict === "incorrect" ? "pi-times-circle" : "pi-info-circle"}`} aria-hidden="true" />{" "}
+        {feedback.state === "closed" ? "Saved" : feedback.aiChecked ? `${feedback.verdict === "correct" ? "Correct" : "Incorrect"} (checked by AI)` : feedback.unresolved ? "Could not be checked automatically" : feedback.state === "pending" ? "Saved — AI review later" : feedback.detail ? "Right construction — check the detail" : feedback.partial ? "Partly correct" : feedback.verdict === "correct" ? "Correct" : feedback.verdict === "idk" ? "No problem" : feedback.verdict === "incorrect" ? "Not this time" : feedback.state === "skipped" ? "Skipped" : "Answer"}
       </p>
       {feedback.detail ? <DetailDiff d={feedback.detail} /> : feedback.aiChecked && feedback.aiReview ? <p lang="ru" className="ru" data-testid="ai-reason">{feedback.aiReview.explanation_ru}</p> : (() => { const m = feedback.message.replace(/^(Correct|Not this time)\.\s*/, ""); return m ? <p>{m}</p> : null; })()}
       {feedback.correct && (
@@ -583,6 +606,7 @@ function FeedbackPanel({ feedback, busy, onTryAgain, onContinue, autoAdvance = f
         </div>
       )}
       {feedback.explanation_ru && <p lang="ru" className="ru">{feedback.explanation_ru}</p>}
+      {skill && SKILL_LABELS[skill] && <p className="format-tag skill-tag" data-testid="skill-tag"><i className="pi pi-graduation-cap" aria-hidden="true" /> {SKILL_LABELS[skill]!.en} <span lang="ru">({SKILL_LABELS[skill]!.ru})</span></p>}
       {feedback.vocabulary && <VocabSentence v={feedback.vocabulary} />}
       {feedback.vocabulary && <VocabWhy v={feedback.vocabulary} />}
       {feedback.vocabulary && feedback.verdict === "correct" && <MarkWordLearned key={`${feedback.slotId}:${feedback.vocabulary.lemma}`} lemma={feedback.vocabulary.lemma} />}

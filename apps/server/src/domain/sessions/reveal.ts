@@ -128,6 +128,7 @@ export function revealSlot(db: Db, deps: SessionDeps, sessionId: string, slotId:
         ordinal: slot.ordinal,
         format: slot.format,
         dimension: slot.dimension,
+        skill: (JSON.parse(slot.content) as { target_skill?: string }).target_skill ?? "",
         inputPreference: slot.inputPreference,
         questionId: slot.questionId,
         readingGroupId: slot.readingGroupId,

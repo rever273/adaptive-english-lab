@@ -4,7 +4,7 @@ import { ApiError } from "../../errors.js";
 import { exposeUnits } from "./exposure.js";
 import type { SessionDeps } from "./policy.js";
 import type { AnalysisV2 } from "../ai/validate.js";
-import { NO_MISTAKE_ID, answerKey, nearMatch } from "../content/grader.js";
+import { NO_MISTAKE_ID, answerKey, isPartialRationale, nearMatch } from "../content/grader.js";
 import { VocabularyPracticeMetadataSchema } from "@english-lab/contracts";
 import { buildPrompt } from "./reveal.js";
 import { isUnresolved } from "./reviewQueue.js";
@@ -190,8 +190,11 @@ function feedbackCore(db: Db, deps: SessionDeps, sessionId: string, slotId: stri
         confirmation: a?.confirmation ?? null,
         explanation_ru: content.explanation_ru,
         correct: correctAnswer(slot.format, content, slot.questionId),
+        ...((a?.source === "deterministic" && isPartialRationale(a?.rationale)) ? { partial: true } : {}),
         message:
-          verdict === "correct"
+          verdict === "correct" && (a?.source === "deterministic" && isPartialRationale(a?.rationale))
+            ? "You found only part of the mistake. It counts, but with a lower score; the whole mistake is shown below."
+            : verdict === "correct"
             ? "Correct."
             : verdict === "idk"
               ? "No problem — this is the answer. It counts as a failed first attempt, not as a skip."

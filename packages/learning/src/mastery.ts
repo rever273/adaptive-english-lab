@@ -9,11 +9,16 @@ export const MASTERY_VERSION = "mastery-v1";
 /** D65: provisional counting of decided local-AI verdicts at a lower weight (a new algorithm id; mastery-v1 is unchanged) */
 export const MASTERY_V2_VERSION = "mastery-v2";
 export const AI_CHECKED_WEIGHT = 0.5;
+/** a partly right answer (e.g. only one of two parts of an error found) counts as correct evidence at this relative weight (mastery-v3) */
+export const PARTIAL_WEIGHT = 0.5;
+export const MASTERY_V3_VERSION = "mastery-v3";
 
 export interface MasteryConfig {
   version: string;
   /** D65 (mastery-v2 only): weight of an AI-checked (model-decided, never confirmed) opportunity relative to a code-confirmed one (1) */
   aiCheckedWeight?: number;
+  /** mastery-v3 only: weight of a partly right answer; absent = a partial answer counts as a plain success (v1/v2 are unchanged) */
+  partialWeight?: number;
   /** last N eligible opportunities per skill x dimension x cohort */
   window: number;
   halfLifeDays: number;
@@ -53,6 +58,9 @@ export const MASTERY_V1: MasteryConfig = {
 /** mastery-v2 (D65): the same arithmetic; opportunities decided by the local AI count with `aiCheckedWeight`. Confirmed-only data gives the same numbers as v1. */
 export const MASTERY_V2: MasteryConfig = { ...MASTERY_V1, version: MASTERY_V2_VERSION, aiCheckedWeight: AI_CHECKED_WEIGHT };
 
+/** mastery-v3: v2 plus partly right answers at `partialWeight`. Without partial evidence it gives the same numbers as v2. */
+export const MASTERY_V3: MasteryConfig = { ...MASTERY_V2, version: MASTERY_V3_VERSION, partialWeight: PARTIAL_WEIGHT };
+
 export type Dimension = "recognition" | "correction" | "production";
 export type EvidenceStatus = "unknown" | "insufficient" | "developing" | "stale" | "stable";
 export type EvidenceLabel = EvidenceStatus | "weak" | "improving" | "maintenance";
@@ -71,6 +79,8 @@ export interface EvidenceOpportunity {
   delayedProbe: boolean;
   /** D65: relative weight of this opportunity (absent = 1); set only by mastery-v2 for AI-checked evidence */
   weight?: number;
+  /** the weight comes from a partly right answer, not from an AI check */
+  partial?: boolean;
 }
 
 export interface MasteryComponents {
@@ -175,7 +185,7 @@ export function computeComponents(all: readonly EvidenceOpportunity[], asOf: str
   for (const o of sel) {
     const age = Math.max(0, (tE - t(o.at)) / MS_PER_DAY);
     const w = o.weight === undefined ? Math.pow(2, -age / cfg.halfLifeDays) : Math.pow(2, -age / cfg.halfLifeDays) * o.weight;
-    if (o.weight !== undefined && o.weight < 1) aiCheckedN += 1;
+    if (o.weight !== undefined && o.weight < 1 && !o.partial) aiCheckedN += 1;
     const y = o.success ? 1 : 0;
     sumW += w;
     sumW2 += w * w;

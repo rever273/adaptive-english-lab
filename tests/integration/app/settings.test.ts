@@ -31,6 +31,7 @@ describe("settings over HTTP", () => {
     expect(first.revision).toBe(2);
     expect(first.values).toMatchObject({ taskCount: 18, weakRatio: 0.65, voiceTarget: 2 });
     expect(vocabularyTaskCount(first.values)).toBe(8);
+    expect(first.values.practiceSoundsEnabled).toBeUndefined(); // older revisions default to enabled in the UI
 
     const saved = await call("POST", { taskCount: 12, voiceTarget: 1 });
     expect(saved.statusCode).toBe(200);
@@ -45,6 +46,10 @@ describe("settings over HTTP", () => {
     expect(revs.map((r) => r.revision)).toEqual([1, 2, 3]);
     expect(JSON.parse(revs[0]!.v).taskCount).toBe(18); // the first revision is untouched
     expect(JSON.parse(revs[0]!.v).vocabularyTaskCount).toBeUndefined();
+    expect((await call("POST", { practiceSoundsEnabled: "off" })).statusCode).toBe(400);
+    expect((await call("POST", { practiceSoundsEnabled: false })).json().values.practiceSoundsEnabled).toBe(false);
+    expect((await call("GET")).json().values.practiceSoundsEnabled).toBe(false);
+    expect((await call("POST", { practiceSoundsEnabled: true })).json().values.practiceSoundsEnabled).toBe(true);
     expect((await call("POST", { vocabularyTaskCount: 4 })).statusCode).toBe(400);
     expect((await call("POST", { vocabularyTaskCount: 11 })).statusCode).toBe(400);
     const vocabularySaved = await call("POST", { vocabularyTaskCount: 5 });

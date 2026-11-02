@@ -14,10 +14,11 @@ import { vocabularyPlanSlots, vocabularyReplenishment } from "./vocabularyPlan.j
 import { loadBlockedFingerprints, loadCandidates } from "../../sessions/bank.js";
 import { loadBlueprint, loadSettings } from "../../sessions/policy.js";
 import { vocabularyFormat } from "./vocabularyDrafts.js";
+import { isItOrdinal } from "./itContext.js";
 
-/** Setting of a vocabulary sentence: 15% IT/technology (every 7th step of a 20-cycle), the rest general adult life, varied per ordinal and per repeat of the same word. */
+/** Setting of a vocabulary sentence: 20% IT/technology (4 of every 20 steps, spread evenly), the rest general adult life, varied per ordinal and per repeat of the same word. */
 const GENERAL_TOPICS = ["workplace", "travel", "health", "shopping", "family", "education", "community", "household", "sport", "food", "finance", "weather"] as const;
-export const vocabularyTopic = (ordinal: number, round: number): string => (ordinal * 7) % 20 < 3 ? "technology" : GENERAL_TOPICS[(ordinal * 5 + round * 3) % GENERAL_TOPICS.length]!;
+export const vocabularyTopic = (ordinal: number, round: number): string => isItOrdinal(ordinal) ? "technology" : GENERAL_TOPICS[(ordinal * 5 + round * 3) % GENERAL_TOPICS.length]!;
 export const GENERATION_PROMPT = "generation-v9";
 /** a skill is "covered" when it has this many released (selectable) exercises; below it the coverage view reports a deficit (D46) */
 export const TARGET_SELECTABLE_PER_SKILL = 12;

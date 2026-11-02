@@ -1,0 +1,322 @@
+{
+  "articles.indefinite": {
+    "en": "Indefinite article (a / an)",
+    "ru": "неопределённый артикль"
+  },
+  "articles.definite": {
+    "en": "Definite article (the)",
+    "ru": "определённый артикль"
+  },
+  "articles.zero_general": {
+    "en": "Zero article for general statements",
+    "ru": "нулевой артикль в общих утверждениях"
+  },
+  "articles.possessive_no_article": {
+    "en": "No article with possessives",
+    "ru": "нет артикля с притяжательными"
+  },
+  "articles.quantifiers": {
+    "en": "Articles with quantifiers",
+    "ru": "артикли с количественными словами"
+  },
+  "countability.mass_nouns": {
+    "en": "Uncountable nouns",
+    "ru": "неисчисляемые существительные"
+  },
+  "countability.singular_plural": {
+    "en": "Singular and plural nouns",
+    "ru": "единственное и множественное число"
+  },
+  "countability.few_little": {
+    "en": "Few / a few / little / a little",
+    "ru": "few, a few, little, a little"
+  },
+  "countability.much_many": {
+    "en": "Much / many / a lot of",
+    "ru": "much, many, a lot of"
+  },
+  "countability.agreement_quantity": {
+    "en": "Agreement with quantity words",
+    "ru": "согласование с количественными словами"
+  },
+  "tenses.past_simple": {
+    "en": "Past Simple",
+    "ru": "простое прошедшее"
+  },
+  "tenses.present_simple": {
+    "en": "Present Simple",
+    "ru": "простое настоящее"
+  },
+  "tenses.present_continuous": {
+    "en": "Present Continuous",
+    "ru": "длительное настоящее"
+  },
+  "tenses.past_continuous": {
+    "en": "Past Continuous",
+    "ru": "длительное прошедшее"
+  },
+  "tenses.present_perfect": {
+    "en": "Present Perfect",
+    "ru": "настоящее совершённое"
+  },
+  "tenses.perfect_vs_past": {
+    "en": "Present Perfect vs Past Simple",
+    "ru": "Present Perfect или Past Simple"
+  },
+  "tenses.future_forms": {
+    "en": "Future forms",
+    "ru": "формы будущего"
+  },
+  "tenses.past_perfect": {
+    "en": "Past Perfect",
+    "ru": "предпрошедшее"
+  },
+  "tenses.tense_sequence": {
+    "en": "Sequence of tenses",
+    "ru": "согласование времён"
+  },
+  "tenses.habitual_used_to": {
+    "en": "Used to / would for past habits",
+    "ru": "used to и would для прошлых привычек"
+  },
+  "verb_patterns.stop_doing_vs_stop_to_do": {
+    "en": "stop doing vs stop to do",
+    "ru": "stop + -ing или stop + to"
+  },
+  "verb_patterns.think_of_doing": {
+    "en": "think of / about + -ing",
+    "ru": "think of / about + -ing"
+  },
+  "verb_patterns.would_rather": {
+    "en": "would rather + base verb",
+    "ru": "would rather + глагол без to"
+  },
+  "verb_patterns.enjoy_doing": {
+    "en": "Verbs followed by -ing",
+    "ru": "глаголы с -ing"
+  },
+  "verb_patterns.want_to": {
+    "en": "Verbs followed by to + verb",
+    "ru": "глаголы с to + инфинитив"
+  },
+  "verb_patterns.make_let_bare": {
+    "en": "make / let + base verb",
+    "ru": "make / let + глагол без to"
+  },
+  "verb_patterns.spend_time_doing": {
+    "en": "spend time + -ing",
+    "ru": "spend time + -ing"
+  },
+  "verb_patterns.suggest_doing": {
+    "en": "suggest + -ing",
+    "ru": "suggest + -ing"
+  },
+  "prepositions.listen_to": {
+    "en": "listen to",
+    "ru": "предлог после listen"
+  },
+  "prepositions.wait_for": {
+    "en": "wait for",
+    "ru": "предлог после wait"
+  },
+  "prepositions.explain_to": {
+    "en": "explain to",
+    "ru": "предлог после explain"
+  },
+  "prepositions.depend_on": {
+    "en": "depend on",
+    "ru": "предлог после depend"
+  },
+  "prepositions.interested_in": {
+    "en": "interested in",
+    "ru": "предлог после interested"
+  },
+  "prepositions.time_at_on_in": {
+    "en": "Prepositions of time (at / on / in)",
+    "ru": "предлоги времени"
+  },
+  "prepositions.place_at_on_in": {
+    "en": "Prepositions of place (at / on / in)",
+    "ru": "предлоги места"
+  },
+  "prepositions.movement": {
+    "en": "Prepositions of movement",
+    "ru": "предлоги движения"
+  },
+  "agreement.third_person": {
+    "en": "Third person -s",
+    "ru": "окончание -s в 3-м лице"
+  },
+  "agreement.be_auxiliary": {
+    "en": "Agreement with be",
+    "ru": "согласование с be"
+  },
+  "agreement.do_auxiliary": {
+    "en": "Agreement with do",
+    "ru": "согласование с do"
+  },
+  "agreement.have_auxiliary": {
+    "en": "Agreement with have",
+    "ru": "согласование с have"
+  },
+  "agreement.collective_nouns": {
+    "en": "Collective nouns",
+    "ru": "собирательные существительные"
+  },
+  "questions.direct_auxiliary": {
+    "en": "Direct questions with auxiliaries",
+    "ru": "прямые вопросы со вспомогательными"
+  },
+  "questions.embedded_order": {
+    "en": "Word order in embedded questions",
+    "ru": "порядок слов во вложенных вопросах"
+  },
+  "questions.embedded_whether": {
+    "en": "Embedded questions with if / whether",
+    "ru": "вложенные вопросы с if / whether"
+  },
+  "questions.subject_questions": {
+    "en": "Subject questions",
+    "ru": "вопросы к подлежащему"
+  },
+  "questions.question_tags": {
+    "en": "Question tags",
+    "ru": "разделительные вопросы"
+  },
+  "modals.ability": {
+    "en": "Modals of ability",
+    "ru": "модальные глаголы способности"
+  },
+  "modals.obligation": {
+    "en": "Modals of obligation",
+    "ru": "модальные глаголы долженствования"
+  },
+  "modals.advice": {
+    "en": "Modals of advice",
+    "ru": "модальные глаголы совета"
+  },
+  "modals.deduction": {
+    "en": "Modals of deduction",
+    "ru": "модальные глаголы предположения"
+  },
+  "modals.polite_requests": {
+    "en": "Polite requests with modals",
+    "ru": "вежливые просьбы с модальными"
+  },
+  "conditionals.zero": {
+    "en": "Zero conditional",
+    "ru": "нулевое условное"
+  },
+  "conditionals.first": {
+    "en": "First conditional",
+    "ru": "условное 1-го типа"
+  },
+  "conditionals.second": {
+    "en": "Second conditional",
+    "ru": "условное 2-го типа"
+  },
+  "conditionals.third": {
+    "en": "Third conditional",
+    "ru": "условное 3-го типа"
+  },
+  "conditionals.mixed": {
+    "en": "Mixed conditionals",
+    "ru": "смешанные условные"
+  },
+  "passive.present": {
+    "en": "Passive: present",
+    "ru": "пассив в настоящем"
+  },
+  "passive.past": {
+    "en": "Passive: past",
+    "ru": "пассив в прошедшем"
+  },
+  "passive.perfect": {
+    "en": "Passive: perfect",
+    "ru": "пассив в перфекте"
+  },
+  "reported_speech.statements": {
+    "en": "Reported statements",
+    "ru": "косвенная речь: утверждения"
+  },
+  "reported_speech.questions": {
+    "en": "Reported questions",
+    "ru": "косвенная речь: вопросы"
+  },
+  "reported_speech.time_reference": {
+    "en": "Time references in reported speech",
+    "ru": "время и место в косвенной речи"
+  },
+  "relatives.defining": {
+    "en": "Defining relative clauses",
+    "ru": "определительные придаточные"
+  },
+  "relatives.nondefining": {
+    "en": "Non-defining relative clauses",
+    "ru": "неопределительные придаточные"
+  },
+  "relatives.relative_pronouns": {
+    "en": "Relative pronouns",
+    "ru": "относительные местоимения"
+  },
+  "word_order.adverbs": {
+    "en": "Position of adverbs",
+    "ru": "место наречий"
+  },
+  "word_order.negation": {
+    "en": "Word order in negatives",
+    "ru": "порядок слов в отрицаниях"
+  },
+  "word_order.adjective_order": {
+    "en": "Order of adjectives",
+    "ru": "порядок прилагательных"
+  },
+  "pronouns.subject_object": {
+    "en": "Subject and object pronouns",
+    "ru": "личные местоимения: субъект и объект"
+  },
+  "pronouns.reflexives": {
+    "en": "Reflexive pronouns",
+    "ru": "возвратные местоимения"
+  },
+  "pronouns.demonstratives": {
+    "en": "this / that / these / those",
+    "ru": "указательные местоимения"
+  },
+  "collocations.make_do": {
+    "en": "make vs do",
+    "ru": "make или do"
+  },
+  "collocations.job_and_work": {
+    "en": "job vs work",
+    "ru": "job или work"
+  },
+  "collocations.natural_phrases": {
+    "en": "Natural collocations",
+    "ru": "естественные сочетания слов"
+  },
+  "register.politeness": {
+    "en": "Politeness",
+    "ru": "вежливость"
+  },
+  "register.formal_informal": {
+    "en": "Formal and informal register",
+    "ru": "формальный и неформальный стиль"
+  },
+  "register.dialect_variants": {
+    "en": "Dialect variants",
+    "ru": "диалектные варианты"
+  },
+  "linking.contrast": {
+    "en": "Linking: contrast",
+    "ru": "связки: противопоставление"
+  },
+  "linking.cause": {
+    "en": "Linking: cause and result",
+    "ru": "связки: причина и следствие"
+  },
+  "linking.concession": {
+    "en": "Linking: concession",
+    "ru": "связки: уступка"
+  }
+}

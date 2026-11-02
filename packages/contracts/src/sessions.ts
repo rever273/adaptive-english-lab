@@ -89,6 +89,8 @@ export const RevealResponseSchema = z
     ordinal: z.number().int(),
     format: z.string(),
     dimension: z.string(),
+    /** target skill id of the exercise (the web shows its readable name) */
+    skill: z.string(),
     inputPreference: z.enum(["text", "voice"]),
     questionId: z.string().nullable(),
     readingGroupId: z.string().nullable(),
@@ -116,6 +118,8 @@ export const FeedbackResponseSchema = z
     }).strict().optional(),
     /** D65: a decided local-AI verdict (correct / incorrect): shown at once as "checked by AI", counted provisionally, never confirmed */
     aiChecked: z.boolean().optional(),
+    /** a partly right answer: counted as correct evidence at half weight; the message says which part was missed */
+    partial: z.boolean().optional(),
     /** D65: the AI check ended without a verdict (abstain, ambiguous, invalid, failed): the answer waits in the review queue */
     unresolved: z.boolean().optional(),
     correct: z

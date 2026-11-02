@@ -1,5 +1,5 @@
 import type { FastifyInstance } from "fastify";
-import { MASTERY_V2 } from "@english-lab/learning";
+import { MASTERY_V3 } from "@english-lab/learning";
 import { SkillAnalyticsQuerySchema, type SkillAnalyticsResponse } from "@english-lab/contracts";
 import type { Db } from "../db/open.js";
 import { readRun, runMastery } from "../domain/analytics/runs.js";
@@ -15,7 +15,7 @@ export function registerAnalyticsRoutes(app: FastifyInstance, db: Db, now: () =>
     const q = parsed.data;
     const hour = new Date(now());
     hour.setUTCMinutes(0, 0, 0);
-    const run = runMastery(db, { asOf: q.asOf ?? hour.toISOString(), watermark: q.watermark, cohort: { criterionVersion: q.criterionVersion, difficulty: q.difficulty }, now, ...(q.provisional === "1" ? { config: MASTERY_V2 } : {}) });
+    const run = runMastery(db, { asOf: q.asOf ?? hour.toISOString(), watermark: q.watermark, cohort: { criterionVersion: q.criterionVersion, difficulty: q.difficulty }, now, ...(q.provisional === "1" ? { config: MASTERY_V3 } : {}) });
     return {
       run: { id: run.id, algorithmId: run.algorithmId, asOf: run.asOf, eventWatermark: run.eventWatermark, inputHash: run.inputHash, cohort: run.cohort, reused: !run.created },
       skills: readRun(db, run.id) as SkillAnalyticsResponse["skills"],

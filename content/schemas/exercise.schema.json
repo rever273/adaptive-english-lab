@@ -636,6 +636,9 @@
             },
             "accept_any": {
               "type": "boolean"
+            },
+            "partial_ok": {
+              "type": "boolean"
             }
           },
           "required": [

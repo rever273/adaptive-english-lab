@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { ClosedFormAssessor } from "../../../apps/server/src/domain/content/grader.js";
+import { ClosedFormAssessor, isPartialRationale } from "../../../apps/server/src/domain/content/grader.js";
 
 const payload = (accept_any: boolean) => ({
   sentence: "The latest software updates is ready.",
@@ -23,5 +23,23 @@ describe("detect_error with accept_any (word-level items)", () => {
   it("keeps exact set equality for older block items", () => {
     expect(verdict(false, ["w4"])).toBe("incorrect");
     expect(verdict(false, ["w4", "w5"])).toBe("correct");
+  });
+});
+
+describe("detect_error with partial_ok (an error made of separate parts)", () => {
+  const assess = (optionIds: string[]) =>
+    ClosedFormAssessor.assess({
+      exerciseType: "detect_error",
+      content: { payload: { ...payload(false), accepted_segment_ids: ["w4", "w5"], partial_ok: true } },
+      rawAnswer: { kind: "options", optionIds },
+      idk: false,
+    } as never);
+  it("all parts is correct, some parts is correct but marked partial, anything else is incorrect", () => {
+    expect(assess(["w4", "w5"])).toMatchObject({ verdict: "correct" });
+    expect(isPartialRationale(assess(["w4", "w5"]).rationale)).toBe(false);
+    expect(assess(["w5"])).toMatchObject({ verdict: "correct" });
+    expect(isPartialRationale(assess(["w5"]).rationale)).toBe(true);
+    expect(assess(["w2"]).verdict).toBe("incorrect");
+    expect(assess(["w4", "w2"]).verdict).toBe("incorrect");
   });
 });

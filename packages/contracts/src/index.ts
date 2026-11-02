@@ -113,6 +113,8 @@ export const SettingsV1Schema = z
     vocabularyNewWordsPerSession: z.number().int().min(1).max(10).optional(),
     /** D67: warm the local model at start and when the learner arrives (default true) */
     preloadModelOnStart: z.boolean().optional(),
+    /** Feedback and completion sounds; missing on older revisions means enabled. */
+    practiceSoundsEnabled: z.boolean().optional(),
     /** D65: how many unresolved answers (the local AI could not settle them) collect before ONE non-blocking notice offers an agent task (default 5) */
     reviewNoticeThreshold: z.number().int().min(1).max(50).optional(),
     /** D64: share of the session's tasks offered for voice (0..1). When set it replaces voiceTarget; older revisions do not have it. */
