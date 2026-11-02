@@ -15,8 +15,10 @@ export function calculateCoursePlan(db: Db, now: Date): CoursePlan {
   const settings = loadSettings(db).values;
   const lessons = courseLessons(db).filter(l => l.completed < MAX_LESSON_PLAYS);
   const blocked = loadBlockedFingerprints(db);
-  const bank = loadCandidates(db, "practice", [], difficultyLevels(settings));
-  const allSkills = [...new Set(loadCandidates(db, "practice").map(c => c.skillId))];
+  const everything = loadCandidates(db, "practice");
+  const levels = difficultyLevels(settings);
+  const bank = levels === null ? everything : everything.filter(c => (levels as readonly string[]).includes(c.difficulty));
+  const allSkills = [...new Set(everything.map(c => c.skillId))];
   let available: Candidate[] = withRepeats(db, bank, now, "shortage").candidates;
   const missing: CourseMissing[] = [];
   let sessions = 0;

@@ -57,13 +57,15 @@ interface ItemRow {
 
 const ITEM_SQL = `
   SELECT bi.id, bi.ordinal, bi.state, bi.plan_json, COALESCE(bo.final_revision_id, bi.revision_id) AS revision_id, bi.job_id, bi.error_json, bo.action AS outcome, j.state AS job_state,
-         s.status AS content_status, er.content_hash AS content_hash,
-         EXISTS (SELECT 1 FROM selectable_revisions sr WHERE sr.revision_id = COALESCE(bo.final_revision_id, bi.revision_id)) AS released,
+         s.to_status AS content_status, er.content_hash AS content_hash,
+         (s.to_status = 'approved' AND EXISTS (SELECT 1 FROM release_items ri JOIN content_reviews cr ON cr.id = ri.review_id
+            WHERE ri.revision_id = er.id AND cr.verdict = 'approved' AND cr.content_hash = er.content_hash)) AS released, -- the selectable_revisions rule, on the rows already joined
          (SELECT COUNT(*) FROM content_reviews cr WHERE cr.revision_id = COALESCE(bo.final_revision_id, bi.revision_id)) AS reviews
     FROM batch_items bi
     LEFT JOIN jobs j ON j.id = bi.job_id
     LEFT JOIN batch_outcomes bo ON bo.batch_id = bi.batch_id AND bo.ordinal = bi.ordinal
-    LEFT JOIN latest_content_state s ON s.revision_id = COALESCE(bo.final_revision_id, bi.revision_id)
+    LEFT JOIN content_state_events s ON s.revision_id = COALESCE(bo.final_revision_id, bi.revision_id)
+      AND s.sequence = (SELECT MAX(m.sequence) FROM content_state_events m WHERE m.revision_id = s.revision_id) -- latest_content_state without materialising the whole view
     LEFT JOIN exercise_revisions er ON er.id = COALESCE(bo.final_revision_id, bi.revision_id)
    WHERE bi.batch_id = ?
    ORDER BY bi.ordinal`;
@@ -288,7 +290,8 @@ export function coverage(db: Db): CoverageView {
   const tax = taxonomyForNewRevisions(db);
   const rows = db.prepare(
     `SELECT sr.skill_id AS skill, s.status AS status, er.type AS type,
-            EXISTS (SELECT 1 FROM selectable_revisions x WHERE x.revision_id = er.id) AS released
+            (s.status = 'approved' AND EXISTS (SELECT 1 FROM release_items ri JOIN content_reviews cr ON cr.id = ri.review_id
+               WHERE ri.revision_id = er.id AND cr.verdict = 'approved' AND cr.content_hash = er.content_hash)) AS released
        FROM exercise_skills es
        JOIN skill_revisions sr ON sr.id = es.skill_revision_id
        JOIN exercise_revisions er ON er.id = es.revision_id

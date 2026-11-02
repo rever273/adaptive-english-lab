@@ -1,5 +1,5 @@
 ﻿import type { Db } from "../../../db/open.js";
-import { exportVocabulary, vocabularyCandidates } from "../../vocabulary/practice.js";
+import { exportVocabulary, vocabularyCandidates, vocabularyPracticeStatus } from "../../vocabulary/practice.js";
 import type { Family } from "../../vocabulary/schedule.js";
 
 const ORDER: readonly Family[] = ["recognition", "guided_recall", "recognition", "collocation", "guided_recall"];
@@ -8,8 +8,9 @@ type Word = { lemma: string; translationRu: string | null; learned: boolean; new
 
 /** Approved fresh and previously shown contexts can supply the five-context target; drafts cannot. */
 export function vocabularyReplenishment(db: Db) {
-  const words = (exportVocabulary(db).json as { words: Word[] }).words;
   const candidates = vocabularyCandidates(db);
+  const status = vocabularyPracticeStatus(db, new Date(), candidates);
+  const words = (exportVocabulary(db, new Date(), status).json as { words: Word[] }).words;
   const counts = new Map<string, Record<Family, number>>();
   for (const c of [...candidates.usable, ...candidates.shown]) {
     const n = counts.get(c.lemma) ?? { recognition: 0, guided_recall: 0, collocation: 0 };
@@ -21,7 +22,7 @@ export function vocabularyReplenishment(db: Db) {
     return { word, deficit };
   }).sort((a, b) => Number(a.word.learned) - Number(b.word.learned) || b.deficit.recognition + b.deficit.guided_recall + b.deficit.collocation - a.deficit.recognition - a.deficit.guided_recall - a.deficit.collocation || a.word.lemma.localeCompare(b.word.lemma));
   const deficit = needs.reduce((s, n) => s + n.deficit.recognition + n.deficit.guided_recall + n.deficit.collocation, 0);
-  return { words: needs, deficit, recommended: Math.ceil(deficit * 1.2), targetPerWord: 5 };
+  return { words: needs, deficit, recommended: Math.ceil(deficit * 1.2), targetPerWord: 5, status };
 }
 
 /** Round-robin over deficit slots; requested extras are varied across words and formats. */

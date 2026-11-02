@@ -42,8 +42,7 @@ export function loadCandidates(db: Db, bankRole: "practice" | "diagnostic" | "he
     .prepare(
       `SELECT rpu.revision_id AS revisionId, u.fingerprint AS fingerprint
          FROM revision_prompt_units rpu JOIN prompt_units u ON u.id = rpu.unit_id
-        WHERE rpu.revision_id IN (SELECT revision_id FROM selectable_revisions)
-        ORDER BY rpu.revision_id, u.fingerprint`,
+        ORDER BY rpu.revision_id, u.fingerprint`, // all revisions: looked up by the loaded revision ids
     )
     .all() as Array<{ revisionId: string; fingerprint: string }>) {
     (units.get(u.revisionId) ?? units.set(u.revisionId, []).get(u.revisionId)!).push(u.fingerprint);

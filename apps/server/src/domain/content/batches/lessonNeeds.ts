@@ -1,7 +1,7 @@
 import { MAX_LESSON_PLAYS, difficultyLevels } from "@english-lab/contracts";
 import { DEFAULT_QUOTAS, FORMAT_ORDER, GRAMMAR_REPEAT_CONFIG, applyReading, scaleQuotas, type Format } from "@english-lab/learning";
 import type { Db } from "../../../db/open.js";
-import { loadBlockedFingerprints, loadCandidates } from "../../sessions/bank.js";
+import { loadBlockedFingerprints, loadCandidates, type BankCandidate } from "../../sessions/bank.js";
 import { loadBlueprint, loadSettings, type BlueprintPolicy } from "../../sessions/policy.js";
 import { courseLessons } from "../../sessions/course.js";
 import { withRepeats } from "../../sessions/repeats.js";
@@ -62,13 +62,18 @@ export const withMargin = (deficit: number): number => (deficit <= 0 ? 0 : Math.
 /** Lessons in course order (the dashboard order) that can be played; completed practice sessions are counted per lesson. */
 function playableLessons(db: Db) { return courseLessons(db); }
 
-function needOf(db: Db, lesson: { id: string; key: string; completed: number }, now: Date, settingsValues: ReturnType<typeof loadSettings>["values"], blocked: ReadonlySet<string>): LessonNeed {
+/** The whole practice bank in the learner's range with the repeat rules applied: lessons only filter it by skill pool, so it is read once per request. */
+function lessonSupply(db: Db, settingsValues: ReturnType<typeof loadSettings>["values"], now: Date): BankCandidate[] {
+  return withRepeats(db, loadCandidates(db, "practice", [], difficultyLevels(settingsValues)), now).candidates;
+}
+
+function needOf(db: Db, lesson: { id: string; key: string; completed: number }, supply: readonly BankCandidate[], settingsValues: ReturnType<typeof loadSettings>["values"], blocked: ReadonlySet<string>): LessonNeed {
   const bp = loadBlueprint(db, lesson.id);
   const levels = difficultyLevels(settingsValues);
   const n = settingsValues.taskCount;
   const S = Math.max(0, PLANNING_SESSIONS - lesson.completed);
-  const all = loadCandidates(db, "practice", bp.policy.skillPool, levels);
-  const reusableSet = withRepeats(db, all, now).candidates;
+  const pool = new Set(bp.policy.skillPool);
+  const reusableSet = pool.size === 0 ? supply : supply.filter((c) => pool.has(c.skillId));
   // fresh = no sentence shown or reserved; reusable = shown before (labelled repeat). Overlapping sentences are counted once.
   const claimed = new Set<string>();
   const usable = reusableSet.filter((c) => {
@@ -155,13 +160,16 @@ export function lessonPlanView(db: Db, now: Date = new Date()): LessonPlanView |
   const settings = loadSettings(db).values;
   const blocked = loadBlockedFingerprints(db);
   const nextIndex = nextUnfinishedLessonIndex(lessons);
-  return { lessons: lessons.map((l) => needOf(db, l, now, settings, blocked)), nextIndex };
+  const supply = lessonSupply(db, settings, now);
+  return { lessons: lessons.map((l) => needOf(db, l, supply, settings, blocked)), nextIndex };
 }
 
 /** Need of one lesson (by blueprint revision id), for the gate that refuses to open a lesson whose stock no longer covers PLANNING_SESSIONS plays. */
 export function lessonNeedFor(db: Db, lessonId: string, now: Date = new Date()): LessonNeed | null {
   const lesson = playableLessons(db).find((l) => l.id === lessonId);
-  return lesson ? needOf(db, lesson, now, loadSettings(db).values, loadBlockedFingerprints(db)) : null;
+  if (!lesson) return null;
+  const settings = loadSettings(db).values;
+  return needOf(db, lesson, lessonSupply(db, settings, now), settings, loadBlockedFingerprints(db));
 }
 
 /** "Lesson L01 at B1-C1 needs: detect_error 4, guided_short_answer 1 (new or reusable exercises for the next 2 sessions)." */

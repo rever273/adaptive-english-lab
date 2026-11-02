@@ -32,8 +32,22 @@ export class ApiRequestError extends Error {
 }
 
 let csrfToken: string | null = null;
+/** Simultaneous identical GETs share one request; a mutation (POST/PATCH) drops them so nothing read before it is reused after it. */
+const inflightGets = new Map<string, Promise<unknown>>();
 
-async function send<T>(method: "GET" | "POST" | "PATCH", path: string, schema: ZodType<T>, body?: unknown): Promise<T> {
+function send<T>(method: "GET" | "POST" | "PATCH", path: string, schema: ZodType<T>, body?: unknown): Promise<T> {
+  if (method !== "GET") {
+    inflightGets.clear();
+    return request(method, path, schema, body).finally(() => inflightGets.clear());
+  }
+  const shared = inflightGets.get(path) as Promise<T> | undefined;
+  if (shared) return shared;
+  const started: Promise<T> = request(method, path, schema, body).finally(() => { if (inflightGets.get(path) === started) inflightGets.delete(path); });
+  inflightGets.set(path, started);
+  return started;
+}
+
+async function request<T>(method: "GET" | "POST" | "PATCH", path: string, schema: ZodType<T>, body?: unknown): Promise<T> {
   const headers: Record<string, string> = { Accept: "application/json" };
   if (method !== "GET") {
     if (!csrfToken) {

@@ -28,7 +28,7 @@ function visibleEntries(db: Db): Map<string, { id: string; learned: boolean }> {
 function bank(db: Db): Array<{ revisionId: string; content: string; difficulty: string; rubricVersion: string }> {
   return db
     .prepare(
-      `SELECT er.id AS revisionId, er.content_json AS content, er.difficulty AS difficulty, er.rubric_version AS rubricVersion
+      `SELECT er.id AS revisionId, json_extract(er.content_json, '$.vocabulary') AS content, er.difficulty AS difficulty, er.rubric_version AS rubricVersion
          FROM selectable_revisions s JOIN exercise_revisions er ON er.id = s.revision_id
         WHERE er.bank_role = 'practice' AND json_type(er.content_json, '$.vocabulary') IS NOT NULL
         ORDER BY er.id`,
@@ -41,8 +41,7 @@ function unitsOf(db: Db): Map<string, Array<{ id: string; fingerprint: string }>
   for (const u of db
     .prepare(
       `SELECT rpu.revision_id AS revisionId, u.id AS id, u.fingerprint AS fingerprint
-         FROM revision_prompt_units rpu JOIN prompt_units u ON u.id = rpu.unit_id
-        WHERE rpu.revision_id IN (SELECT revision_id FROM selectable_revisions)`,
+         FROM revision_prompt_units rpu JOIN prompt_units u ON u.id = rpu.unit_id`, // all revisions: callers look units up by selectable revision id
     )
     .all() as Array<{ revisionId: string; id: string; fingerprint: string }>) {
     (out.get(u.revisionId) ?? out.set(u.revisionId, []).get(u.revisionId)!).push({ id: u.id, fingerprint: u.fingerprint });
@@ -102,7 +101,7 @@ function shownRevisions(db: Db): Map<string, { at: string; slotId: string }> {
  * (the same global no-repeat ledger as grammar); `shown` = sentences already shown in an earlier vocabulary session, offered only as
  * labelled repeats (D64). Exercises for words that are not in the dictionary are never offered.
  */
-export function vocabularyCandidates(db: Db): { usable: VocabularyCandidate[]; shown: ShownCandidate[]; approvedForWords: number; approvedTotal: number } {
+export function vocabularyCandidates(db: Db): { usable: VocabularyCandidate[]; shown: ShownCandidate[]; approvedForWords: number; approvedTotal: number; events: Map<string, WordEvent[]> } {
   const entries = visibleEntries(db);
   const blocked = loadBlockedFingerprints(db);
   const units = unitsOf(db);
@@ -118,7 +117,7 @@ export function vocabularyCandidates(db: Db): { usable: VocabularyCandidate[]; s
   let approvedForWords = 0;
   const all = bank(db);
   for (const r of all) {
-    const meta = VocabularyPracticeMetadataSchema.safeParse((JSON.parse(r.content) as { vocabulary?: unknown }).vocabulary);
+    const meta = VocabularyPracticeMetadataSchema.safeParse(JSON.parse(r.content));
     if (!meta.success) continue;
     const entry = entries.get(normalizeWord(meta.data.target.lemma));
     if (!entry) continue;
@@ -134,7 +133,7 @@ export function vocabularyCandidates(db: Db): { usable: VocabularyCandidate[]; s
       shown.push({ ...cand, unexposedUnits, lastShownAt: seen.at, lastSlotId: seen.slotId, lastOutcome: outcomeBySlot.get(seen.slotId) ?? (attempted.has(seen.slotId) ? "success" : null) });
     } else if (!u.some((x) => blocked.has(x.fingerprint))) usable.push(cand);
   }
-  return { usable, shown, approvedForWords, approvedTotal: all.length };
+  return { usable, shown, approvedForWords, approvedTotal: all.length, events };
 }
 
 export interface VocabularyPracticeStatus {
@@ -158,22 +157,22 @@ export interface VocabularyPracticeStatus {
   wordQueue: { due: number; newWords: number; recent: number };
 }
 
-export function vocabularyPracticeStatus(db: Db, now: Date = new Date()): VocabularyPracticeStatus {
+/** `candidates` lets a caller that already read them (same request) skip a second pass over the bank. */
+export function vocabularyPracticeStatus(db: Db, now: Date = new Date(), candidates: ReturnType<typeof vocabularyCandidates> = vocabularyCandidates(db)): VocabularyPracticeStatus {
   const settings = loadSettings(db);
   const n = vocabularyTaskCount(settings.values);
-  const { usable, shown, approvedForWords } = vocabularyCandidates(db);
+  const { usable, shown, approvedForWords, events } = candidates;
   const entries = visibleEntries(db);
   const drafts = (db
     .prepare(
       `SELECT COUNT(*) AS n FROM exercise_revisions er
-        WHERE json_type(er.content_json, '$.vocabulary') IS NOT NULL AND er.id NOT IN (SELECT revision_id FROM selectable_revisions)
+        WHERE json_type(er.content_json, '$.vocabulary') IS NOT NULL
           AND er.exercise_id NOT IN (SELECT exercise_id FROM selectable_revisions)`, // a revision replaced by a newer approved one is history, not a draft
     )
     .get() as { n: number }).n;
   const active = db.prepare("SELECT s.id FROM sessions s JOIN vocabulary_sessions v ON v.session_id = s.id WHERE s.status = 'active' ORDER BY s.created_at DESC LIMIT 1").get() as { id: string } | undefined;
   const all = Number.MAX_SAFE_INTEGER;
   // `available` = the largest session (up to the configured size) the picker can really build with the soft repeat cap and the new-word cap
-  const events = wordEvents(db);
   const newWords = vocabularyNewWordsPerSession(settings.values);
   const candidateLemmas = new Set([...usable, ...shown].map(c => c.lemma));
   const wordQueue = { due: 0, newWords: 0, recent: 0 };
@@ -289,17 +288,18 @@ export function createVocabularySession(db: Db, deps: SessionDeps, req: { timezo
  * Content Studio → Vocabulary: per dictionary word, how many approved exercises exist, how many are still new (never shown or reserved),
  * how many were shown, and how many vocabulary revisions exist that are not approved and released (drafts, flagged, rejected).
  */
-export function vocabularyCoverage(db: Db, now: Date = new Date()) {
+export function vocabularyCoverage(db: Db, now: Date = new Date(), status?: VocabularyPracticeStatus) {
   const entries = visibleEntries(db);
   const blocked = loadBlockedFingerprints(db);
   const units = unitsOf(db);
-  const selectable = new Set((db.prepare("SELECT revision_id AS id FROM selectable_revisions").all() as Array<{ id: string }>).map((r) => r.id));
+  const releasedRows = db.prepare("SELECT revision_id AS id, exercise_id AS ex FROM selectable_revisions").all() as Array<{ id: string; ex: string }>;
+  const selectable = new Set(releasedRows.map((r) => r.id));
   const per = new Map<string, { lemma: string; entryId: string; learned: boolean; approved: number; available: number; shown: number; notReleased: number; families: Record<string, number> }>();
   for (const [lemma, e] of entries) per.set(lemma, { lemma, entryId: e.id, learned: e.learned, approved: 0, available: 0, shown: 0, notReleased: 0, families: { recognition: 0, guided_recall: 0, collocation: 0 } });
   let outside = 0;
-  const released = new Set((db.prepare("SELECT exercise_id AS id FROM selectable_revisions").all() as Array<{ id: string }>).map((r) => r.id));
-  for (const r of db.prepare("SELECT id, exercise_id AS ex, content_json AS c FROM exercise_revisions WHERE json_type(content_json, '$.vocabulary') IS NOT NULL").all() as Array<{ id: string; ex: string; c: string }>) {
-    const m = VocabularyPracticeMetadataSchema.safeParse((JSON.parse(r.c) as { vocabulary?: unknown }).vocabulary);
+  const released = new Set(releasedRows.map((r) => r.ex));
+  for (const r of db.prepare("SELECT id, exercise_id AS ex, json_extract(content_json, '$.vocabulary') AS c FROM exercise_revisions WHERE json_type(content_json, '$.vocabulary') IS NOT NULL").all() as Array<{ id: string; ex: string; c: string }>) {
+    const m = VocabularyPracticeMetadataSchema.safeParse(JSON.parse(r.c));
     if (!m.success) continue;
     const w = per.get(normalizeWord(m.data.target.lemma));
     if (!w) {
@@ -326,13 +326,13 @@ export function vocabularyCoverage(db: Db, now: Date = new Date()) {
     })
     // words with misses and no fresh sentences left come first: they need new exercises most
     .sort((a, b) => Number(b.recentMisses > 0 && b.freshLeft === 0) - Number(a.recentMisses > 0 && a.freshLeft === 0) || a.available - b.available || a.lemma.localeCompare(b.lemma));
-  const status = vocabularyPracticeStatus(db, now);
+  status ??= vocabularyPracticeStatus(db, now);
   return { words, exercisesForOtherWords: outside, sessionSize: status.taskCount, available: status.available, freshAvailable: status.freshAvailable, warning: status.shortage?.message ?? null };
 }
 
 /** read-only export for the coding agent that writes vocabulary exercises: the words, their meaning so far and what already exists */
-export function exportVocabulary(db: Db, now: Date = new Date()): { json: unknown; markdown: string } {
-  const cov = vocabularyCoverage(db, now);
+export function exportVocabulary(db: Db, now: Date = new Date(), status?: VocabularyPracticeStatus): { json: unknown; markdown: string } {
+  const cov = vocabularyCoverage(db, now, status);
   const meaning = db.prepare(
     `SELECT translation_ru AS tr, part_of_speech AS pos, example_en AS ex FROM vocabulary_revisions WHERE entry_id = ? ORDER BY (source = 'user') DESC, revision DESC LIMIT 1`,
   );

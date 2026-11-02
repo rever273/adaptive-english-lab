@@ -1,5 +1,5 @@
 import { useEffect, useState } from "react";
-import { fetchContentStock } from "../api";
+import { stockCache } from "../pages/studioCache";
 
 type Category = "grammar" | "vocabulary";
 const SEEN = "stockNoticeSeen";
@@ -8,10 +8,10 @@ const seenBefore = (c: Category): boolean => { try { return sessionStorage.getIt
 const markSeen = (c: Category): void => { try { sessionStorage.setItem(`${SEEN}:${c}`, "1"); } catch { /* storage can be blocked: the notice then simply lives until dismissed */ } };
 
 export function ContentStockNotice({ onOpen }: { onOpen: (category: Category) => void }) {
-  const [stock, setStock] = useState<Awaited<ReturnType<typeof fetchContentStock>> | null>(null);
+  const [stock, setStock] = useState(() => stockCache.peek());
   const [dismissed, setDismissed] = useState<Set<string>>(() => new Set((["grammar", "vocabulary"] as const).filter(seenBefore)));
   useEffect(() => {
-    const load = async () => { try { setStock(await fetchContentStock()); } catch { /* Keep the previous stock; connection errors have their own UI. */ } };
+    const load = async () => { try { setStock(await stockCache.get(true)); } catch { /* Keep the previous stock; connection errors have their own UI. */ } };
     void load(); const t = setInterval(() => void load(), 15000); return () => clearInterval(t);
   }, []);
   /** grammar is gated when a lesson is opened (LESSON_STOCK_LOW), never announced during a lesson */

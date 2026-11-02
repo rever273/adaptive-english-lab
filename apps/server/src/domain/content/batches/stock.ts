@@ -20,7 +20,7 @@ export function replenishmentStock(db: Db, now: Date = new Date()) {
   if (plan) {
     const next = plan.lessons[plan.nextIndex]!;
     const course = calculateCoursePlan(db, now);
-    const vocab = vocabularyPracticeStatus(db);
+    const vocab = vocabularyDemand.status;
     const nextMissing = course.missing.filter(item => item.lesson === next.key);
     const low = nextMissing.length > 0;
     const formatDeficits = [...new Set(nextMissing.map(item => item.type))].map(type => ({ kind: "format" as const, name: type, need: nextMissing.filter(item => item.type === type).length, have: 0, deficit: nextMissing.filter(item => item.type === type).length }));

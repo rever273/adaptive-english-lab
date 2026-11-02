@@ -77,8 +77,7 @@ export function withRepeats(db: Db, all: readonly BankCandidate[], now: Date, ho
   for (const u of db
     .prepare(
       `SELECT rpu.revision_id AS revisionId, u.id AS id, u.fingerprint AS fingerprint
-         FROM revision_prompt_units rpu JOIN prompt_units u ON u.id = rpu.unit_id
-        WHERE rpu.revision_id IN (SELECT revision_id FROM selectable_revisions)`,
+         FROM revision_prompt_units rpu JOIN prompt_units u ON u.id = rpu.unit_id`, // all revisions: looked up by the candidates' revision ids
     )
     .all() as Array<{ revisionId: string; id: string; fingerprint: string }>) {
     (units.get(u.revisionId) ?? units.set(u.revisionId, []).get(u.revisionId)!).push({ id: u.id, fingerprint: u.fingerprint });

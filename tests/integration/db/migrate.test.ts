@@ -92,7 +92,7 @@ describe("migration 001 content", () => {
     const d = open();
     await runMigrations(d, { migrationsDir: realMigrations, appVersion: "test" });
     const before = d.prepare("SELECT * FROM schema_migrations").all();
-    expect(before).toHaveLength(22);
+    expect(before).toHaveLength(23);
     const r = await runMigrations(d, { migrationsDir: realMigrations, appVersion: "other" });
     expect(r.applied).toEqual([]);
     expect(r.backupSkippedReason).toBe("nothing_pending");
