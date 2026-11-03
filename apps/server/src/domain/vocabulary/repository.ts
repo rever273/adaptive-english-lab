@@ -367,12 +367,35 @@ export interface VocabularyTotals {
   bankOccurrences: number;
   displayedOccurrences: number;
 }
-/** entries whose latest event is not a removal (D63) */
-const VISIBLE = "(SELECT kind FROM vocabulary_entry_events ev WHERE ev.entry_id = vocabulary_entries.id ORDER BY ev.created_at DESC, ev.rowid DESC LIMIT 1) IS NOT 'removed'";
+/** entries whose latest event is not a removal (D63). References the table by its real name so it works with an `e` alias. */
+export const VISIBLE = "(SELECT kind FROM vocabulary_entry_events ev WHERE ev.entry_id = vocabulary_entries.id ORDER BY ev.created_at DESC, ev.rowid DESC LIMIT 1) IS NOT 'removed'";
 const VISIBLE_ENC = "entry_id IN (SELECT id FROM vocabulary_entries WHERE " + VISIBLE + ")";
 
-export function vocabularyTotals(db: Db): VocabularyTotals {
-  const n = (sql: string) => (db.prepare(sql).get() as { n: number }).n;
+/** current Russian translation for a set of entry ids, with the same priority as `view`: a non-empty user text wins, then a model draft. */
+export function currentTranslations(db: Db, entryIds: readonly string[]): Map<string, string> {
+  const out = new Map<string, string>();
+  if (entryIds.length === 0) return out;
+  const rows = db
+    .prepare(
+      `SELECT r.entry_id AS id, r.translation_ru AS t, r.source AS s FROM vocabulary_revisions r
+        WHERE r.entry_id IN (${entryIds.map(() => "?").join(",")})
+        ORDER BY r.revision DESC`,
+    )
+    .all(...entryIds) as Array<{ id: string; t: string; s: string }>;
+  for (const row of rows) {
+    if (out.has(row.id)) continue;
+    if (row.t.trim() === "") continue;
+    if (row.s === "user") out.set(row.id, row.t.trim());
+  }
+  for (const row of rows) {
+    if (out.has(row.id)) continue;
+    if (row.t.trim() === "") continue;
+    out.set(row.id, row.t.trim());
+  }
+  return out;
+}
+
+export function vocabularyTotals(db: Db): VocabularyTotals {  const n = (sql: string) => (db.prepare(sql).get() as { n: number }).n;
   return {
     words: n(`SELECT COUNT(*) AS n FROM vocabulary_entries WHERE ${VISIBLE}`),
     learned: n(`SELECT COUNT(*) AS n FROM vocabulary_entries WHERE learned = 1 AND ${VISIBLE}`),

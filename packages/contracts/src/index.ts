@@ -122,6 +122,11 @@ export const SettingsV1Schema = z
     /** Target CEFR range; old revisions without bounds keep their historical A2-C1 meaning. */
     difficultyMin: z.enum(CEFR_RANGE).optional(),
     difficultyMax: z.enum(CEFR_RANGE).optional(),
+    /** TASK_027: typing practice settings; missing on older revisions means the defaults. */
+    typingWordsPerLevel: z.number().int().min(10).max(100).optional(),
+    typingVocabularyShare: z.number().min(0).max(1).optional(),
+    typingSpeedMultiplier: z.number().min(0.5).max(2).optional(),
+    typingBookMinutes: z.number().int().min(1).max(30).optional(),
   })
   .strict();
 export type SettingsV1 = z.infer<typeof SettingsV1Schema>;
@@ -134,6 +139,14 @@ export const preloadModelOnStart = (v: Pick<SettingsV1, "preloadModelOnStart">):
 export const reviewNoticeThreshold = (v: Pick<SettingsV1, "reviewNoticeThreshold">): number => v.reviewNoticeThreshold ?? 5;
 
 export const vocabularyNewWordsPerSession = (v: Pick<SettingsV1, "vocabularyNewWordsPerSession">): number => v.vocabularyNewWordsPerSession ?? 4;
+
+export const typingWordsPerLevel = (v: Pick<SettingsV1, "typingWordsPerLevel">): number => v.typingWordsPerLevel ?? 30;
+
+export const typingVocabularyShare = (v: Pick<SettingsV1, "typingVocabularyShare">): number => v.typingVocabularyShare ?? 0.3;
+
+export const typingSpeedMultiplier = (v: Pick<SettingsV1, "typingSpeedMultiplier">): number => v.typingSpeedMultiplier ?? 1.05;
+
+export const typingBookMinutes = (v: Pick<SettingsV1, "typingBookMinutes">): number => v.typingBookMinutes ?? 5;
 
 /**
  * The levels for grammar practice and new content, or null for the full A2-C2 range.
@@ -169,3 +182,5 @@ export * from "./exercises.js";
 export * from "./vocabulary-practice.js";
 export * from "./sessions.js";
 export * from "./batches.js";
+export * from "./typing.js";
+export * from "./typingText.js";

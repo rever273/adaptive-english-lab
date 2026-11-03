@@ -3,8 +3,8 @@ import type { AiModelStatus } from "@english-lab/contracts";
 import * as api from "../api";
 import { modelErrorText } from "../components/AiModelNotice";
 
-type Values = { preloadModelOnStart?: boolean; practiceSoundsEnabled?: boolean; taskCount: number; weakRatio: number; voiceTarget: 0 | 1 | 2; voiceShare?: number; vocabularyTaskCount?: number; vocabularyNewWordsPerSession?: number; reviewNoticeThreshold?: number; difficultyMin?: api.Level; difficultyMax?: api.Level };
-type Draft = { taskCount: number; weakRatio: number; voiceShare: number; practiceSoundsEnabled: boolean; vocabularyTaskCount: number; vocabularyNewWordsPerSession: number; reviewNoticeThreshold: number; difficultyMin: api.Level; difficultyMax: api.Level };
+type Values = { preloadModelOnStart?: boolean; practiceSoundsEnabled?: boolean; taskCount: number; weakRatio: number; voiceTarget: 0 | 1 | 2; voiceShare?: number; vocabularyTaskCount?: number; vocabularyNewWordsPerSession?: number; reviewNoticeThreshold?: number; difficultyMin?: api.Level; difficultyMax?: api.Level; typingWordsPerLevel?: number; typingVocabularyShare?: number; typingSpeedMultiplier?: number; typingBookMinutes?: number };
+type Draft = { taskCount: number; weakRatio: number; voiceShare: number; practiceSoundsEnabled: boolean; vocabularyTaskCount: number; vocabularyNewWordsPerSession: number; reviewNoticeThreshold: number; difficultyMin: api.Level; difficultyMax: api.Level; typingWordsPerLevel: number; typingVocabularyShare: number; typingSpeedMultiplier: number; typingBookMinutes: number };
 const LEVELS: api.Level[] = ["A2", "B1", "B2", "C1", "C2"];
 
 /** docs/04 §7: only the settings the allocator reads today. A change is a new settings revision and applies to the next session. */
@@ -69,6 +69,32 @@ export function Settings() {
               Only tasks where you write a sentence can be spoken, so a session may have fewer. You can always type or skip instead. Default {Math.round(pick(saved.defaults).voiceShare * 100)}% (≈ {voiceCount(pick(saved.defaults))} of {saved.defaults.taskCount}).
             </span>
           </label>
+        </div>
+
+        <div className="card settings-card">
+          <h3>Typing Practice</h3>
+          <div className="settings-fields">
+            <label>
+              Words per level
+              <input type="number" min={10} max={100} value={draft.typingWordsPerLevel} onChange={(e) => setDraft({ ...draft, typingWordsPerLevel: clamp(Math.round(Number(e.target.value) || 30), 10, 100) })} data-testid="set-typing-words" />
+              <span className="muted small">10–100, default 30. The exact number of meteor words in a Words level; it does not grow automatically.</span>
+            </label>
+            <label>
+              Personal vocabulary share: {Math.round(draft.typingVocabularyShare * 100)}%
+              <input type="range" min={0} max={100} step={5} value={Math.round(draft.typingVocabularyShare * 100)} onChange={(e) => setDraft({ ...draft, typingVocabularyShare: Number(e.target.value) / 100 })} data-testid="set-typing-vocab-share" />
+              <span className="muted small">Share of Words targets taken from your saved vocabulary. Default 30%.</span>
+            </label>
+            <label>
+              Speed multiplier: {Math.round(draft.typingSpeedMultiplier * 100)}%
+              <input type="range" min={50} max={200} step={5} value={Math.round(draft.typingSpeedMultiplier * 100)} onChange={(e) => setDraft({ ...draft, typingSpeedMultiplier: Number(e.target.value) / 100 })} data-testid="set-typing-speed" />
+              <span className="muted small">50–200%, default 105%. Makes the game slightly harder than your current comfortable speed.</span>
+            </label>
+            <label>
+              Book session duration (minutes)
+              <input type="number" min={1} max={30} value={draft.typingBookMinutes} onChange={(e) => setDraft({ ...draft, typingBookMinutes: clamp(Math.round(Number(e.target.value) || 5), 1, 30) })} data-testid="set-typing-book-minutes" />
+              <span className="muted small">1–30, default 5. Target duration of one Books level; the actual length rounds to a paragraph boundary.</span>
+            </label>
+          </div>
         </div>
 
         <div className="card settings-card">
@@ -197,7 +223,7 @@ function VocabularySpeechSettings() {
 }
 
 /** older settings revisions hold a fixed voice count; it is shown as the share of the task count it was */
-const pick = (v: Values): Draft => ({ taskCount: v.taskCount, weakRatio: v.weakRatio, voiceShare: v.voiceShare ?? Math.round((v.voiceTarget / v.taskCount) * 20) / 20, practiceSoundsEnabled: v.practiceSoundsEnabled ?? true, vocabularyTaskCount: v.vocabularyTaskCount ?? 8, vocabularyNewWordsPerSession: v.vocabularyNewWordsPerSession ?? 4, reviewNoticeThreshold: v.reviewNoticeThreshold ?? 5, difficultyMin: v.difficultyMin ?? (v.difficultyMax ? "A2" : "B1"), difficultyMax: v.difficultyMax ?? "C1" });
+const pick = (v: Values): Draft => ({ taskCount: v.taskCount, weakRatio: v.weakRatio, voiceShare: v.voiceShare ?? Math.round((v.voiceTarget / v.taskCount) * 20) / 20, practiceSoundsEnabled: v.practiceSoundsEnabled ?? true, vocabularyTaskCount: v.vocabularyTaskCount ?? 8, vocabularyNewWordsPerSession: v.vocabularyNewWordsPerSession ?? 4, reviewNoticeThreshold: v.reviewNoticeThreshold ?? 5, difficultyMin: v.difficultyMin ?? (v.difficultyMax ? "A2" : "B1"), difficultyMax: v.difficultyMax ?? "C1", typingWordsPerLevel: v.typingWordsPerLevel ?? 30, typingVocabularyShare: v.typingVocabularyShare ?? 0.3, typingSpeedMultiplier: v.typingSpeedMultiplier ?? 1.05, typingBookMinutes: v.typingBookMinutes ?? 5 });
 const voiceCount = (d: Draft): number => Math.round(d.voiceShare * d.taskCount);
 const clamp = (n: number, lo: number, hi: number) => Math.min(hi, Math.max(lo, n));
 

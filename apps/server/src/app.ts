@@ -33,6 +33,7 @@ import { registerSttRoutes } from "./routes/stt.js";
 import type { SttService } from "./domain/stt/sttService.js";
 import { registerSessionRoutes } from "./routes/sessions.js";
 import { registerSettingsRoutes } from "./routes/settings.js";
+import { registerTypingRoutes } from "./routes/typing.js";
 import { registerAiModelRoutes } from "./routes/aiModel.js";
 import { LOCAL_MODEL_TAG } from "./domain/ai/config.js";
 import type { ModelResidency } from "./queue/modelResidency.js";
@@ -112,6 +113,7 @@ export async function buildApp(deps: AppDeps): Promise<FastifyInstance> {
   const base = { now: deps.attempts?.now ?? (() => new Date()), newId: deps.attempts?.newId ?? randomUUID };
   registerSessionRoutes(app, db, base, { ...(deps.sessions ?? {}), onLease: () => deps.scheduler?.kick(), onSessionEnd: (id) => void deps.stt?.stopForSession(id), onVoiceDone: async (id) => { deps.scheduler?.releaseVoiceHold(id); await deps.stt?.stopForSession(id); deps.scheduler?.kick(); } });
   registerVocabularyPracticeRoutes(app, db, base);
+  registerTypingRoutes(app, db, base, { booksDir: path.join(config.dataRoot, "typing-books") });
   registerVocabularyImageRoutes(app, config.vocabularyImagesDir, db);
   registerVocabularySpeechRoutes(app, db, base, { key: deps.elevenLabsKey, voiceId: deps.elevenLabsVoiceId, cacheDir: path.join(config.dataRoot, "vocabulary-speech") });
   registerGroqStatusRoute(app, { key: deps.groqKey });

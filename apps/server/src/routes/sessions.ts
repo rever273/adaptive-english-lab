@@ -27,6 +27,7 @@ import { revealSlot } from "../domain/sessions/reveal.js";
 import { currentSessionId, getSnapshot, recentSessionId, sessionCategory, type SessionCategory } from "../domain/sessions/snapshot.js";
 import { reviewStatus } from "../domain/sessions/reviewQueue.js";
 import { activityProgress } from "../domain/sessions/xp.js";
+import { typingProgress } from "../domain/typing/xp.js";
 import { ApiError } from "../errors.js";
 
 function parse<T>(schema: ZodType<T>, body: unknown): T {
@@ -57,7 +58,7 @@ export interface SessionRouteOptions {
 }
 
 export function registerSessionRoutes(app: FastifyInstance, db: Db, deps: SessionDeps, opts: SessionRouteOptions = {}): void {
-  app.get("/api/v1/activity-progress", async () => ({ grammar: activityProgress(db, "grammar"), vocabulary: activityProgress(db, "vocabulary") }));
+  app.get("/api/v1/activity-progress", async () => ({ grammar: activityProgress(db, "grammar"), vocabulary: activityProgress(db, "vocabulary"), typing: typingProgress(db) }));
   app.post("/api/v1/sessions", async (req, reply): Promise<CreateSessionResponse> => {
     const body = parse(CreateSessionRequestSchema, req.body);
     const r = body.purpose === "diagnostic" ? createDiagnosticBlock(db, deps, body) : body.purpose === "heldout" ? createHeldoutCheck(db, deps, body) : createPracticeSession(db, deps, body, { discovery: opts.discovery, enforceStock: true });

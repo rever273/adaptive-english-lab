@@ -4,6 +4,7 @@ import { Analytics } from "./pages/Analytics";
 import { ContentStudio } from "./pages/ContentStudio";
 import { Practice } from "./pages/Practice";
 import { Vocabulary } from "./pages/Vocabulary";
+import { Typing } from "./pages/Typing";
 import { Tutor } from "./pages/Tutor";
 import { Settings } from "./pages/Settings";
 import { Status } from "./pages/Status";
@@ -14,16 +15,17 @@ import { WordCatcher } from "./components/WordPopup";
 import { Kbd, useKeys } from "./components/hotkeys";
 import { ContentStockNotice } from "./components/ContentStockNotice";
 
-type Page = "practice" | "vocabulary" | "tutor" | "analytics" | "studio" | "tasks" | "settings";
+type Page = "practice" | "vocabulary" | "typing" | "tutor" | "analytics" | "studio" | "tasks" | "settings";
 
-const PAGES: Array<{ id: Page; label: string; icon: string; path: string }> = [
-  { id: "practice", label: "Practice", icon: "pi-play-circle", path: "/practice" },
-  { id: "vocabulary", label: "Vocabulary", icon: "pi-bookmark", path: "/vocabulary" },
-  { id: "tutor", label: "Tutor", icon: "pi-comments", path: "/tutor" },
-  { id: "analytics", label: "Analytics", icon: "pi-chart-line", path: "/analytics" },
-  { id: "studio", label: "Content Studio", icon: "pi-box", path: "/content-studio" },
-  { id: "tasks", label: "AI Tasks", icon: "pi-microchip", path: "/ai-tasks" },
-  { id: "settings", label: "Settings & Status", icon: "pi-cog", path: "/settings" },
+const PAGES: Array<{ id: Page; label: string; icon: string; path: string; group: "tasks" | "tools" }> = [
+  { id: "practice", label: "Practice", icon: "pi-play-circle", path: "/practice", group: "tasks" },
+  { id: "vocabulary", label: "Vocabulary", icon: "pi-bookmark", path: "/vocabulary", group: "tasks" },
+  { id: "typing", label: "Typing", icon: "pi-bullseye", path: "/typing", group: "tasks" },
+  { id: "tutor", label: "Tutor", icon: "pi-comments", path: "/tutor", group: "tools" },
+  { id: "analytics", label: "Analytics", icon: "pi-chart-line", path: "/analytics", group: "tools" },
+  { id: "studio", label: "Content Studio", icon: "pi-box", path: "/content-studio", group: "tools" },
+  { id: "tasks", label: "AI Tasks", icon: "pi-microchip", path: "/ai-tasks", group: "tools" },
+  { id: "settings", label: "Settings & Status", icon: "pi-cog", path: "/settings", group: "tools" },
 ];
 
 /** each tab has its own address (e.g. /vocabulary), so a reload or a bookmark opens the same tab; an unknown address shows Practice */
@@ -70,7 +72,7 @@ export function App() {
     window.addEventListener("popstate", onPop);
     return () => window.removeEventListener("popstate", onPop);
   }, []);
-  // Alt+1 ... Alt+7 open the tabs
+  // Alt+1 ... Alt+8 open the tabs
   useKeys((e) => {
     if (!e.altKey || e.ctrlKey || e.metaKey || e.repeat) return;
     const i = Number(e.key) - 1;
@@ -95,7 +97,7 @@ export function App() {
         </div>
         <nav aria-label="Main">
           {PAGES.map((p, i) => (
-            <button key={p.id} className={`tab has-kbd${page === p.id ? " tab-on" : ""}`} aria-current={page === p.id ? "page" : undefined} onClick={() => go(p.id)} title={`Alt+${i + 1}`}>
+            <button key={p.id} className={`tab has-kbd${page === p.id ? " tab-on" : ""}${i > 0 && p.group === "tools" && PAGES[i - 1]!.group === "tasks" ? " tab-group-start" : ""}`} aria-current={page === p.id ? "page" : undefined} onClick={() => go(p.id)} title={`Alt+${i + 1}`}>
               <Kbd k={String(i + 1)} />
               <i className={`pi ${p.icon}`} aria-hidden="true" />
               {p.label}
@@ -108,6 +110,8 @@ export function App() {
           <Practice onNavigate={(p) => go(p)} />
         ) : page === "vocabulary" ? (
           <Vocabulary onNavigate={(p) => go(p, "vocabulary")} />
+        ) : page === "typing" ? (
+          <Typing onNavigate={(p) => go(p)} />
         ) : page === "tutor" ? (
           <Tutor />
         ) : page === "analytics" ? (

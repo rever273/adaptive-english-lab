@@ -17,6 +17,11 @@ import {
   type AiModelStatus,
   type Capabilities,
   type Health,
+  type TypingAnalytics as TypingAnalyticsData,
+  type TypingBookStartResponse,
+  type TypingOverview,
+  type TypingResult,
+  type TypingWordsStartResponse,
 } from "@english-lab/contracts";
 import type { ZodType } from "zod";
 
@@ -79,12 +84,12 @@ export const loadAiModel = (): Promise<AiModelStatus> => send("POST", "/api/v1/a
 export const unloadAiModel = (): Promise<AiModelStatus> => send("POST", "/api/v1/ai/model/unload", AiModelStatusSchema, {});
 export const fetchCapabilities = (): Promise<Capabilities> => send("GET", "/api/v1/capabilities", CapabilitiesSchema);
 
-type SettingsValues = { preloadModelOnStart?: boolean; practiceSoundsEnabled?: boolean; taskCount: number; weakRatio: number; voiceTarget: 0 | 1 | 2; voiceShare?: number; vocabularyTaskCount?: number; vocabularyNewWordsPerSession?: number; reviewNoticeThreshold?: number; difficultyMin?: Level; difficultyMax?: Level };
+type SettingsValues = { preloadModelOnStart?: boolean; practiceSoundsEnabled?: boolean; taskCount: number; weakRatio: number; voiceTarget: 0 | 1 | 2; voiceShare?: number; vocabularyTaskCount?: number; vocabularyNewWordsPerSession?: number; reviewNoticeThreshold?: number; difficultyMin?: Level; difficultyMax?: Level; typingWordsPerLevel?: number; typingVocabularyShare?: number; typingSpeedMultiplier?: number; typingBookMinutes?: number };
 export type Level = "A2" | "B1" | "B2" | "C1" | "C2";
 type SettingsView = { revision: number; values: SettingsValues; defaults: SettingsValues };
 export const fetchSettings = () => send("GET", "/api/v1/settings", typed<SettingsView>());
 export const savePreloadModel = (on: boolean) => send("POST", "/api/v1/settings", typed<SettingsView>(), { preloadModelOnStart: on });
-export const saveSettings = (values: { taskCount: number; weakRatio: number; voiceShare: number; practiceSoundsEnabled?: boolean; vocabularyTaskCount?: number; vocabularyNewWordsPerSession?: number; reviewNoticeThreshold?: number; difficultyMin?: Level; difficultyMax?: Level }) => send("POST", "/api/v1/settings", typed<SettingsView>(), values);
+export const saveSettings = (values: { taskCount: number; weakRatio: number; voiceShare: number; practiceSoundsEnabled?: boolean; vocabularyTaskCount?: number; vocabularyNewWordsPerSession?: number; reviewNoticeThreshold?: number; difficultyMin?: Level; difficultyMax?: Level; typingWordsPerLevel?: number; typingVocabularyShare?: number; typingSpeedMultiplier?: number; typingBookMinutes?: number }) => send("POST", "/api/v1/settings", typed<SettingsView>(), values);
 export type VocabularySpeechStatus = { enabled: boolean; configured: boolean; requests: number; blockedUntil: string | null };
 export const fetchVocabularySpeech = () => send("GET", "/api/v1/vocabulary-speech", typed<VocabularySpeechStatus>());
 export type VocabularySpeechCredits = { available: boolean; reason?: string; used?: number; limit?: number; remaining?: number; resetsAt?: string | null; tier?: string | null; appCharacters30d: number };
@@ -348,8 +353,31 @@ export const askTutor = (body: { sessionId: string; slotId: string; kind: "why" 
 export const fetchAgentTask = (kind: "session" | "exercise" | "batch" | "findings" | "coverage" | "progress" | "lessons" | "vocabulary" | "review", id?: string) => send("GET", `/api/v1/tutor/agent-task?kind=${kind}${id ? `&id=${encodeURIComponent(id)}` : ""}`, anyOf<{ text: string }>());
 
 // ---- Vocabulary Practice, XP tracks, vocabulary coverage and analytics (vocabulary TZ) ----
-export interface TrackProgress { track: "grammar" | "vocabulary"; total: number; level: number; withinLevel: number; threshold: number; ruleVersion: string; levelRule?: string }
-export const fetchActivityProgress = () => send("GET", "/api/v1/activity-progress", typed<{ grammar: TrackProgress; vocabulary: TrackProgress }>());
+export interface TrackProgress { track: "grammar" | "vocabulary" | "typing"; total: number; level: number; withinLevel: number; threshold: number; ruleVersion: string; levelRule?: string }
+export const fetchActivityProgress = () => send("GET", "/api/v1/activity-progress", typed<{ grammar: TrackProgress; vocabulary: TrackProgress; typing: TrackProgress }>());
+
+// ---- Typing Practice (TASK_027) ----
+export type { TypingAnalyticsData, TypingBookStartResponse, TypingOverview, TypingResult, TypingWordsStartResponse };
+export const fetchTypingOverview = () => send("GET", "/api/v1/typing/overview", typed<TypingOverview>());
+export const startTypingWords = () => send("POST", "/api/v1/typing/words/start", typed<TypingWordsStartResponse>(), {});
+export const typingWordAppearances = (sessionId: string, appearances: Array<{ planIndex: number; order: number }>) => send("POST", `/api/v1/typing/words/${encodeURIComponent(sessionId)}/appearances`, typed<{ ok: true }>(), { appearances });
+export const completeTypingWords = (sessionId: string, body: { status: "completed" | "failed"; activeMs: number; charsTyped: number; errors: number; appearances: Array<{ planIndex: number; order: number }>; destroyedPlanIndexes: number[] }) => send("POST", `/api/v1/typing/words/${encodeURIComponent(sessionId)}/complete`, typed<TypingResult>(), body);
+export const abortTypingWords = (sessionId: string, body: { activeMs?: number; charsTyped?: number; errors?: number }) => send("POST", `/api/v1/typing/words/${encodeURIComponent(sessionId)}/abort`, typed<{ ok: true }>(), body);
+export const startTypingBook = () => send("POST", "/api/v1/typing/books/start", typed<TypingBookStartResponse>(), {});
+export const checkpointTypingBook = (sessionId: string, body: { offset: number; activeMs: number; charsTyped: number; errors: number }) => send("POST", `/api/v1/typing/books/${encodeURIComponent(sessionId)}/checkpoint`, typed<{ ok: true; applied: boolean }>(), body);
+export const completeTypingBook = (sessionId: string, body: { offset: number; activeMs: number; charsTyped: number; errors: number }) => send("POST", `/api/v1/typing/books/${encodeURIComponent(sessionId)}/complete`, typed<TypingResult>(), body);
+export const abortTypingBook = (sessionId: string, body: { activeMs?: number; charsTyped?: number; errors?: number }) => send("POST", `/api/v1/typing/books/${encodeURIComponent(sessionId)}/abort`, typed<{ ok: true }>(), body);
+export const fetchTypingResult = (sessionId: string) => send("GET", `/api/v1/typing/sessions/${encodeURIComponent(sessionId)}/result`, typed<TypingResult>());
+export const fetchTypingAnalytics = (mode: "words" | "books", days: "7" | "30" | "90" | "all") => send("GET", `/api/v1/analytics/typing?mode=${mode}&days=${days}&timezone=${encodeURIComponent(Intl.DateTimeFormat().resolvedOptions().timeZone)}`, typed<TypingAnalyticsData>());
+/** fetch with keepalive for `pagehide`/`visibilitychange` checkpoints (CSRF requires fetch, not sendBeacon) */
+export async function sendKeepalive(path: string, body: unknown): Promise<void> {
+  if (!csrfToken) return; // no token yet: losing the last seconds is acceptable
+  try {
+    await fetch(path, { method: "POST", keepalive: true, headers: { "Content-Type": "application/json", "X-CSRF-Token": csrfToken }, body: JSON.stringify(body) });
+  } catch {
+    /* best effort */
+  }
+}
 export interface VocabPracticeStatus { wordQueue?: { due: number; newWords: number; recent: number }; taskCount: number; available: number; freshAvailable?: number; repeatsAvailable?: number; repeatStock?: number; wordsWithContexts: number; words: number; learned: number; approvedForWords: number; draftsNotReleased: number; shortage: { available: number; requested: number; message: string } | null; activeSessionId: string | null }
 export const fetchVocabPractice = () => send("GET", "/api/v1/vocabulary/practice", typed<VocabPracticeStatus>());
 export const createVocabSession = (count?: number) =>

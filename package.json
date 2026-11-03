@@ -26,6 +26,8 @@
     "lab:verdicts": "node scripts/attempt-verdicts.mjs",
     "lab:thoughts": "node scripts/lab-thoughts.mjs",
     "vocab:backfill": "node scripts/vocab-backfill.mjs",
+    "typing:seed": "node scripts/typing-seed.mjs",
+    "typing:prepare-book": "node scripts/typing-prepare-book.mjs",
     "content:agent": "node scripts/content-agent.mjs",
     "content:validate": "node scripts/content-validate.mjs",
     "trial:generate": "node scripts/generation-trial.mjs",

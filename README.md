@@ -51,8 +51,9 @@ Legend: **Working** = implemented and covered by automated tests · **Partial** 
 | Analytics and export | Working | Reports computed by code from raw attempts (first-attempt accuracy, Wilson intervals, series kept apart), CSV/JSON export, external assessment import. A separate Vocabulary view shows recognition, recall and collocation accuracy with sample sizes, XP by day and words that need another look. |
 | Vocabulary | Working | Save a word from any exercise; the local model drafts a translation and a CEFR level, your own edits are never overwritten. No flashcards. |
 | Vocabulary Practice | Working | Optional short sessions (5–10 tasks, default 8) with your saved words in new sentences: word in context, recall from a clue, collocations. Graded by code; kept apart from grammar Mastery. |
-| Keyboard | Working | Enter answers and continues, 1–9 pick an option, I / H / A / S act, hold M to speak (release to transcribe), Alt+1…7 switch tabs. The key is shown on a small badge on each button. |
-| Levels and XP | Working | Two independent tracks in the header, Grammar and Vocabulary: 10 XP per finished task, a level every 100 XP, tier badges. Activity, not a grade. |
+| Typing Practice | Working | A third practice kind: **Words** (arcade: type words to destroy falling meteors) and **Books** (calm typing of a classic novel, no way to lose), with its own Typing XP, speed/accuracy analytics and local settings. |
+| Keyboard | Working | Enter answers and continues, 1–9 pick an option, I / H / A / S act, hold M to speak (release to transcribe), Alt+1…8 switch tabs. The key is shown on a small badge on each button. |
+| Levels and XP | Working | Three independent tracks in the header — Grammar, Vocabulary and Typing. Grammar and Vocabulary: 10 XP per finished task; Typing: XP per completed typing level. A level every 100 XP, tier badges. Activity, not a grade. |
 | Tutor | Working | Explains an answered task (approved rule first, AI drafts labelled as drafts); "Copy Agent Task" for an external coding agent. |
 | Content Studio | Working, reviewed | Grammar and dictionary-based vocabulary batches (default 50), stock warnings, and one copied agent task to review, repair and publish. Every final revision needs an individual review; corrections need an independent reviewer. |
 | GPU-aware task scheduler | Working | One GPU dispatcher; speech has top priority and pauses background AI work. |
@@ -107,6 +108,15 @@ npm start
 ```
 
 `npm run first10:seed` loads the first ten lessons, the diagnostic and the delayed checks into your profile (run it once, while the app is stopped; running it again adds nothing twice). `npm start` starts the server in the background and opens <http://127.0.0.1:4318/>; `npm stop` stops it. If you prefer to keep the server in a terminal window, use `npm run lab` instead and stop it with Ctrl+C. Closing the browser does not stop anything.
+
+Typing Practice needs two local, git-ignored data files that are never published: the word bank and the book. Run once (with the app stopped):
+
+```
+npm run typing:seed                # imports your old word list (or pass --csv <file>)
+npm run typing:prepare-book -- --source <file-or-url>   # cleans and stores Nineteen Eighty-Four
+```
+
+The word list comes from `englishlab.local.json` (`lexiconCsv`) or `--csv`; the book is downloaded from an archive source, cleaned, and stored under `var/typing-books/`. Both are idempotent.
 
 Your data lives in `var/` inside the project (git-ignored). To keep the database file itself on a faster drive, create `englishlab.local.json` in the project folder with `{ "dbDir": "C:\\Databases\\EnglishLab" }` (or set `ENGLISHLAB_DB_DIR`); backups and logs stay in `var/`.
 

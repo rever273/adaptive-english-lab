@@ -20,6 +20,10 @@ const SettingsPatchSchema = z
     practiceSoundsEnabled: z.boolean().optional(),
     difficultyMin: z.enum(CEFR_RANGE).optional(),
     difficultyMax: z.enum(CEFR_RANGE).optional(),
+    typingWordsPerLevel: z.number().int().min(10).max(100).optional(),
+    typingVocabularyShare: z.number().min(0).max(1).optional(),
+    typingSpeedMultiplier: z.number().min(0.5).max(2).optional(),
+    typingBookMinutes: z.number().int().min(1).max(30).optional(),
   })
   .strict();
 
