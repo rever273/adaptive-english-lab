@@ -1,4 +1,4 @@
-import type { ExerciseType } from "@english-lab/contracts";
+import type { AnyExerciseType } from "@english-lab/contracts";
 
 /** One concrete sentence a cheap model can be asked about, and what we EXPECT of it if the draft is sound. */
 export interface ScreenSentence {
@@ -18,7 +18,7 @@ const splitSentences = (para: string): string[] => para.split(/(?<=[.!?])\s+/).m
  * makes a correct sentence, so the key sentence should read as correct and every distractor sentence should read as wrong. A distractor
  * that also reads fine is the classic defect ("the team is/are"). This only produces HINTS for the human reviewer.
  */
-export function screenSentences(type: ExerciseType, content: { prompt_en: string; payload: Record<string, any> }): ScreenSentence[] {
+export function screenSentences(type: AnyExerciseType, content: { prompt_en: string; payload: Record<string, any> }): ScreenSentence[] {
   const p = content.payload;
   const out: ScreenSentence[] = [];
   switch (type) {
@@ -37,7 +37,11 @@ export function screenSentences(type: ExerciseType, content: { prompt_en: string
       break;
     case "guided_short_answer":
     case "russian_to_english_short":
+      if (typeof p.source_en === "string") out.push({ role: "key", label: "source sentence", text: p.source_en });
       for (const [i, a] of (p.accepted_answers as string[]).entries()) out.push({ role: "key", label: `accepted answer ${i + 1}`, text: a });
+      break;
+    case "assemble_sentence":
+      for (const [i, a] of (p.accepted_answers as string[]).entries()) out.push({ role: "key", label: `accepted sentence ${i + 1}`, text: a });
       break;
     case "context_reading":
       for (const [i, para] of (p.paragraphs as string[]).entries()) for (const [k, s] of splitSentences(para).entries()) out.push({ role: "key", label: `paragraph ${i + 1} sentence ${k + 1}`, text: s });

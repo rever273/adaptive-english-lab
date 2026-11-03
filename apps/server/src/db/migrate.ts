@@ -105,7 +105,7 @@ export async function runMigrations(db: Db, opts: MigrateOptions): Promise<Migra
   for (const mig of pending) {
     // SQLite requires foreign_keys to be disabled outside the transaction when rebuilding a referenced parent.
     // The entire copy and FK verification remain atomic, and the setting is restored on every exit path.
-    const rebuildReferencedTable = mig.version === 20 && mig.name === "exercise_c2";
+    const rebuildReferencedTable = (mig.version === 20 && mig.name === "exercise_c2") || (mig.version === 25 && mig.name === "assemble_sentence");
     try {
       if (rebuildReferencedTable) {
         db.pragma("foreign_keys = OFF");

@@ -1,10 +1,12 @@
 import { Ajv2020, type ValidateFunction } from "ajv/dist/2020.js";
 import { readFileSync } from "node:fs";
 import path from "node:path";
-import { DIMENSION_BY_TYPE, VocabularyPracticeMetadataSchema, normaliseVocabularyAnswer, type ExerciseType, type PromptUnitFingerprint, type ValidationIssue, type ValidationResult } from "@english-lab/contracts";
+import { DIMENSION_BY_TYPE, VocabularyPracticeMetadataSchema, normaliseVocabularyAnswer, type AnyExerciseType, type PromptUnitFingerprint, type ValidationIssue, type ValidationResult } from "@english-lab/contracts";
 import { detectProjectRoot } from "../../config.js";
 import { BLANK, contentHashOf, markBlanks } from "./normalize.js";
+import { comparisonKey } from "./grader.js";
 import { extractUnits } from "./units.js";
+import { mayHaveNoDistractor, spellsFrom, type Block } from "./blocks.js";
 
 const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
 const IDK_TEXT = /^\s*(i\s+(do\s*not|don'?t|dunno)\s+know|idk)\s*\.?\s*$/i;
@@ -53,7 +55,7 @@ export function validateExercise(input: unknown, ctx: ValidationContext): Valida
     id: string;
     revision: number;
     status: string;
-    type: ExerciseType;
+    type: AnyExerciseType;
     target_skill: string;
     additional_skills: string[];
     dimension: string;
@@ -165,6 +167,29 @@ export function validateExercise(input: unknown, ctx: ValidationContext): Valida
         if (a.trim().split(/\s+/).length > maxWords) warn("ANSWER_OVER_MAX_WORDS", `/payload/accepted_answers/${i}`, "accepted answer is longer than max_words");
       }
       for (const d of dup(accepted.map((a) => a.trim().toLowerCase()))) warn("DUPLICATE_ANSWER", "/payload/accepted_answers", `answer "${d}" is listed twice`);
+      break;
+    }
+    case "assemble_sentence": {
+      const blocks = p.blocks as Block[];
+      const accepted = p.accepted_answers as string[];
+      const distractors = p.distractor_block_ids as string[];
+      if (!/\p{Script=Cyrillic}/u.test(String(p.cue_ru))) warn("CUE_NOT_RUSSIAN", "/payload/cue_ru", "cue_ru contains no Cyrillic text");
+      for (const d of dup(blocks.map((b) => b.id))) err("DUPLICATE_ID", "/payload/blocks", `block id ${d} is used twice`);
+      const ids = new Set(blocks.map((b) => b.id));
+      for (const d of distractors) if (!ids.has(d)) err("UNKNOWN_DISTRACTOR", "/payload/distractor_block_ids", `distractor ${d} is not a block`);
+      const used = blocks.filter((b) => !distractors.includes(b.id));
+      if (used.length < 3) err("TOO_FEW_BLOCKS", "/payload/blocks", "at least three blocks must be part of the sentence");
+      if (distractors.length === 0 && !mayHaveNoDistractor(ex.target_skill)) err("DISTRACTOR_REQUIRED", "/payload/distractor_block_ids", `${ex.target_skill} does not test word order: add a wrong block that breaks its rule, otherwise the task only checks the order of ready-made forms`);
+      for (const [i, a] of accepted.entries()) {
+        if (!spellsFrom(a, used.map((b) => b.text))) err("ANSWER_NOT_FROM_BLOCKS", `/payload/accepted_answers/${i}`, "every approved sentence must be spelled by using each non-distractor block once, in some order");
+      }
+      for (const d of dup(accepted.map((a) => a.trim().toLowerCase()))) warn("DUPLICATE_ANSWER", "/payload/accepted_answers", `answer "${d}" is listed twice`);
+      // a distractor that spells a correct sentence would make the key ambiguous
+      const usedKeys = new Set(used.map((b) => comparisonKey(b.text)));
+      for (const d of distractors) {
+        const text = blocks.find((b) => b.id === d)?.text ?? "";
+        if (usedKeys.has(comparisonKey(text))) err("DISTRACTOR_FITS", "/payload/distractor_block_ids", `the wrong block "${text}" reads exactly like a real block, so either could be used`);
+      }
       break;
     }
     case "context_reading": {

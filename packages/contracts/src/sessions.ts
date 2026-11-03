@@ -73,6 +73,7 @@ export const RevealRequestSchema = z.object({ slotId: Id, tabId: z.string().min(
 export const PromptSchema = z.discriminatedUnion("kind", [
   z.object({ kind: z.literal("choice"), prompt_en: z.string(), options: z.array(z.object({ id: z.string(), text: z.string() })), multiple: z.boolean() }),
   z.object({ kind: z.literal("segments"), prompt_en: z.string(), sentence: z.string(), segments: z.array(z.object({ id: z.string(), text: z.string() })), noMistakeId: z.string() }),
+  z.object({ kind: z.literal("blocks"), prompt_en: z.string(), cue_ru: z.string(), blocks: z.array(z.object({ id: z.string(), text: z.string() })) }),
   z.object({ kind: z.literal("short"), prompt_en: z.string(), cue_ru: z.string(), max_words: z.number().int(), allow_voice: z.boolean() }),
   z.object({
     kind: z.literal("reading"),

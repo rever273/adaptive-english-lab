@@ -271,6 +271,7 @@ textarea { background: var(--surface-2); }
 .fmt-guided_short_answer { --fmt: #8ee6a8; }
 .fmt-russian_to_english_short { --fmt: #c3a6ff; }
 .fmt-context_reading { --fmt: #f78fb3; }
+.fmt-assemble_sentence { --fmt: #ffd479; }
 .format-tag { display: inline-flex; align-items: center; gap: 0.4rem; margin: 0 0 0.35rem; padding: 0.15rem 0.6rem; border-radius: 1rem; font-size: 0.8rem; font-weight: 600; letter-spacing: 0.02em; color: var(--fmt, var(--accent)); background: color-mix(in srgb, var(--fmt, var(--accent)) 16%, transparent); }
 .option:hover { border-color: var(--fmt, var(--accent)); }
 .option:has(input:checked) { border-color: var(--fmt, var(--accent)); background: color-mix(in srgb, var(--fmt, var(--accent)) 14%, var(--surface)); }
@@ -666,3 +667,11 @@ button.letter-hint-tile:hover { background: #365575; }
 .skill-tag span { font-weight: 500; opacity: 0.85; }
 .btn-nomistake { font-style: italic; border-style: dashed; border-color: #d9a441; color: #e9b95a; background: transparent; }
 .btn-nomistake.btn-on { background: #d9a44122; border-style: solid; }
+
+/* assemble_sentence (TASK_026): build a sentence from blocks */
+.blocks-line { min-height: 3rem; display: flex; flex-wrap: wrap; gap: 0.4rem; align-items: center; padding: 0.5rem 0.6rem; border: 1px dashed var(--border); border-radius: 0.5rem; margin: 0.5rem 0; }
+.blocks-pool { display: flex; flex-wrap: wrap; gap: 0.5rem; margin-bottom: 0.5rem; }
+.block { font: inherit; padding: 0.35rem 0.8rem; border-radius: 0.5rem; border: 1px solid var(--border); background: var(--surface-2); color: var(--text); cursor: pointer; }
+.block:disabled { opacity: 0.4; cursor: default; }
+.block-placed { border-color: var(--accent); }
+.block:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }

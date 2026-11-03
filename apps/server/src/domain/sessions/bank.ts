@@ -55,7 +55,8 @@ export function loadCandidates(db: Db, bankRole: "practice" | "diagnostic" | "he
       return {
         revisionId: r.revisionId,
         exerciseId: r.exerciseId,
-        format: r.format,
+        // a block exercise takes a choose_missing_fragment slot: the selector has no quota of its own for it and must not change (TASK_026). reveal/grading use the real type.
+        format: ((r.format as string) === "assemble_sentence" ? "choose_missing_fragment" : r.format) as Format,
         dimension: r.dimension,
         skillId: r.skillId,
         family: r.family,

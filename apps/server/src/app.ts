@@ -28,6 +28,7 @@ import { registerUiRoutes } from "./routes/ui.js";
 import { registerTutorRoutes } from "./routes/tutor.js";
 import { registerAttemptRoutes } from "./routes/attempts.js";
 import { registerContentRoutes } from "./routes/content.js";
+import { registerThoughtRoutes } from "./routes/thoughts.js";
 import { registerSttRoutes } from "./routes/stt.js";
 import type { SttService } from "./domain/stt/sttService.js";
 import { registerSessionRoutes } from "./routes/sessions.js";
@@ -120,6 +121,8 @@ export async function buildApp(deps: AppDeps): Promise<FastifyInstance> {
   if (deps.stt) registerSttRoutes(app, deps.stt);
   if (deps.residency) registerAiModelRoutes(app, deps.residency);
   registerContentRoutes(app, db, { now: deps.attempts?.now ?? (() => new Date()), newId: deps.attempts?.newId ?? randomUUID }, { onBatchQueued: () => deps.scheduler?.kick() });
+
+  registerThoughtRoutes(app, db, { now: deps.attempts?.now ?? (() => new Date()), newId: deps.attempts?.newId ?? randomUUID }, { onQueued: () => deps.scheduler?.kick() });
 
   const uiBuilt = existsSync(path.join(config.webDist, "index.html"));
 

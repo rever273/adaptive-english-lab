@@ -108,9 +108,9 @@ function firstAnswerText(db: Db, slotId: string): string | null {
   if (ids.length === 1 && ids[0] === NO_MISTAKE_ID) return "No mistake";
   const s = db.prepare("SELECT er.type AS format, er.content_json AS c, ss.question_id AS q FROM session_slots ss JOIN exercise_revisions er ON er.id = ss.exercise_revision_id WHERE ss.id = ?").get(slotId) as { format: string; c: string; q: string | null };
   const shown = buildPrompt(s.format, s.c, s.q, slotId);
-  const items: Array<{ id: string; text: string }> = shown.kind === "choice" ? shown.options : shown.kind === "segments" ? shown.segments : shown.kind === "reading" ? shown.question.options : [];
+  const items: Array<{ id: string; text: string }> = shown.kind === "choice" ? shown.options : shown.kind === "segments" ? shown.segments : shown.kind === "reading" ? shown.question.options : shown.kind === "blocks" ? shown.blocks : [];
   const texts = ids.map((id) => items.find((x) => x.id === id)?.text.trim()).filter((t): t is string => Boolean(t));
-  return texts.length ? texts.join(" / ") : null;
+  return texts.length ? texts.join(shown.kind === "blocks" ? " " : " / ") : null;
 }
 
 function feedbackCore(db: Db, deps: SessionDeps, sessionId: string, slotId: string): FeedbackResponse {

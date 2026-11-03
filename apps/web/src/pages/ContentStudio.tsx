@@ -1,10 +1,16 @@
 import { useCallback, useEffect, useState } from "react";
 import { VocabularyStudio } from "./VocabularyStudio";
 import { batchCache, coverageCache, stockCache } from "./studioCache";
-import { ApiRequestError, createBatchApi, fetchBatch, fetchRevisionContent, fetchContentStock, type BatchItem, type BatchSummary, type StudioBatchSummary, type Coverage, type ItemStatus } from "../api";
+import { ApiRequestError, createBatchApi, createThoughtBatchApi, fetchThoughts, fetchBatch, fetchRevisionContent, fetchContentStock, type BatchItem, type BatchSummary, type StudioBatchSummary, type Coverage, type ItemStatus } from "../api";
 
 const STATUS_LABEL: Record<ItemStatus, string> = { queued: "Generating", invalid: "Needs agent repair", generated: "Draft", ready_for_review: "Awaiting agent", approved: "Approved", released: "Accepted", flagged: "Flagged", rejected: "Rejected" };
 const errorText = (e: unknown) => e instanceof ApiRequestError ? e.message : "Something went wrong.";
+const THOUGHTS_AGENT_TASK = `English Lab: choose the grammar skills for my saved thoughts. Follow any local project instructions. Work on your own and run every command yourself; do not ask me to run anything. Do not commit or push. Never edit the SQLite database directly; use only the commands below. Keep the thoughts private: do not copy them into Git or public files.
+1. Run: npm run lab:thoughts -- export (read-only; it prints where thoughts.md and thoughts.json are).
+2. For EVERY pattern pick the ONE skill whose rule the pattern genuinely exercises, judging by the rule text, not the skill id; use null when nothing fits or the pattern is wrong for the sentence. Do not take the nearest-sounding skill.
+3. Write the manifest (template in thoughts.json) and apply it: npm run lab:thoughts -- apply <manifest.json>.
+4. Reply in Russian, briefly: how many thoughts got skills, how many patterns were dropped and why.`;
+
 export const batchAgentTask = (id: string, category: "grammar" | "vocabulary") => `Complete and publish ${category} replenishment batch ${id}. Read content/agent-workflows/${category}.md and common.md in that directory. Run npm run content:agent -- prepare ${id}, review every item, repair suitable drafts as new revisions and reject unsuitable ones. Use the check and finalize commands in the instructions. Independent review by a separate agent is explicitly requested for every final candidate, especially corrections; do not self-approve. Do the review through the content-reviewer agent and the tools in .claude/tools (see your project memory for the workflow), after you have rejected duplicates and fixed the known defects yourself. Apply the reviewed results to the local app yourself. Do not ask me to copy JSON or run commands. Preserve lesson selection, dictionary edits and raw attempt history. Reply briefly with accepted, corrected and rejected counts, and end with one short line: how many tokens the review subagent(s) used in total.`;
 
 export function ContentStudio({ initialView = "grammar" }: { initialView?: "grammar" | "vocabulary" } = {}) {
@@ -53,6 +59,13 @@ function BatchStudio({ category, onCategoryChange }: { category: "grammar" | "vo
     try { const r = await createBatchApi({count, mode: "adaptive", category}); setOpen(r.batchId); setNote(`Started ${r.items} drafts. Progress is shown in AI Tasks and the AI activity panel.`); await batchCache.get(); await loadBatches(true); }
     catch(e) { setError(errorText(e)); } finally { setBusy(false); }
   };
+  const [thoughts, setThoughts] = useState({ ready: 0, needSkills: 0 });
+  useEffect(() => { void fetchThoughts().then(r => setThoughts({ ready: r.readyForBatch, needSkills: r.needSkills })).catch(() => undefined); }, [note]);
+  const startThoughts = async () => {
+    setBusy(true); setError(null); setNote(null);
+    try { const r = await createThoughtBatchApi(); setOpen(r.batchId); setNote(`Started ${r.items} drafts from ${r.thoughts} thought${r.thoughts === 1 ? "" : "s"}. They wait for independent review like any other draft.`); await batchCache.get(); await loadBatches(true); }
+    catch (e) { setError(errorText(e)); } finally { setBusy(false); }
+  };
   const low = stock?.[category];
   const course = category === "grammar" ? stock?.grammar.course : undefined;
   const calculateCourse = async () => {
@@ -92,6 +105,10 @@ function BatchStudio({ category, onCategoryChange }: { category: "grammar" | "vo
       {error && <p className="notice notice-error" role="alert">{error}</p>}
       {note && <p className="notice notice-info" role="status">{note}</p>}
       <div className="actions"><label className="inline"><span>Batch size</span><input type="number" min={1} max={500} value={count} onChange={e => { setCountTouched(true); setCount(Number(e.target.value)); }} aria-label="Batch size" /></label><button className="btn btn-primary" disabled={busy || !Number.isInteger(count) || count < 1 || count > 500} onClick={() => void start()}>Start batch</button>{category === "grammar" ? <button className="btn" disabled={busy} onClick={() => void calculateCourse()}>Calculate for lessons</button> : <button className="btn" disabled={busy} onClick={() => void calculateVocabulary()}>Calculate for words</button>}</div>
+      {category === "grammar" && (thoughts.ready > 0 || thoughts.needSkills > 0) && <div className="actions" data-testid="thoughts-ready">
+        {thoughts.needSkills > 0 && <><span className="small">{thoughts.needSkills} saved thought{thoughts.needSkills === 1 ? " needs" : "s need"} a grammar-skill check by your agent.</span><button className="btn" onClick={() => void navigator.clipboard?.writeText(THOUGHTS_AGENT_TASK).then(() => setNote("Task copied. Paste it to your coding agent."))}>Copy task for agent</button></>}
+        {thoughts.ready > 0 && <><span className="small">{thoughts.ready} checked thought{thoughts.ready === 1 ? "" : "s"} ready to become practice patterns.</span><button className="btn" disabled={busy} onClick={() => void startThoughts()}>Create drafts from my thoughts</button></>}
+      </div>}
     </section>
     <section className="card"><h2>Batches</h2>
       {otherCount > 0 && <p className="small muted">Showing {category} batches. <button className="link" onClick={() => onCategoryChange(category === "grammar" ? "vocabulary" : "grammar")}>Show {otherCount} {category === "grammar" ? "vocabulary" : "grammar"} {otherCount === 1 ? "batch" : "batches"}</button></p>}

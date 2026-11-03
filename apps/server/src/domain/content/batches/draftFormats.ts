@@ -2,10 +2,11 @@ import { createHash } from "node:crypto";
 import { readFileSync } from "node:fs";
 import path from "node:path";
 import { detectProjectRoot } from "../../../config.js";
-import { DIMENSION_BY_TYPE, type ExerciseType, type ValidationIssue } from "@english-lab/contracts";
+import { ASSEMBLE_TYPE, DIMENSION_BY_TYPE, type AnyExerciseType, type ExerciseType, type ValidationIssue } from "@english-lab/contracts";
 import { validateExercise } from "../validator.js";
 import type { ItemPlan } from "./plan.js";
 import { articleMismatch, australianDeep } from "./languageChecks.js";
+import { mayHaveNoDistractor, spellsFrom } from "../blocks.js";
 import { itContext } from "./itContext.js";
 
 /**
@@ -51,6 +52,17 @@ const DETECT_WORDS_PROPS = { ...({ explanation_ru: str(MIN_EXPLANATION), hint_ru
 /** generation-v7: a translation draft also carries the key words the Hint button reveals after the grammar hint */
 const WORD_HINT_PROPS = { word_hint_ru: str(5) };
 
+/** TASK_026: a rewrite task. The English source sentence, the task and an English grammar hint are shown; the learner writes the whole new sentence. */
+const TRANSFORM_PROPS = { ...common, source_en: str(10), task_en: str(8), hint_en: str(5), cue_ru: str(10), accepted_answers: opts(2, 3), meaning_ru: str(5), marker_ru: str(3), reject_ru: str(5) };
+const TRANSFORM_RULES = "A rewrite task on the TARGET SKILL. source_en is one natural sentence in a NEW everyday situation (not the pattern's earlier example). task_en tells the learner what to change, in one short English sentence (for example: Say this as a regret about the past.). hint_en names the construction or gives a grammar pointer WITHOUT writing the answer (for example: Use a third conditional.). cue_ru says the same task in Russian. accepted_answers are 2-3 complete, natural, different rewrites of source_en that all follow the task and use the target skill; none may equal source_en. The rewrite must really need the target skill.";
+
+/**
+ * TASK_026: build a sentence from blocks. The model gives the sentence already cut into meaningful blocks, in the right order, plus (usually) one
+ * wrong block and any other natural orders. NOT part of DRAFT_PROPS / EXAMPLES on purpose: those are hashed into the generation-v9 prompt version.
+ */
+const BLOCKS_PROPS = { ...common, cue_ru: str(10), blocks: { type: "array", minItems: 4, maxItems: 8, items: { type: "string", minLength: 1, maxLength: 40 } }, distractor: { type: "string", maxLength: 40 }, other_orders: { type: "array", maxItems: 2, items: str() } };
+const BLOCKS_RULES = "A sentence-building task on the TARGET SKILL. cue_ru is one Russian sentence that says what the learner must build (a natural thing someone would say). blocks is the correct English sentence cut into 4 to 8 MEANINGFUL blocks in the correct order (for example: it would | be | easier | to fix | the issue | now.), each 1 to 4 words, all lowercase except names and the word I, the last block ending with the full stop or question mark. The blocks must make the target skill matter: distractor is ONE extra block that is WRONG for the target rule (a wrong form, for example fix instead of to fix) and fits no correct sentence; leave it empty only if the skill is about word order. other_orders lists other COMPLETE natural sentences that use exactly the same blocks in a different order (empty if there is only one natural order). Do not make a task whose blocks allow several natural orders unless you list them all.";
+
 const DRAFT_PROPS: Record<ExerciseType, Record<string, unknown>> = {
   choose_form: { ...common, sentence: str(10), options: opts(3, 4), correct_index: { type: "integer", minimum: 0, maximum: 3 } },
   choose_missing_fragment: { ...common, sentence: str(10), options: opts(3, 4), correct_index: { type: "integer", minimum: 0, maximum: 3 } },
@@ -65,9 +77,10 @@ const DRAFT_PROPS: Record<ExerciseType, Record<string, unknown>> = {
 };
 
 /** JSON schema of one inference unit for a format: {drafts:[...<= count]} - also the `format` handed to the model. */
-export function draftFormat(type: ExerciseType, count: number, version = ""): object {
+export function draftFormat(type: AnyExerciseType, count: number, version = "", variant?: "transform"): object {
   const { wordHint, wordErrors } = flagsFor(version);
-  const props = wordErrors && type === "detect_error" ? DETECT_WORDS_PROPS : wordHint && type === "russian_to_english_short" ? { ...DRAFT_PROPS[type], ...WORD_HINT_PROPS } : DRAFT_PROPS[type];
+  if (type === ASSEMBLE_TYPE) return { type: "object", additionalProperties: false, required: ["drafts"], properties: { drafts: { type: "array", minItems: 1, maxItems: count, items: { type: "object", additionalProperties: false, required: Object.keys(BLOCKS_PROPS), properties: BLOCKS_PROPS } } } };
+  const props = variant === "transform" && type === "guided_short_answer" ? TRANSFORM_PROPS : wordErrors && type === "detect_error" ? DETECT_WORDS_PROPS : wordHint && type === "russian_to_english_short" ? { ...DRAFT_PROPS[type], ...WORD_HINT_PROPS } : DRAFT_PROPS[type];
   return { type: "object", additionalProperties: false, required: ["drafts"], properties: { drafts: { type: "array", minItems: 1, maxItems: count, items: { type: "object", additionalProperties: false, required: Object.keys(props), properties: props } } } };
 }
 
@@ -149,11 +162,11 @@ export function buildGenerationUser(batchId: string, items: ItemPlan[]): string 
     task: `Write ${items.length} new practice item(s) of the format ${first.type}.`,
     format: first.type,
     count: items.length,
-    format_rules: FORMAT_RULES[first.type],
+    format_rules: first.type === ASSEMBLE_TYPE ? BLOCKS_RULES : first.variant === "transform" && first.type === "guided_short_answer" ? TRANSFORM_RULES : FORMAT_RULES[first.type],
     batch_id: batchId,
-    items: items.map((i) => ({ ordinal: i.ordinal, target_skill: i.target_skill, skill_meaning: skillGloss(i.target_skill), skill_card: skillCards()[i.target_skill] ?? null, topic: i.topic, ...(i.topic === "technology" ? { it_context: itContext(i.ordinal) } : {}), ...(i.level ? { target_level: `CEFR ${i.level}: choose vocabulary, structures and topic complexity typical of ${i.level}` } : {}), ...(first.type === "detect_error" ? { sentence_must_be: i.noMistake ? "fully correct (no mistake)" : "one clear mistake" } : {}) })),
+    items: items.map((i) => ({ ordinal: i.ordinal, target_skill: i.target_skill, skill_meaning: skillGloss(i.target_skill), skill_card: skillCards()[i.target_skill] ?? null, topic: i.topic, ...(i.topic === "technology" ? { it_context: itContext(i.ordinal) } : {}), ...(i.transfer ? { transfer_pattern: { pattern: i.transfer.pattern, instruction: "Build the item on exactly this grammar pattern, in a NEW everyday situation. Use different people, objects, activities and plot each time. The pattern is the point of the item, not the topic." } } : {}), ...(i.level ? { target_level: `CEFR ${i.level}: choose vocabulary, structures and topic complexity typical of ${i.level}` } : {}), ...(first.type === "detect_error" ? { sentence_must_be: i.noMistake ? "fully correct (no mistake)" : "one clear mistake" } : {}) })),
     output_shape: `{"drafts":[ one object per item, in the same order ]}`,
-    example_of_one_draft: EXAMPLES[first.type],
+    example_of_one_draft: first.type === ASSEMBLE_TYPE ? undefined : EXAMPLES[first.type],
   });
 }
 
@@ -209,11 +222,12 @@ function checkEnglish(label: string, v: unknown, out: ValidationIssue[]): void {
 export function assembleExercise(raw: unknown, plan: ItemPlan, ctx: { exerciseId: string; model: { tag: string; digest: string }; promptVersion: string; taxonomySkillIds: ReadonlySet<string> }): Built {
   if (typeof raw !== "object" || raw === null || Array.isArray(raw)) return { ok: false, issues: [issue("NOT_AN_OBJECT", "", "a draft must be a JSON object")] };
   const d = australianDeep(raw as Record<string, unknown>);
-  const type = plan.type as ExerciseType;
+  const type = plan.type as AnyExerciseType;
   const flags = flagsFor(ctx.promptVersion);
   const wordHint = flags.wordHint && type === "russian_to_english_short";
   const wordErrors = flags.wordErrors && type === "detect_error";
-  const allowed = new Set(wordErrors ? Object.keys(DETECT_WORDS_PROPS) : [...Object.keys(DRAFT_PROPS[type]), ...(wordHint ? Object.keys(WORD_HINT_PROPS) : [])]);
+  const transform = plan.variant === "transform" && type === "guided_short_answer";
+  const allowed = new Set(type === ASSEMBLE_TYPE ? Object.keys(BLOCKS_PROPS) : transform ? Object.keys(TRANSFORM_PROPS) : wordErrors ? Object.keys(DETECT_WORDS_PROPS) : [...Object.keys(DRAFT_PROPS[type]), ...(wordHint ? Object.keys(WORD_HINT_PROPS) : [])]);
   const issues: ValidationIssue[] = [];
   for (const k of Object.keys(d)) {
     if (allowed.has(k)) continue;
@@ -222,6 +236,17 @@ export function assembleExercise(raw: unknown, plan: ItemPlan, ctx: { exerciseId
   }
   if (issues.length > 0) return { ok: false, issues };
   copiedFrom(d, plan.target_skill, issues);
+  if (plan.transfer) {
+    // the learner's own sentence must not come back as an exercise: the item carries the pattern, not the story
+    const mine = new Set<string>();
+    collectEnglish(d, mine);
+    // a block task is the original sentence once its blocks are joined
+    if (Array.isArray(d.blocks)) mine.add(norm(d.blocks.map(String).join(" ")));
+    // a gap item is the original sentence once its key is put in the gap
+    if (typeof d.sentence === "string" && Array.isArray(d.options) && Number.isInteger(d.correct_index)) mine.add(norm(d.sentence.replace(GAP, String(d.options[d.correct_index as number] ?? ""))));
+    const src = norm(plan.transfer.source_en);
+    for (const m of mine) if (m === src) issues.push(issue("COPIED_THOUGHT", "", "the exercise repeats the learner's own sentence; write a new situation that uses the pattern"));
+  }
   checkRussian("explanation_ru", d.explanation_ru, issues);
   checkRussian("hint_ru", d.hint_ru, issues);
   if (typeof d.explanation_ru === "string" && d.explanation_ru.trim().length < MIN_EXPLANATION) issues.push(issue("EXPLANATION_TOO_SHORT", "/explanation_ru", "explanation is too short to teach anything"));
@@ -306,6 +331,24 @@ export function assembleExercise(raw: unknown, plan: ItemPlan, ctx: { exerciseId
       break;
     }
     case "guided_short_answer": {
+      if (transform) {
+        const answers = d.accepted_answers as string[];
+        const source = String(d.source_en ?? "").trim();
+        const task = String(d.task_en ?? "").trim();
+        const hint = String(d.hint_en ?? "").trim();
+        checkRussian("cue_ru", d.cue_ru, issues);
+        for (const [k, v] of [["source_en", source], ["task_en", task], ["hint_en", hint]] as const) checkEnglish(k, v, issues);
+        if (words(source) < 4) issues.push(issue("TOO_SHORT", "/source_en", "the source sentence is too short"));
+        for (const [i, a] of answers.entries()) {
+          checkEnglish(`accepted_answers/${i}`, a, issues);
+          if (norm(a) === norm(source)) issues.push(issue("ANSWER_IS_SOURCE", `/accepted_answers/${i}`, "an accepted answer repeats the source sentence: the task must change it"));
+          if (norm(hint).includes(norm(a))) issues.push(issue("HINT_LEAKS", "/hint_en", "the hint contains a complete accepted answer"));
+        }
+        if (new Set(answers.map(norm)).size !== answers.length) issues.push(issue("ANSWERS_NOT_DISTINCT", "/accepted_answers", "accepted answers must differ"));
+        promptEn = `Source: ${source}\nTask: ${task}\nHint: ${hint}`;
+        payload = { ...rubricPayload(d, answers, Math.max(...answers.map(words)) + 5), source_en: source };
+        break;
+      }
       const answers = d.accepted_answers as string[];
       const starter = String(d.starter_en ?? "").trim();
       checkRussian("cue_ru", d.cue_ru, issues);
@@ -336,6 +379,29 @@ export function assembleExercise(raw: unknown, plan: ItemPlan, ctx: { exerciseId
       payload = rubricPayload(d, answers, Math.max(...answers.map(words)) + 5);
       break;
     }
+    case ASSEMBLE_TYPE: {
+      const parts = (d.blocks as string[]).map((b) => String(b).trim());
+      const distractor = String(d.distractor ?? "").trim();
+      const others = (d.other_orders as string[]).map((o) => String(o).trim());
+      checkRussian("cue_ru", d.cue_ru, issues);
+      // a block may be a single letter ("I", "a"): English means Latin letters and no Cyrillic
+      const blockEnglish = (label: string, v: string) => { if (CYRILLIC.test(v) || !/[A-Za-z]/.test(v)) issues.push(issue("NOT_ENGLISH", `/${label}`, `${label} must be English text`)); };
+      parts.forEach((b, i) => blockEnglish(`blocks/${i}`, b));
+      if (distractor !== "") blockEnglish("distractor", distractor);
+      if (new Set(parts.map(norm)).size !== parts.length) issues.push(issue("BLOCKS_NOT_DISTINCT", "/blocks", "blocks must be different from each other"));
+      if (parts.filter((b) => words(b) === 1).length * 2 > parts.length) issues.push(issue("BLOCKS_TOO_SMALL", "/blocks", "cut the sentence into meaningful chunks of one to four words (for example: to fix, the issue, it would), not into single words"));
+      if (parts.some((b) => words(b) > 4)) issues.push(issue("BLOCK_TOO_LONG", "/blocks", "a block is at most four words"));
+      if (distractor !== "" && parts.some((b) => norm(b) === norm(distractor))) issues.push(issue("DISTRACTOR_IS_BLOCK", "/distractor", "the wrong block must differ from the real blocks"));
+      if (!/[.?!]$/.test(parts.at(-1) ?? "")) issues.push(issue("NO_FINAL_PUNCTUATION", "/blocks", "the last block ends with the full stop or question mark"));
+      const correct = parts.join(" ");
+      if (parts.length >= 4 && others.some((o) => norm(o) === norm(correct))) issues.push(issue("OTHER_ORDER_IS_KEY", "/other_orders", "other_orders repeats the main sentence"));
+      for (const [i, o] of others.entries()) if (!spellsFrom(o, parts)) issues.push(issue("OTHER_ORDER_NOT_FROM_BLOCKS", `/other_orders/${i}`, "every other order must use exactly the same blocks"));
+      if (distractor === "" && !mayHaveNoDistractor(plan.target_skill)) issues.push(issue("DISTRACTOR_REQUIRED", "/distractor", `${plan.target_skill} does not test word order: give one wrong block that breaks its rule`));
+      promptEn = "Build the sentence from the blocks.";
+      const all = [...parts, ...(distractor !== "" ? [distractor] : [])];
+      payload = { cue_ru: String(d.cue_ru).trim(), blocks: all.map((text, i) => ({ id: `b${i + 1}`, text })), distractor_block_ids: distractor !== "" ? [`b${all.length}`] : [], accepted_answers: [correct, ...others] };
+      break;
+    }
     case "context_reading": {
       const paragraphs = d.paragraphs as string[];
       const questions = d.questions as Array<{ prompt: string; options: string[]; correct_index: number }>;
@@ -363,7 +429,7 @@ export function assembleExercise(raw: unknown, plan: ItemPlan, ctx: { exerciseId
   }
   if (issues.length > 0) return { ok: false, issues };
 
-  const fingerprint = createHash("sha256").update(norm(promptEn || JSON.stringify(payload))).digest("hex").slice(0, 10);
+  const fingerprint = createHash("sha256").update(type === ASSEMBLE_TYPE ? norm(JSON.stringify((payload as { accepted_answers: string[] }).accepted_answers)) : norm(promptEn || JSON.stringify(payload))).digest("hex").slice(0, 10);
   const exercise: Record<string, unknown> = {
     schema_version: "exercise-v1",
     id: ctx.exerciseId,

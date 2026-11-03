@@ -377,3 +377,8 @@ export const fetchVocabAnalytics = (days: "7" | "30" | "90" | "all") =>
   send("GET", `/api/v1/analytics/vocabulary?days=${days}&timezone=${encodeURIComponent(Intl.DateTimeFormat().resolvedOptions().timeZone)}`, typed<VocabAnalytics>());
 /** components that change XP (a finished task) announce it so the header refreshes at once */
 export const announceXp = () => window.dispatchEvent(new Event("el:xp"));
+
+export interface ThoughtItem { id: string; textRu: string; createdAt: string; status: "pending" | "needs_skills" | "ok" | "ambiguous" | "no_skill" | "failed"; englishDraft: string | null }
+export const fetchThoughts = () => send("GET", "/api/v1/thoughts", typed<{ thoughts: ThoughtItem[]; readyForBatch: number; needSkills: number }>());
+export const addThought = (text: string) => send("POST", "/api/v1/thoughts", typed<{ thought: ThoughtItem; created: boolean }>(), { text });
+export const createThoughtBatchApi = () => send("POST", "/api/v1/thoughts/batch", typed<{ batchId: string; items: number; thoughts: number }>(), {});

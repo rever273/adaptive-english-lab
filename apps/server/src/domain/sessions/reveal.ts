@@ -5,6 +5,7 @@ import type { Db } from "../../db/open.js";
 import { ApiError } from "../../errors.js";
 import { runDiscovery } from "../analytics/discoveryAdapter.js";
 import { localDateIn } from "../attempts/canonical.js";
+import { isApprovedOrder } from "../content/blocks.js";
 import { NO_MISTAKE_ID } from "../content/grader.js";
 import { loadBlockedFingerprints, loadCandidates } from "./bank.js";
 import { recordDisplayedEncounters } from "../vocabulary/repository.js";
@@ -55,6 +56,8 @@ export function buildPrompt(format: string, contentJson: string, questionId: str
     case "guided_short_answer":
     case "russian_to_english_short":
       return { kind: "short", prompt_en: c.prompt_en, cue_ru: p.cue_ru, max_words: p.max_words, allow_voice: Boolean(p.allow_voice) };
+    case "assemble_sentence":
+      return { kind: "blocks", prompt_en: c.prompt_en, cue_ru: p.cue_ru, blocks: shuffledBlocks(p.blocks, p.distractor_block_ids ?? [], p.accepted_answers, slotId) };
     case "context_reading": {
       const q = (p.questions as Array<{ id: string; prompt: string; options: Array<{ id: string; text: string }> }>).find((x) => x.id === questionId);
       if (!q) throw new ApiError(500, "READING_QUESTION_MISSING", "Reading slot has no matching question");
@@ -63,6 +66,17 @@ export function buildPrompt(format: string, contentJson: string, questionId: str
     default:
       throw new ApiError(500, "UNKNOWN_FORMAT", `Unknown exercise format ${format}`);
   }
+}
+
+/**
+ * The blocks in a per-slot stable but scrambled order. When every block belongs to the sentence and the scramble happens to spell an approved
+ * sentence, the first two blocks swap so the task is never shown already solved.
+ */
+function shuffledBlocks(blocks: Array<{ id: string; text: string }>, distractors: string[], accepted: string[], slotId: string): Array<{ id: string; text: string }> {
+  const hash = (id: string) => createHash("sha256").update(`${slotId}:${id}`).digest("hex");
+  const shown = blocks.map((b) => ({ id: b.id, text: b.text })).sort((a, b) => hash(a.id).localeCompare(hash(b.id)));
+  if (distractors.length === 0 && shown.length > 1 && isApprovedOrder(shown.map((b) => b.id), blocks, accepted)) [shown[0], shown[1]] = [shown[1]!, shown[0]!];
+  return shown;
 }
 
 /** Preserve answer IDs and sentence order while avoiding the one-piece no-mistake and fixed middle-error cues in the slice bank. */

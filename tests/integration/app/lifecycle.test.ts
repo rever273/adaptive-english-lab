@@ -67,7 +67,7 @@ describe("start / stop scripts with a real server process", () => {
     expect(spa.status).toBe(200);
     const health = HealthSchema.parse(JSON.parse((await rawGet({})).body));
     expect(health).toMatchObject({ status: "ok", instanceId: lock1.instanceId });
-    expect(health.db.schemaVersion).toBe(23);
+    expect(health.db.schemaVersion).toBe(25);
 
     // foreign Origin / Host rejected by the real process
     expect((await rawGet({ origin: "https://evil.example" })).status).toBe(403);
@@ -105,7 +105,7 @@ describe("start / stop scripts with a real server process", () => {
     const d2 = openDatabase(dbPath());
     expect((d2.prepare("SELECT values_json FROM settings_revisions WHERE revision=3").get() as { values_json: string }).values_json).toContain('"taskCount":20');
     expect((d2.prepare("SELECT applied_at FROM schema_migrations WHERE version=1").get() as { applied_at: string }).applied_at).toBe(appliedAt);
-    expect((d2.prepare("SELECT COUNT(*) AS n FROM schema_migrations").get() as { n: number }).n).toBe(23);
+    expect((d2.prepare("SELECT COUNT(*) AS n FROM schema_migrations").get() as { n: number }).n).toBe(25);
     d2.close();
     const backups = path.join(scratch.root, "backups");
     expect(existsSync(backups)).toBe(true);

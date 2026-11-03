@@ -1,5 +1,6 @@
 import { ApiError } from "../../errors.js";
 import type { Assessor, AssessContext, AssessmentDecision } from "../attempts/ports.js";
+import { isApprovedOrder, type Block } from "./blocks.js";
 
 /** `detect_error` answer meaning "the sentence is correct"; a distinct UI action from "I don't know" (spec/05 invariant 2). */
 export const NO_MISTAKE_ID = "__no_mistake__";
@@ -132,6 +133,14 @@ export const ClosedFormAssessor: Assessor = {
         if (!q) throw new ApiError(422, "ANSWER_SHAPE_INVALID", "Unknown reading question for this slot");
         const ok = ids.every((i) => q.options.some((o) => o.id === i)) && setKey(ids) === setKey(q.accepted_option_ids);
         return confirmed(ok ? "correct" : "incorrect", ok ? "Exact match with the accepted options." : "Selection differs from the accepted options.");
+      }
+      case "assemble_sentence": {
+        // the chosen blocks, in the order chosen, spell a sentence; the approved sentences are the complete list (no model, no review queue)
+        const ids = needOptions(raw);
+        const blocks = content.payload.blocks as Block[];
+        if (ids.some((i) => !blocks.some((b) => b.id === i))) throw new ApiError(422, "ANSWER_SHAPE_INVALID", "Unknown block for this slot");
+        const ok = isApprovedOrder(ids, blocks, content.payload.accepted_answers as string[]);
+        return confirmed(ok ? "correct" : "incorrect", ok ? "The blocks spell an approved sentence." : "The blocks do not spell an approved sentence.");
       }
       case "guided_short_answer":
       case "russian_to_english_short": {

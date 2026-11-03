@@ -1,3 +1,4 @@
+import { THOUGHT_SYSTEM_V1 } from "../thoughts/interpret.js";
 import { createHash } from "node:crypto";
 import type { Db } from "../../db/open.js";
 
@@ -156,6 +157,7 @@ export const PROMPTS: Record<string, PromptDef> = {
   "vocabulary-generation-v2": { id: "vocabulary-generation-v2", purpose: "generation", template: VOCABULARY_GENERATION_SYSTEM_V2 },
   "vocabulary-generation-v3": { id: "vocabulary-generation-v3", purpose: "generation", template: VOCABULARY_GENERATION_SYSTEM_V3 },
   "vocabulary-generation-v4": { id: "vocabulary-generation-v4", purpose: "generation", template: VOCABULARY_GENERATION_SYSTEM_V4 },
+  "thought-interpret-v1": { id: "thought-interpret-v1", purpose: "generation", template: THOUGHT_SYSTEM_V1 },
   "tutor-v1": { id: "tutor-v1", purpose: "tutor", template: TUTOR_SYSTEM_V1 },
   "tutor-v2": { id: "tutor-v2", purpose: "tutor", template: TUTOR_SYSTEM_V2 },
   "vocabulary-v2": { id: "vocabulary-v2", purpose: "vocabulary", template: VOCABULARY_SYSTEM_V2 },

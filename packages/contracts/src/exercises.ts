@@ -2,6 +2,14 @@ import { z } from "zod";
 
 export const EXERCISE_TYPES = ["choose_form", "choose_missing_fragment", "detect_error", "guided_short_answer", "russian_to_english_short", "context_reading"] as const;
 export type ExerciseType = (typeof EXERCISE_TYPES)[number];
+/**
+ * TASK_026: "assemble_sentence" (build a sentence from blocks) exists ONLY for material made from the learner's own thoughts. It is not in
+ * EXERCISE_TYPES on purpose: that list drives the general generator, the 24-draft Trial (4 per type) and the batch request. It is stored,
+ * validated, selected (in a choose_missing_fragment slot, see sessions/bank.ts) and played like any other exercise.
+ */
+export const ASSEMBLE_TYPE = "assemble_sentence" as const;
+export const ALL_EXERCISE_TYPES = [...EXERCISE_TYPES, ASSEMBLE_TYPE] as const;
+export type AnyExerciseType = (typeof ALL_EXERCISE_TYPES)[number];
 
 export const CONTENT_STATUSES = ["draft", "validated", "pending_review", "approved", "flagged", "rejected"] as const;
 export type ContentStatus = (typeof CONTENT_STATUSES)[number];
@@ -10,13 +18,15 @@ export const ACTOR_TYPES = ["code", "model", "agent", "user"] as const;
 export type ActorType = (typeof ACTOR_TYPES)[number];
 
 /** Dimension is decided by the format (spec/05 table). */
-export const DIMENSION_BY_TYPE: Record<ExerciseType, "recognition" | "correction" | "production"> = {
+export const DIMENSION_BY_TYPE: Record<AnyExerciseType, "recognition" | "correction" | "production"> = {
   choose_form: "recognition",
   choose_missing_fragment: "recognition",
   context_reading: "recognition",
   detect_error: "correction",
   guided_short_answer: "production",
   russian_to_english_short: "production",
+  /** the blocks are given: the learner orders ready-made forms, so this is recognition (production would overstate it) */
+  assemble_sentence: "recognition",
 };
 
 /** Reviewer checklist (spec/05). Every item must be true for an approval; two items may be "n/a" by format. */

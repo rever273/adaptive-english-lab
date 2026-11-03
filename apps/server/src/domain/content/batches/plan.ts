@@ -1,4 +1,4 @@
-import { DIMENSION_BY_TYPE, EXERCISE_TYPES, TRIAL_PER_TYPE, TRIAL_SIZE, type CreateBatchRequest, type ExerciseType } from "@english-lab/contracts";
+import { DIMENSION_BY_TYPE, EXERCISE_TYPES, TRIAL_PER_TYPE, TRIAL_SIZE, type CreateBatchRequest, type ExerciseType, type AnyExerciseType } from "@english-lab/contracts";
 import { ApiError } from "../../../errors.js";
 import type { CourseMissing } from "./coursePlanning.js";
 import { isItOrdinal } from "./itContext.js";
@@ -6,7 +6,7 @@ import { isItOrdinal } from "./itContext.js";
 /** One requested draft: what the generator is asked for. The server, not the model, decides all of these fields. */
 export interface ItemPlan {
   ordinal: number;
-  type: ExerciseType;
+  type: AnyExerciseType;
   dimension: "recognition" | "correction" | "production";
   target_skill: string;
   topic: string;
@@ -17,6 +17,10 @@ export interface ItemPlan {
   level?: "A2" | "B1" | "B2" | "C1" | "C2";
   /** D68: stable key of the lesson whose deficit this item serves (grammar batches planned from lesson deficits) */
   lesson?: string;
+  /** TASK_026: the item is built on a reusable pattern from one of the learner's own thoughts. source_en stays on the server (never sent to the model) and only blocks a copy of the original sentence. */
+  /** TASK_026: guided_short_answer built as "rewrite this sentence in another construction" (source + task + hint) instead of "continue the starter" */
+  variant?: "transform";
+  transfer?: { thoughtId: string; pattern: string; source_en: string };
   vocabulary?: { lemma: string; translationRu: string | null; family: "recognition" | "guided_recall" | "collocation" };
 }
 
@@ -28,7 +32,7 @@ export const planTopic = (ordinal: number): string => (isItOrdinal(ordinal) ? "t
  * Inference unit size per format (spec/05 allows 1-4). The real Trial (2026-10-29, evidence/task-010) showed that 4 drafts per call do not
  * fit the 2048-token output cap (every call was cut off mid-JSON): 2 per call, and 1 for the long reading passages (D47).
  */
-export const unitSizeFor = (type: ExerciseType): number => (type === "context_reading" ? 1 : 2);
+export const unitSizeFor = (type: AnyExerciseType): number => (type === "context_reading" ? 1 : 2);
 
 /** Generate the actual simulated gaps first, then cycle them for the review margin. */
 export function planCourseMissing(missing: readonly CourseMissing[], count: number, tag: string): ItemPlan[] {

@@ -40,6 +40,7 @@ const INSTRUCTION: Record<string, string> = {
   guided_short_answer: "Write one short sentence.",
   russian_to_english_short: "Write the idea in natural English.",
   context_reading: "Read the text, then answer.",
+  assemble_sentence: "Put the blocks in order to build the sentence.",
 };
 
 /** one icon and one label per format, shown above the task (the colour comes from the card's fmt-* class) */
@@ -50,6 +51,7 @@ export const FORMAT_LOOK: Record<string, { icon: string; label: string }> = {
   guided_short_answer: { icon: "pi-pencil", label: "Your sentence" },
   russian_to_english_short: { icon: "pi-language", label: "Russian → English" },
   context_reading: { icon: "pi-book", label: "Reading" },
+  assemble_sentence: { icon: "pi-objects-column", label: "Build the sentence" },
 };
 
 /** Renders one prompt (all six formats) and the answer controls. No keyboard shortcut steals Space/Enter while typing. */
@@ -74,8 +76,10 @@ export function PromptView({ reveal, busy, hint, voice, onSubmit, onIdk, onSkip,
     ? /^Choose the word meaning\s+[\u00ab\u201c"]([^\u00bb\u201d"]+)[\u00bb\u201d"]\s*:\s*(.+)$/isu.exec(p.prompt_en)
     : null;
 
+  // blocks: a block joins the end of the sentence; a block already placed leaves it (the others keep their order)
+  const pickBlock = (id: string) => setSelected((cur) => (cur.includes(id) ? cur.filter((x) => x !== id) : [...cur, id]));
   const toggle = (id: string, multiple: boolean) => setSelected((cur) => (multiple ? (cur.includes(id) ? cur.filter((x) => x !== id) : [...cur, id]) : [id]));
-  const canSubmit = p.kind === "short" ? text.trim().length > 0 : p.kind === "segments" ? noMistake || selected.length > 0 : selected.length > 0;
+  const canSubmit = p.kind === "short" ? text.trim().length > 0 : p.kind === "blocks" ? selected.length >= 2 : p.kind === "segments" ? noMistake || selected.length > 0 : selected.length > 0;
 
   function submit() {
     if (!canSubmit || busy) return;
@@ -224,11 +228,27 @@ export function PromptView({ reveal, busy, hint, voice, onSubmit, onIdk, onSkip,
 
       {p.kind === "short" && !vocabulary && (
         <div className="short">
-          {/starting with/i.test(p.prompt_en) && <p className="prompt">{p.prompt_en}</p>}
+          {/starting with|^Source:/i.test(p.prompt_en) && <p className="prompt" style={{ whiteSpace: "pre-line" }}>{p.prompt_en}</p>}
           <p lang="ru" className="ru cue" data-testid="prompt">{p.cue_ru}</p>
           <label htmlFor={`${groupId}-t`} className="visually-hidden">Your answer</label>
           <textarea id={`${groupId}-t`} rows={3} maxLength={2000} value={text} readOnly={locked} onChange={(e) => setText(e.target.value)} placeholder="Type your answer" data-testid="answer-text" />
           {voice && !locked && <VoiceBar voice={voice} busy={busy} hasDraft={draftId !== null} />}
+        </div>
+      )}
+
+      {p.kind === "blocks" && (
+        <div className="blocks" data-testid="blocks">
+          <p lang="ru" className="ru cue" data-testid="prompt">{p.cue_ru}</p>
+          <p className="blocks-line" aria-live="polite" data-testid="blocks-line">
+            {selected.length === 0
+              ? <span className="muted">Choose the blocks in order…</span>
+              : selected.map((id) => <button key={id} type="button" className="block block-placed" disabled={locked} onClick={() => pickBlock(id)} aria-label={`Remove ${p.blocks.find((b) => b.id === id)?.text}`}>{p.blocks.find((b) => b.id === id)?.text}</button>)}
+          </p>
+          <div className="blocks-pool" role="group" aria-label="Blocks">
+            {p.blocks.map((b) => <button key={b.id} type="button" className="block" disabled={locked || selected.includes(b.id)} aria-pressed={selected.includes(b.id)} onClick={() => pickBlock(b.id)}>{b.text}</button>)}
+          </div>
+          {!locked && selected.length > 0 && <button type="button" className="link" onClick={() => setSelected([])}>Start again</button>}
+          <p className="small muted">One block may not belong to the sentence.</p>
         </div>
       )}
 

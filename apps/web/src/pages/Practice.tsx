@@ -1,3 +1,4 @@
+import { MyThoughts } from "../components/MyThoughts.js";
 import type { Dashboard, FeedbackResponse, RevealResponse, SessionSnapshot, SessionSummary } from "@english-lab/contracts";
 import { MAX_LESSON_PLAYS } from "@english-lab/contracts";
 import skillLabels from "../skillLabels.json";
@@ -362,7 +363,7 @@ export function Practice({ category = "grammar", onExit, onNavigate }: { categor
         <i className="pi pi-bookmark" aria-hidden="true" /> A vocabulary session is still open. Finish it in Vocabulary before starting a grammar lesson.
         {onNavigate && <div className="actions"><button className="btn btn-primary" onClick={() => onNavigate("vocabulary")}><i className="pi pi-arrow-right" aria-hidden="true" /> Continue the vocabulary session</button></div>}
       </div>
-    )}{stockBlock && <aside className="notice notice-error" role="alert" data-testid="lesson-stock-low"><strong>More grammar exercises needed</strong><p className="small">{stockBlock}</p>{onNavigate && <div className="actions"><button className="btn btn-primary" onClick={() => onNavigate("studio")}>Open Content Studio</button><button className="link" onClick={() => setStockBlock(null)}>Dismiss</button></div>}</aside>}<DashboardScreen dashboard={view.dashboard} message={view.message} onStart={(id) => void start(id)} onStartCheck={(p) => void startCheck(p)} />{recent && <div className="actions page-actions"><button className="btn" data-testid="review-recent" onClick={() => setView({ kind: "summary", summary: recent })}><i className="pi pi-history" aria-hidden="true" /> Review last session</button></div>}</>;
+    )}{stockBlock && <aside className="notice notice-error" role="alert" data-testid="lesson-stock-low"><strong>More grammar exercises needed</strong><p className="small">{stockBlock}</p>{onNavigate && <div className="actions"><button className="btn btn-primary" onClick={() => onNavigate("studio")}>Open Content Studio</button><button className="link" onClick={() => setStockBlock(null)}>Dismiss</button></div>}</aside>}<DashboardScreen dashboard={view.dashboard} message={view.message} onStart={(id) => void start(id)} onStartCheck={(p) => void startCheck(p)} />{recent && <div className="actions page-actions"><button className="btn" data-testid="review-recent" onClick={() => setView({ kind: "summary", summary: recent })}><i className="pi pi-history" aria-hidden="true" /> Review last session</button></div>}{category !== "vocabulary" && <MyThoughts />}</>;
   }
 
   const session = view.session;

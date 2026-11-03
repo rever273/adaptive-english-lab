@@ -18,10 +18,15 @@ import { GENERATION_SYSTEM_V3, GENERATION_SYSTEM_V4, GENERATION_SYSTEM_V5, GENER
 import type { ItemPlan } from "./plan.js";
 import { VOCABULARY_SYSTEM, VOCABULARY_SYSTEM_V2, VOCABULARY_SYSTEM_V3, VOCABULARY_SYSTEM_V4, assembleVocabulary, vocabularyFormat } from "./vocabularyDrafts.js";
 import { itContext } from "./itContext.js";
+import { THOUGHT_SYSTEM_V1, thoughtFormat, validateInterpretation, type Interpretation } from "../../thoughts/interpret.js";
 
 export interface GenerationPayload {
   batchId: string;
   ordinals: number[];
+}
+/** TASK_026: reading one saved Russian thought (no batch yet); runs through the same dispatcher and model as draft generation */
+export interface ThoughtPayload {
+  thoughtId: string;
 }
 
 export interface GenerationRunnerOptions {
@@ -57,7 +62,7 @@ interface QueuedItem {
  * validates, de-duplicates and stores. A stored draft is `draft -> validated (code) -> pending_review (code)`, never approved. Items
  * and the job result commit in ONE transaction, so a crash or duplicate delivery can neither lose nor repeat an ordinal.
  */
-export class GenerationJobRunner implements JobRunner<GenerationPayload> {
+export class GenerationJobRunner implements JobRunner<GenerationPayload | ThoughtPayload> {
   readonly kind = "generation" as const;
   private modelVersionId: string | null = null;
 
@@ -80,6 +85,7 @@ export class GenerationJobRunner implements JobRunner<GenerationPayload> {
         .run(this.o.deps.newId(), id, configHashOf(GENERATION_PARAMS), peak, JSON.stringify({ source: "TASK_023 nvidia-smi measurement of gemma4:12b at num_ctx 8192 (gemma4:12b entry in MEASURED_ADDITIONAL_PEAK_MIB) (ctx 8192)", note: "additional peak above the desktop baseline" }), this.o.deps.now().toISOString());
     }
     ensurePromptVersion(this.o.db, GENERATION_PROMPT, draftFormatsText(GENERATION_PROMPT));
+    ensurePromptVersion(this.o.db, "thought-interpret-v1", JSON.stringify(thoughtFormat()));
     this.modelVersionId = id;
     return { ok: true };
   }
@@ -96,9 +102,50 @@ export class GenerationJobRunner implements JobRunner<GenerationPayload> {
     return rows.map((r) => ({ id: r.id, ordinal: r.ordinal, plan: JSON.parse(r.plan_json) as ItemPlan }));
   }
 
-  async run(ctx: RunnerContext<GenerationPayload>): Promise<RunnerOutput> {
+  /** One saved thought -> an English reading and reusable patterns (a new append-only thought_analyses row). Nothing is published. */
+  private async runThought(ctx: RunnerContext<ThoughtPayload>): Promise<RunnerOutput> {
     const m = this.pinned;
-    const payload = ctx.job.payload;
+    const { thoughtId } = ctx.job.payload;
+    const row = this.o.db.prepare("SELECT t.text_ru AS text, (SELECT status FROM thought_analyses WHERE thought_id = t.id ORDER BY created_at DESC, rowid DESC LIMIT 1) AS status FROM personal_thoughts t WHERE t.id = ?").get(thoughtId) as { text: string; status: string | null } | undefined;
+    if (!row || row.status !== "pending") return { schemaVersion: "thought-v1", output: { thoughtId, skipped: "already_settled" }, metrics: { calls: 0 } };
+    const installed = await this.o.installedDigest(m.tag);
+    if (installed !== m.digest) throw new RunnerError("model_digest_mismatch", `installed digest of ${m.tag} differs from the pinned one`, false);
+    const result = await runStructured<Interpretation>({
+      client: this.o.chat,
+      model: m.tag,
+      messages: [
+        { role: "system", content: THOUGHT_SYSTEM_V1 },
+        { role: "user", content: JSON.stringify({ thought_ru: row.text }) },
+      ],
+      format: thoughtFormat(),
+      options: { num_ctx: GENERATION_PARAMS.numCtx, num_predict: 1024, temperature: 0.3, seed: GENERATION_PARAMS.seed },
+      validate: (text) => validateInterpretation(text),
+      signal: ctx.signal,
+      sleep: this.o.sleep,
+    });
+    if (!result.ok && result.code === "transport_failed") throw new RunnerError("transport_failed", result.issues.map((i) => `${i.code}: ${i.message}`).join("; ").slice(0, 300), true);
+    ctx.checkpoint({ thoughtId, modelCalled: true });
+    // the model only proposes the English and the patterns; an agent chooses the skills before anything is drafted
+    const status = result.ok ? (result.value.status === "ok" ? "needs_skills" : result.value.status) : "failed";
+    const output = result.ok ? result.value : { issues: result.issues.map((i) => ({ code: i.code, message: i.message })) };
+    const { now, newId } = this.o.deps;
+    return {
+      schemaVersion: "thought-v1",
+      output: { thoughtId, status },
+      metrics: { calls: result.usage.calls, repaired: result.usage.repaired },
+      alsoCommit: (db) => {
+        const latest = db.prepare("SELECT status FROM thought_analyses WHERE thought_id = ? ORDER BY created_at DESC, rowid DESC LIMIT 1").get(thoughtId) as { status: string } | undefined;
+        if (latest?.status !== "pending") return; // settled by another delivery
+        db.prepare("INSERT INTO thought_analyses(id, thought_id, status, output_json, created_at) VALUES (?,?,?,?,?)").run(newId(), thoughtId, status, JSON.stringify({ ...output, model: `${m.tag}@${m.digest.slice(0, 12)}`, prompt: "thought-interpret-v1" }), now().toISOString());
+      },
+    };
+  }
+
+  async run(ctx: RunnerContext<GenerationPayload | ThoughtPayload>): Promise<RunnerOutput> {
+    if ("thoughtId" in ctx.job.payload) return this.runThought(ctx as RunnerContext<ThoughtPayload>);
+    ctx = ctx as RunnerContext<GenerationPayload>;
+    const m = this.pinned;
+    const payload = (ctx as RunnerContext<GenerationPayload>).job.payload;
     const items = this.queued(payload);
     if (items.length === 0) {
       // duplicate delivery or a unit that already settled: nothing to ask the model, nothing to write
@@ -160,7 +207,7 @@ export class GenerationJobRunner implements JobRunner<GenerationPayload> {
         { role: "system", content: system },
         { role: "user", content: user },
       ],
-      format: vocabulary ? vocabularyFormat(items.length) : draftFormat(first.type as ExerciseType, items.length, version ?? ""),
+      format: vocabulary ? vocabularyFormat(items.length) : draftFormat(first.type as ExerciseType, items.length, version ?? "", first.variant),
       options: { num_ctx: GENERATION_PARAMS.numCtx, num_predict: GENERATION_PARAMS.numPredict, temperature: GENERATION_PARAMS.temperature, seed: GENERATION_PARAMS.seed },
       validate,
       signal: ctx.signal,
@@ -192,7 +239,7 @@ export class GenerationJobRunner implements JobRunner<GenerationPayload> {
       const retry = await runStructured<unknown>({
         client: this.o.chat, model: m.tag,
         messages: [{ role: "system", content: system }, { role: "user", content: retryUser }, { role: "user", content: `Previous validation failed: ${failure}. Generate one corrected draft for this item.` }],
-        format: vocabulary ? vocabularyFormat(1) : draftFormat(item.plan.type as ExerciseType, 1, version ?? ""),
+        format: vocabulary ? vocabularyFormat(1) : draftFormat(item.plan.type as ExerciseType, 1, version ?? "", item.plan.variant),
         options: { num_ctx: GENERATION_PARAMS.numCtx, num_predict: GENERATION_PARAMS.numPredict, temperature: GENERATION_PARAMS.temperature, seed: GENERATION_PARAMS.seed + 1 + item.ordinal },
         validate: text => {
           try {

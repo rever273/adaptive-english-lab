@@ -54,6 +54,13 @@ export function extractUnits(ex: Exercise): PromptUnitFingerprint[] {
         for (const a of (p.accepted_answers as string[]) ?? []) add("answer", ex.prompt_en.replace(/_{2,}/, a));
         break;
       }
+      // a rewrite task (TASK_026): the shown source sentence is a sentence the learner meets, so it can never come back as another exercise
+      if (typeof p.source_en === "string") add("prompt", p.source_en);
+      for (const a of (p.accepted_answers as string[]) ?? []) add("answer", a);
+      break;
+    }
+    case "assemble_sentence": {
+      // the approved sentences are the only text a learner meets (the prompt is a fixed instruction): each is a unit, so the same sentence can never come back
       for (const a of (p.accepted_answers as string[]) ?? []) add("answer", a);
       break;
     }
