@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useState } from "react";
 import { VocabularyAnalytics } from "./VocabularyAnalytics";
 import { TypingAnalytics } from "./TypingAnalytics";
+import { Chart } from "../components/Chart";
 import { ApiRequestError, createExport, decideExternalReport, fetchExternal, fetchFindings, fetchReport, importExternalReport, type DiscoveryAuditData, type ExternalData, type FindingData, type Ratio, type SavedReportData } from "../api";
 
 const pct = (x: number | null): string => (x === null ? "—" : `${(x * 100).toFixed(1)}%`);
@@ -21,42 +22,20 @@ function Cell({ r }: { r: Ratio }) {
 /** held-out accuracy by week with Wilson whiskers; weeks without data are GAPS, never zeros */
 function WeeklyChart({ points }: { points: Array<{ week: string; r: Ratio }> }) {
   if (points.length === 0 || points.every((p) => p.r.rate === null)) return <p className="muted">No held-out answers yet. A delayed check opens once a skill has been practised for 7 days.</p>;
-  const W = 640;
-  const H = 180;
-  const pad = 30;
-  const x = (i: number) => pad + (points.length === 1 ? (W - 2 * pad) / 2 : (i * (W - 2 * pad)) / (points.length - 1));
-  const y = (v: number) => H - pad - v * (H - 2 * pad);
-  const segs: string[] = [];
-  let cur: string[] = [];
-  points.forEach((p, i) => {
-    if (p.r.rate === null) {
-      if (cur.length > 1) segs.push(cur.join(" "));
-      cur = [];
-    } else cur.push(`${x(i)},${y(p.r.rate)}`);
-  });
-  if (cur.length > 1) segs.push(cur.join(" "));
   return (
-    <svg role="img" aria-label="Held-out accuracy by week with 95% intervals" viewBox={`0 0 ${W} ${H}`} className="chart">
-      {[0, 0.5, 1].map((t) => (
-        <g key={t}>
-          <line x1={pad} x2={W - pad} y1={y(t)} y2={y(t)} className="chart-grid" />
-          <text x={4} y={y(t) + 4} className="chart-label">{t * 100}%</text>
-        </g>
-      ))}
-      {segs.map((s, i) => (
-        <polyline key={i} points={s} className="chart-line" />
-      ))}
-      {points.map((p, i) =>
-        p.r.rate === null || !p.r.wilson ? (
-          <text key={p.week} x={x(i)} y={H - 8} textAnchor="middle" className="chart-label">·</text>
-        ) : (
-          <g key={p.week}>
-            <line x1={x(i)} x2={x(i)} y1={y(p.r.wilson.low)} y2={y(p.r.wilson.high)} className="chart-whisker" />
-            <circle cx={x(i)} cy={y(p.r.rate)} r={4} className={p.r.lowN ? "chart-dot chart-dot-low" : "chart-dot"} />
-          </g>
-        ),
-      )}
-    </svg>
+    <Chart
+      ariaLabel="Held-out accuracy by week with 95% intervals"
+      line={{ color: "#6ab7ff", format: (v) => `${Math.round(v * 100)}%`, max: 1 }}
+      points={points.map((p) => ({
+        key: p.week,
+        label: p.week,
+        line: p.r.rate,
+        band: p.r.wilson ? { low: p.r.wilson.low, high: p.r.wilson.high } : null,
+        muted: p.r.lowN,
+        tip: [p.week, p.r.rate === null ? "No held-out answers" : `Accuracy: ${Math.round(p.r.rate * 100)}%`, ...(p.r.wilson ? [`95% interval: ${Math.round(p.r.wilson.low * 100)}–${Math.round(p.r.wilson.high * 100)}%`] : []), ...(p.r.lowN && p.r.rate !== null ? ["Few answers"] : [])],
+      }))}
+      legend="Weeks without data are gaps. Whiskers show the 95% interval; hollow points have few answers."
+    />
   );
 }
 

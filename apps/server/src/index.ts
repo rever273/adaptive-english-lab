@@ -50,6 +50,7 @@ async function main(): Promise<void> {
   const groqKey = process.env.GROQ_API_KEY ?? process.env.groq_api_key ?? localEnv.GROQ_API_KEY ?? localEnv.groq_api_key;
   const elevenLabsKey = process.env.ELEVENLABS_API_KEY ?? process.env.elevenlabs_api_key ?? localEnv.ELEVENLABS_API_KEY ?? localEnv.elevenlabs_api_key;
   const elevenLabsVoiceId = process.env.ELEVENLABS_VOICE_ID ?? process.env.elevenlabs_voice_id ?? localEnv.ELEVENLABS_VOICE_ID ?? localEnv.elevenlabs_voice_id;
+  const translateEmail = process.env.MYMEMORY_EMAIL ?? localEnv.MYMEMORY_EMAIL;
   const cloudSpeech = Boolean(groqKey);
   const instanceId = randomUUID();
   const startedAt = new Date().toISOString();
@@ -169,6 +170,7 @@ async function main(): Promise<void> {
     db,
     elevenLabsKey,
     elevenLabsVoiceId,
+    ...(translateEmail ? { translateEmail } : {}),
     ...(groqKey ? { groqKey } : {}),
     instanceId,
     startedAt,

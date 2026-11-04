@@ -15,8 +15,16 @@ export interface PreparedBook {
   issues: string[];
 }
 
-const HEADING_RE = /^(?:PART\s+(?:ONE|TWO|THREE|1|2|3)\b|Chapter\s+(?:[IVXLCDM]+|\d+)\b|Appendix\b)/i;
+// A heading is an exact standalone line: part titles, "Chapter N" (Arabic only, so the Roman-numeral chapter
+// headings quoted inside Goldstein's book stay body text) and the appendix. `trim()` already ran, so `$` anchors the line.
+const HEADING_RE = /^(PART\s+(?:ONE|TWO|THREE)|Chapter\s+\d+|APPENDIX\.?)$/i;
 const PAGE_NUMBER_RE = /^\d{1,4}$/;
+/** scene breaks like "*****" or "-----": decorative separators, dropped (they end the current paragraph). */
+const SEPARATOR_RE = /^[*_\-=]{3,}$/;
+/** Gutenberg service header/footer lines (title/author/licence/transcriber boilerplate), never part of the text. */
+const SERVICE_RE = /gutenberg|ebook no\.|^title\s*:|^author\s*:|^language\s*:|^date first posted|^date most recently updated|licence\.html|^character set|^produced by|^transcriber|^proofread/i;
+/** the explicit end-of-book marker (may appear once after the novel and again after an appendix): skip, never stop. */
+const THE_END_RE = /^THE END$|^END OF (THE )?PROJECT GUTENBERG/i;
 const BLOCKLIST = new Set([
   "1984",
   "nineteen eighty-four",
@@ -46,7 +54,7 @@ function reportIssues(text: string): string[] {
   const issues: string[] = [];
   const unexpected = new Map<string, number>();
   for (const ch of text) {
-    if (/[A-Za-z0-9\s.,;:!?\-—’'“”"()\[\]]/.test(ch)) continue;
+    if (/[A-Za-z0-9\s.,;:!?\-—’‘'"“”"()\[\]]/.test(ch)) continue;
     if (ch === "\n") continue;
     unexpected.set(ch, (unexpected.get(ch) ?? 0) + 1);
   }
@@ -62,7 +70,6 @@ export function prepareBookText(raw: string): PreparedBook {
   const issues: string[] = [];
   const lines = raw.replace(/^\uFEFF/, "").replace(/\r\n?/g, "\n").split("\n");
 
-  const paragraphs: string[] = [];
   let currentLines: string[] = [];
   let currentTitle: string | null = null;
   let currentStart = -1;
@@ -74,7 +81,9 @@ export function prepareBookText(raw: string): PreparedBook {
     const para = joinParagraph(currentLines);
     currentLines = [];
     if (para === "") return;
-    if (currentTitle !== null && currentStart === -1) currentStart = out.length;
+    // text before the first heading is the service header (title/author/licence): drop it
+    if (currentTitle === null) return;
+    if (currentStart === -1) currentStart = out.length;
     out += (out === "" ? "" : "\n\n") + para;
   };
 
@@ -93,6 +102,12 @@ export function prepareBookText(raw: string): PreparedBook {
       continue;
     }
     if (PAGE_NUMBER_RE.test(line)) continue;
+    if (SEPARATOR_RE.test(line)) {
+      flush();
+      continue;
+    }
+    if (THE_END_RE.test(line)) continue;
+    if (SERVICE_RE.test(line)) continue;
     if (BLOCKLIST.has(line.toLowerCase())) continue;
     if (HEADING_RE.test(line)) {
       flush();

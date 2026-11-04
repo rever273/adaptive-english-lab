@@ -40,11 +40,12 @@ function consecutiveFails(history: SpeedHistoryPoint[]): number {
   return n;
 }
 
-const INFORMATIVE_MIN_CHARS = 60;
-const INFORMATIVE_MIN_MS = 20_000;
+/** absolute thresholds, so the learner can change the number of words per level without making levels "uninformative" */
+const INFORMATIVE_MIN_CHARS = 40;
+const INFORMATIVE_MIN_MS = 15_000;
 
 /**
- * Adaptive speed (typing-speed-v1). The real difficulty lever is the spawn tempo, not just fall speed; the estimate is a
+ * Adaptive speed (typing-speed-v2: informative attempt = 40+ correct characters in 15+ s, was 60 and 20 s in v1). The real difficulty lever is the spawn tempo, not just fall speed; the estimate is a
  * trimmed median of the last informative attempts, clamped to ±8% of the previous estimate so one record cannot jump it.
  * Repeated losses temporarily lower the pressure. The measured WPM is never altered.
  */
@@ -82,5 +83,5 @@ export function fallMs(len: number, msPerChar: number): number {
 
 /** Gap before the next meteor may spawn (client-side), scaled to the length of the previous word. */
 export function spawnGapMs(prevWordLen: number, msPerChar: number): number {
-  return Math.round(prevWordLen * msPerChar + 350);
+  return Math.round(1.6 * prevWordLen * msPerChar + 600);
 }

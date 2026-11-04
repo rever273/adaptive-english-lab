@@ -12,6 +12,8 @@ export interface MetricsInput {
   charsCorrect: number;
   level: number;
   completed: boolean;
+  /** words: number of words in the level's plan, so the score does not depend on the "words per level" setting */
+  plannedWords?: number;
 }
 
 export interface Metrics {
@@ -25,6 +27,9 @@ export interface Metrics {
   charsTyped: number;
 }
 
+/** a level of this many words is the score's reference size (the default setting) */
+const REFERENCE_WORDS = 30;
+
 const round1 = (n: number): number => Math.round(n * 10) / 10;
 
 export function computeMetrics(input: MetricsInput): Metrics {
@@ -36,7 +41,7 @@ export function computeMetrics(input: MetricsInput): Metrics {
   const accF = Math.pow((accuracy ?? 0) / 100, 2);
   const score =
     input.mode === "words"
-      ? Math.round(input.charsCorrect * (wpm / 40) * accF * (1 + Math.min(input.level, 50) * 0.02)) + (input.completed ? 100 : 0)
+      ? Math.round(input.charsCorrect * (REFERENCE_WORDS / Math.max(1, input.plannedWords ?? REFERENCE_WORDS)) * (wpm / 40) * accF * (1 + Math.min(input.level, 50) * 0.02)) + (input.completed ? 100 : 0)
       : Math.round(wpm * accF * 10);
   return {
     wpm: round1(wpm),

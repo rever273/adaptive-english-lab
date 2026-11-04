@@ -3,7 +3,7 @@ import { computeSpeed, fallMs, spawnGapMs, type SpeedHistoryPoint } from "../../
 
 const pt = (status: "completed" | "failed", charsCorrect: number, activeMs: number): SpeedHistoryPoint => ({ status, charsCorrect, activeMs });
 
-describe("typing speed (typing-speed-v1)", () => {
+describe("typing speed (typing-speed-v3)", () => {
   it("uses a calm default when there is no informative history", () => {
     const s = computeSpeed([], { multiplier: 1.05 });
     expect(s.estimateWpm).toBe(25);
@@ -12,7 +12,7 @@ describe("typing speed (typing-speed-v1)", () => {
 
   it("ignores too-short attempts as uninformative", () => {
     const s = computeSpeed([pt("completed", 10, 5000), pt("completed", 100, 120000)], { multiplier: 1 });
-    // only the second is informative (charsCorrect >= 60, activeMs >= 20000)
+    // only the second is informative (charsCorrect >= 40, activeMs >= 15000)
     expect(s.estimateWpm).toBe(10); // 100 chars / 5 / 2 min
   });
 
@@ -46,5 +46,10 @@ describe("typing speed (typing-speed-v1)", () => {
 
   it("scales the spawn gap by the previous word length", () => {
     expect(spawnGapMs(10, 100)).toBeGreaterThan(spawnGapMs(3, 100));
+  });
+
+  it("leaves slack: meteors arrive slower than the estimated typing speed", () => {
+    // a 5-letter word at 100 ms/char takes 500 ms to type; the next meteor comes later than that
+    expect(spawnGapMs(5, 100)).toBeGreaterThan(5 * 100 * 1.5);
   });
 });

@@ -9,7 +9,7 @@ import type { ChatClient, ChatResult, CallStats } from "../../../apps/server/src
 import { AI_CONFIG_V3 } from "../../../apps/server/src/domain/ai/config.js";
 import { getReport } from "../../../apps/server/src/domain/reports/report.js";
 import { VocabularyJobRunner, type VocabularyRunnerOptions } from "../../../apps/server/src/domain/vocabulary/enrichment.js";
-import { addWord, getEntry, listWords, lookupWord, patchWord, queueMissingLevels, recoverLegacyVocabularyFailures, removeWord, revisionHistory, vocabularyTotals } from "../../../apps/server/src/domain/vocabulary/repository.js";
+import { addWord, getEntry, listWords, lookupWord, matchWords, patchWord, queueMissingLevels, recoverLegacyVocabularyFailures, removeWord, revisionHistory, vocabularyTotals } from "../../../apps/server/src/domain/vocabulary/repository.js";
 import { enqueue, getJob } from "../../../apps/server/src/queue/jobs.js";
 import { GpuScheduler } from "../../../apps/server/src/queue/scheduler.js";
 import { ApiError } from "../../../apps/server/src/errors.js";
@@ -38,6 +38,19 @@ const fails = (fn: () => unknown, status: number, code: string): ApiError => {
   }
   throw new Error(`expected ${code}`);
 };
+
+describe("matching saved words in a text", () => {
+  it("finds saved words by lemma, regular ending or selected form, with their translation, and skips words without one", async () => {
+    env = await makeEnv();
+    const a = addWord(env.db, deps(), { word: "reconcile" });
+    const b = addWord(env.db, deps(), { word: "hinder" });
+    addWord(env.db, deps(), { word: "scarce" }); // no translation yet
+    patchWord(env.db, deps(), a.entry.id, { expectedRevision: 0, translationRu: "согласовывать, примирять" });
+    patchWord(env.db, deps(), b.entry.id, { expectedRevision: 0, translationRu: "мешать" });
+    const found = matchWords(env.db, ["Reconciled", "hindering", "scarce", "table", "reconcile,"]);
+    expect(found.map((f) => [f.word, f.lemma, f.translationRu]).sort()).toEqual([["hindering", "hinder", "мешать"], ["reconcile", "reconcile", "согласовывать, примирять"], ["reconciled", "reconcile", "согласовывать, примирять"]]);
+  });
+});
 
 describe("saving a word", () => {
   it("is immediate and needs no AI: the word is stored, an enrichment job is merely queued, and the same word is the same entry", async () => {

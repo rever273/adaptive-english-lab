@@ -6,7 +6,7 @@ import { currentTranslations, VISIBLE } from "../vocabulary/repository.js";
 import { computeMetrics, METRICS_VERSION } from "./metrics.js";
 import { buildTypingResult, sessionRow, type TypingSessionRow } from "./result.js";
 import { computeSpeed, fallMs, type SpeedHistoryPoint } from "./speed.js";
-import { awardTypingXp, typingXpForWords } from "./xp.js";
+import { awardTypingXp, typingXpForWordBands, wordErrorBands } from "./xp.js";
 
 export interface WordsDeps {
   now: () => Date;
@@ -62,6 +62,46 @@ function shuffle<T>(arr: T[], r: () => number): T[] {
   return arr;
 }
 
+/**
+ * How well the learner types each word, derived from the raw per-word facts (never stored): clean destroyed appearances raise the
+ * rating, appearances with wrong keys lower it. Low = needs practice, high = comfortable, 0 = never seen. Repeats stay allowed.
+ */
+function lemmaRatings(db: Db): Map<string, number> {
+  const rows = db
+    .prepare(
+      `SELECT w.lemma AS lemma,
+              SUM(CASE WHEN w.destroyed_at IS NOT NULL AND r.errors = 0 THEN 1 ELSE 0 END) AS clean,
+              SUM(CASE WHEN r.errors > 0 THEN 1 ELSE 0 END) AS errorful
+         FROM typing_words w LEFT JOIN typing_word_results r ON r.session_id = w.session_id AND r.plan_index = w.plan_index
+        GROUP BY w.lemma`,
+    )
+    .all() as Array<{ lemma: string; clean: number; errorful: number }>;
+  return new Map(rows.map((r) => [r.lemma, r.clean - 1.5 * r.errorful]));
+}
+
+/** lemmas of the most recent Words session: they are offered less right after, so levels do not repeat each other */
+function previousLemmas(db: Db): Set<string> {
+  const last = db.prepare("SELECT id FROM typing_sessions WHERE mode = 'words' AND status <> 'active' ORDER BY started_at DESC LIMIT 1").get() as { id: string } | undefined;
+  if (!last) return new Set();
+  return new Set((db.prepare("SELECT lemma FROM typing_words WHERE session_id = ?").all(last.id) as Array<{ lemma: string }>).map((r) => r.lemma));
+}
+
+/**
+ * Weighted random order (each item draws an exponential clock; the weight sets the rate): problem words are several times more likely
+ * to come early, comfortable ones less, and words from the previous level less still, but nothing is guaranteed or excluded, so the
+ * same few words cannot fill every level.
+ */
+function byRating<T>(items: T[], lemmaOf: (t: T) => string, ratings: Map<string, number>, recent: Set<string>, r: () => number, factor: (t: T) => number = () => 1): T[] {
+  return items
+    .map((t) => {
+      const rating = Math.max(-3, Math.min(4, ratings.get(lemmaOf(t)) ?? 0));
+      const weight = 2 ** -rating * factor(t) * (recent.has(lemmaOf(t)) ? 0.3 : 1);
+      return { t, k: -Math.log(Math.max(r(), 1e-9)) / weight };
+    })
+    .sort((a, b) => a.k - b.k)
+    .map((x) => x.t);
+}
+
 /** personal entries, not removed, a single (possibly hyphenated) lowercase word, with the priority: learned=0 first, then longest-unseen, ties random. */
 function personalCandidates(db: Db, level: number, deps: WordsDeps): PersonalCandidate[] {
   const rows = db
@@ -74,13 +114,9 @@ function personalCandidates(db: Db, level: number, deps: WordsDeps): PersonalCan
     .all() as Array<{ id: string; lemma: string; learned: number; last: string | null }>;
   const maxLen = level <= 3 ? 12 : Number.POSITIVE_INFINITY;
   const candidates = rows.filter((r) => /^[a-z]+(-[a-z]+)?$/.test(r.lemma) && r.lemma.length <= maxLen && r.lemma.length <= 32);
-  // shuffle first, then stable-sort by (learned, last): ties keep their random order
-  shuffle(candidates, rand(deps)).sort((a, b) => {
-    if (a.learned !== b.learned) return a.learned - b.learned;
-    if ((a.last === null) !== (b.last === null)) return a.last === null ? -1 : 1;
-    if (a.last !== null && b.last !== null && a.last !== b.last) return a.last < b.last ? -1 : 1;
-    return 0;
-  });
+  // problem words first, then not-yet-learned ones, then the ones not shown for longest; every entry stays a candidate
+  const ordered = byRating(candidates, (c) => c.lemma, lemmaRatings(db), previousLemmas(db), rand(deps), (c) => (c.learned ? 0.7 : 1));
+  candidates.splice(0, candidates.length, ...ordered);
   // a word without a translation is dropped: it cannot be a target with a translation (D77)
   const ids = candidates.map((c) => c.id);
   const translations = currentTranslations(db, ids);
@@ -109,7 +145,10 @@ function wordsHistory(db: Db): { points: SpeedHistoryPoint[]; previousEstimate: 
   const rows = db
     .prepare("SELECT status, chars_correct, active_ms, plan_json FROM typing_sessions WHERE mode = 'words' AND status <> 'active' ORDER BY ended_at ASC")
     .all() as Array<{ status: string; chars_correct: number | null; active_ms: number; plan_json: string | null }>;
-  const points = rows.map((r) => ({ status: (r.status === "failed" ? "failed" : "completed") as "completed" | "failed", charsCorrect: r.chars_correct ?? 0, activeMs: r.active_ms }));
+  // an interrupted session is neither a loss nor a win: it must not break a losing streak or feed the estimate
+  const points = rows
+    .filter((r) => r.status === "failed" || r.status === "completed")
+    .map((r) => ({ status: r.status as "completed" | "failed", charsCorrect: r.chars_correct ?? 0, activeMs: r.active_ms }));
   let previousEstimate: number | null = null;
   for (let i = rows.length - 1; i >= 0; i--) {
     const r = rows[i]!;
@@ -166,7 +205,7 @@ export function buildWordsPlan(db: Db, level: number, settings: SettingsV1, deps
     k++;
   }
 
-  const bank = shuffle(bankWords(db, level), rand(deps));
+  const bank = byRating(bankWords(db, level), (b) => b.lemma, lemmaRatings(db), previousLemmas(db), rand(deps));
   const takenLemmas = new Set(personalWords.map((w) => w.lemma));
   const pool = { short: [] as BankWord[], med: [] as BankWord[], long: [] as BankWord[] };
   for (const b of bank) {
@@ -298,6 +337,8 @@ export interface WordsCompleteRequest {
   errors: number;
   appearances: Array<{ planIndex: number; order: number }>;
   destroyedPlanIndexes: number[];
+  /** wrong keys per word; one entry per appeared word; absent from older clients (then every destroyed word counts as clean for XP, with no rating data) */
+  wordErrors?: Array<{ planIndex: number; errors: number }>;
 }
 
 export function completeWords(db: Db, deps: WordsDeps, sessionId: string, req: WordsCompleteRequest): ReturnType<typeof buildTypingResult> {
@@ -323,14 +364,23 @@ export function completeWords(db: Db, deps: WordsDeps, sessionId: string, req: W
     throw new ApiError(400, "TYPING_COUNTERS_INVALID", "charsTyped minus errors cannot be below charsCorrect");
   }
 
-  const metrics = computeMetrics({ mode: "words", activeMs: req.activeMs, charsTyped: req.charsTyped, errors: req.errors, charsCorrect, level: row.level_number, completed: req.status === "completed" });
-  const xp = req.status === "completed" ? typingXpForWords(destroyedSet.size) : 0;
+  const metrics = computeMetrics({ mode: "words", activeMs: req.activeMs, charsTyped: req.charsTyped, errors: req.errors, charsCorrect, level: row.level_number, completed: req.status === "completed", plannedWords: words.length });
+  const errorsByIndex = new Map<number, number>();
+  for (const e of req.wordErrors ?? []) {
+    if (!words[e.planIndex]) throw new ApiError(400, "TYPING_INDEX_INVALID", `wordErrors ${e.planIndex} is outside the plan`);
+    if (errorsByIndex.has(e.planIndex)) throw new ApiError(400, "TYPING_INDEX_DUPLICATE", "wordErrors must be unique");
+    errorsByIndex.set(e.planIndex, e.errors);
+  }
+  const xp = req.status === "completed" ? typingXpForWordBands(wordErrorBands([...destroyedSet].map((i) => errorsByIndex.get(i) ?? 0))) : 0;
   const now = deps.now().toISOString();
 
   db.transaction(() => {
     for (const i of destroyedSet) {
       db.prepare("UPDATE typing_words SET destroyed_at = ? WHERE session_id = ? AND plan_index = ? AND destroyed_at IS NULL").run(now, sessionId, i);
     }
+    // per-word wrong keys, only for words that actually appeared
+    const putErrors = db.prepare("INSERT OR IGNORE INTO typing_word_results(session_id, plan_index, errors) SELECT session_id, plan_index, ? FROM typing_words WHERE session_id = ? AND plan_index = ?");
+    for (const [i, n] of errorsByIndex) putErrors.run(n, sessionId, i);
     db.prepare(
       "UPDATE typing_sessions SET status = ?, ended_at = ?, active_ms = ?, chars_typed = ?, errors = ?, chars_correct = ?, wpm = ?, cpm = ?, accuracy = ?, score = ?, metrics_version = ? WHERE id = ?",
     ).run(req.status, now, req.activeMs, req.charsTyped, req.errors, charsCorrect, metrics.wpm, metrics.cpm, metrics.accuracy, metrics.score, METRICS_VERSION, sessionId);

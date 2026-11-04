@@ -1,6 +1,7 @@
 import type { Db } from "../../db/open.js";
 import type { TypingPlanWord, TypingResult } from "@english-lab/contracts";
 import { skillOf } from "./metrics.js";
+import { wordErrorBands } from "./xp.js";
 
 export interface TypingSessionRow {
   id: string;
@@ -35,6 +36,14 @@ export function sessionRow(db: Db, id: string): TypingSessionRow {
 
 interface PlanWord extends TypingPlanWord {
   // identical shape to TypingPlanWord
+}
+
+/** only when the client reported per-word errors for every destroyed word (older sessions have none) */
+function bandsOf(words: TypingResult["words"]): TypingResult["wordErrorBands"] {
+  if (!words) return undefined;
+  const destroyed = words.filter((w) => w.destroyed);
+  if (destroyed.length === 0 || destroyed.some((w) => w.errors === null)) return undefined;
+  return wordErrorBands(destroyed.map((w) => w.errors!));
 }
 
 export function planWords(row: TypingSessionRow): PlanWord[] {
@@ -105,6 +114,7 @@ export function buildTypingResult(db: Db, row: TypingSessionRow): TypingResult {
     words,
     wordsShown: row.mode === "words" ? (db.prepare("SELECT COUNT(*) AS n FROM typing_words WHERE session_id = ?").get(row.id) as { n: number }).n : undefined,
     wordsDestroyed: row.mode === "words" ? destroyedCount.n : undefined,
+    wordErrorBands: bandsOf(words),
     book,
   };
 }
@@ -116,6 +126,7 @@ function resultWords(db: Db, row: TypingSessionRow): TypingResult["words"] {
     d: string | null;
     o: number;
   }>;
+  const errors = new Map((db.prepare("SELECT plan_index AS pi, errors AS e FROM typing_word_results WHERE session_id = ?").all(row.id) as Array<{ pi: number; e: number }>).map((x) => [x.pi, x.e]));
   return rows.map((r) => {
     const w = plan.get(r.pi);
     return {
@@ -130,6 +141,7 @@ function resultWords(db: Db, row: TypingSessionRow): TypingResult["words"] {
       unverified: w?.unverified ?? false,
       destroyed: r.d !== null,
       order: r.o,
+      errors: errors.get(r.pi) ?? null,
     };
   });
 }

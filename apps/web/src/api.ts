@@ -84,12 +84,12 @@ export const loadAiModel = (): Promise<AiModelStatus> => send("POST", "/api/v1/a
 export const unloadAiModel = (): Promise<AiModelStatus> => send("POST", "/api/v1/ai/model/unload", AiModelStatusSchema, {});
 export const fetchCapabilities = (): Promise<Capabilities> => send("GET", "/api/v1/capabilities", CapabilitiesSchema);
 
-type SettingsValues = { preloadModelOnStart?: boolean; practiceSoundsEnabled?: boolean; taskCount: number; weakRatio: number; voiceTarget: 0 | 1 | 2; voiceShare?: number; vocabularyTaskCount?: number; vocabularyNewWordsPerSession?: number; reviewNoticeThreshold?: number; difficultyMin?: Level; difficultyMax?: Level; typingWordsPerLevel?: number; typingVocabularyShare?: number; typingSpeedMultiplier?: number; typingBookMinutes?: number };
+type SettingsValues = { preloadModelOnStart?: boolean; practiceSoundsEnabled?: boolean; typingSoundsEnabled?: boolean; taskCount: number; weakRatio: number; voiceTarget: 0 | 1 | 2; voiceShare?: number; vocabularyTaskCount?: number; vocabularyNewWordsPerSession?: number; reviewNoticeThreshold?: number; difficultyMin?: Level; difficultyMax?: Level; typingWordsPerLevel?: number; typingVocabularyShare?: number; typingSpeedMultiplier?: number; typingBookMinutes?: number };
 export type Level = "A2" | "B1" | "B2" | "C1" | "C2";
 type SettingsView = { revision: number; values: SettingsValues; defaults: SettingsValues };
 export const fetchSettings = () => send("GET", "/api/v1/settings", typed<SettingsView>());
 export const savePreloadModel = (on: boolean) => send("POST", "/api/v1/settings", typed<SettingsView>(), { preloadModelOnStart: on });
-export const saveSettings = (values: { taskCount: number; weakRatio: number; voiceShare: number; practiceSoundsEnabled?: boolean; vocabularyTaskCount?: number; vocabularyNewWordsPerSession?: number; reviewNoticeThreshold?: number; difficultyMin?: Level; difficultyMax?: Level; typingWordsPerLevel?: number; typingVocabularyShare?: number; typingSpeedMultiplier?: number; typingBookMinutes?: number }) => send("POST", "/api/v1/settings", typed<SettingsView>(), values);
+export const saveSettings = (values: { taskCount: number; weakRatio: number; voiceShare: number; practiceSoundsEnabled?: boolean; typingSoundsEnabled?: boolean; vocabularyTaskCount?: number; vocabularyNewWordsPerSession?: number; reviewNoticeThreshold?: number; difficultyMin?: Level; difficultyMax?: Level; typingWordsPerLevel?: number; typingVocabularyShare?: number; typingSpeedMultiplier?: number; typingBookMinutes?: number }) => send("POST", "/api/v1/settings", typed<SettingsView>(), values);
 export type VocabularySpeechStatus = { enabled: boolean; configured: boolean; requests: number; blockedUntil: string | null };
 export const fetchVocabularySpeech = () => send("GET", "/api/v1/vocabulary-speech", typed<VocabularySpeechStatus>());
 export type VocabularySpeechCredits = { available: boolean; reason?: string; used?: number; limit?: number; remaining?: number; resetsAt?: string | null; tier?: string | null; appCharacters30d: number };
@@ -325,6 +325,8 @@ interface VocabTotals { words: number; learned: number; bankOccurrences: number;
 const anyOf = <T>() => ({ parse: (x: unknown) => x as T }) as unknown as ZodType<T>;
 export const fetchVocabulary = (q = "") => send("GET", `/api/v1/vocabulary${q ? `?q=${encodeURIComponent(q)}` : ""}`, anyOf<{ words: VocabEntry[]; totals: VocabTotals }>());
 export const lookupVocabulary = (word: string) => send("GET", `/api/v1/vocabulary/lookup?word=${encodeURIComponent(word)}`, anyOf<{ known: boolean; entry: VocabEntry | null }>());
+export const translateSentence = (text: string) => send("POST", "/api/v1/translate", anyOf<{ text: string }>(), { text });
+export const matchVocabulary = (words: string[]) => send("POST", "/api/v1/vocabulary/match", anyOf<{ matches: Array<{ word: string; lemma: string; translationRu: string }> }>(), { words });
 export const addVocabulary = (word: string, selected?: string, slotId?: string) => send("POST", "/api/v1/vocabulary", anyOf<VocabEntry & { created: boolean }>(), { word, ...(selected ? { selected } : {}), ...(slotId ? { slotId } : {}) });
 export const removeVocabulary = (id: string) => send("POST", `/api/v1/vocabulary/${id}/remove`, anyOf<{ removed: true }>(), {});
 export const patchVocabulary = (id: string, body: { expectedRevision?: number; translationRu?: string; exampleEn?: string; collocations?: string[]; pos?: string; learned?: boolean }) => send("PATCH", `/api/v1/vocabulary/${id}`, anyOf<VocabEntry>(), body);
@@ -361,7 +363,7 @@ export type { TypingAnalyticsData, TypingBookStartResponse, TypingOverview, Typi
 export const fetchTypingOverview = () => send("GET", "/api/v1/typing/overview", typed<TypingOverview>());
 export const startTypingWords = () => send("POST", "/api/v1/typing/words/start", typed<TypingWordsStartResponse>(), {});
 export const typingWordAppearances = (sessionId: string, appearances: Array<{ planIndex: number; order: number }>) => send("POST", `/api/v1/typing/words/${encodeURIComponent(sessionId)}/appearances`, typed<{ ok: true }>(), { appearances });
-export const completeTypingWords = (sessionId: string, body: { status: "completed" | "failed"; activeMs: number; charsTyped: number; errors: number; appearances: Array<{ planIndex: number; order: number }>; destroyedPlanIndexes: number[] }) => send("POST", `/api/v1/typing/words/${encodeURIComponent(sessionId)}/complete`, typed<TypingResult>(), body);
+export const completeTypingWords = (sessionId: string, body: { status: "completed" | "failed"; activeMs: number; charsTyped: number; errors: number; appearances: Array<{ planIndex: number; order: number }>; destroyedPlanIndexes: number[]; wordErrors?: Array<{ planIndex: number; errors: number }> }) => send("POST", `/api/v1/typing/words/${encodeURIComponent(sessionId)}/complete`, typed<TypingResult>(), body);
 export const abortTypingWords = (sessionId: string, body: { activeMs?: number; charsTyped?: number; errors?: number }) => send("POST", `/api/v1/typing/words/${encodeURIComponent(sessionId)}/abort`, typed<{ ok: true }>(), body);
 export const startTypingBook = () => send("POST", "/api/v1/typing/books/start", typed<TypingBookStartResponse>(), {});
 export const checkpointTypingBook = (sessionId: string, body: { offset: number; activeMs: number; charsTyped: number; errors: number }) => send("POST", `/api/v1/typing/books/${encodeURIComponent(sessionId)}/checkpoint`, typed<{ ok: true; applied: boolean }>(), body);
@@ -395,7 +397,7 @@ export interface VocabAnalytics {
   families: Record<"recognition" | "guided_recall" | "collocation", Rate & { assisted: number; pending: number }>;
   series: Array<{ date: string; correct: number; total: number; xp: number }>;
   growth: { series: Array<{ date: string; added: number; learned: number }>; learnedNow: number; learnedWithoutDate: number };
-  encounters: { uniqueWordsShown: number; displays: number; bankWords: number; bankContexts: number };
+  encounters: { uniqueWordsShown: number; displays: number; bankWords: number; bankContexts: number; typedInBooks: { words: number; occurrences: number } };
   weak: Array<{ lemma: string; entryId: string | null; attempts: number; misses: number; firstSeen: string; lastSeen: string; lastResult: string | null; example: string | null }>;
   words: Array<{ lemma: string; attempts: number; misses: number; lastSeen: string; lastResult: string | null }>;
   retention: Rate;

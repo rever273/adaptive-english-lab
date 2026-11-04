@@ -18,6 +18,7 @@ const SettingsPatchSchema = z
     reviewNoticeThreshold: z.number().int().min(1).max(50).optional(),
     preloadModelOnStart: z.boolean().optional(),
     practiceSoundsEnabled: z.boolean().optional(),
+    typingSoundsEnabled: z.boolean().optional(),
     difficultyMin: z.enum(CEFR_RANGE).optional(),
     difficultyMax: z.enum(CEFR_RANGE).optional(),
     typingWordsPerLevel: z.number().int().min(10).max(100).optional(),

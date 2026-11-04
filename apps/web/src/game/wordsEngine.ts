@@ -16,14 +16,18 @@ export interface WordsWord {
   lane: number;
   /** typed correct characters so far */
   progress: number;
-  /** incorrect characters pending deletion (red) */
-  errors: string[];
+  /** wrong keys pressed while this word was locked (reported to the server for per-word statistics) */
+  mistakes: number;
   /** whether the meteor is currently animating a destruction */
   destroying: boolean;
 }
 
 export type WordsEvent =
   | { type: "appeared"; word: WordsWord }
+  /** a correct letter: one shot at the word */
+  | { type: "hit"; word: WordsWord }
+  /** a wrong key; `word` is the locked target (null when no word was locked) */
+  | { type: "miss"; word: WordsWord | null }
   | { type: "destroyed"; word: WordsWord }
   | { type: "failed" }
   | { type: "won" };
@@ -51,8 +55,10 @@ export interface WordsEngineState {
   spawnTimerMs: number;
   /** for the "no target on screen" fast-spawn rule */
   nextAppearanceOrder: number;
-  /** flashes: wrong letter without a target */
-  flash: number;
+  /** counts wrong keys; the host restarts its shake animation whenever it changes */
+  errorSeq: number;
+  /** planIndex of the word that was locked at the last wrong key (null: no lock, shake every label) */
+  errorPlanIndex: number | null;
 }
 
 export interface WordsEngineConfig {
@@ -80,7 +86,8 @@ export function createWordsEngine(config: WordsEngineConfig): WordsEngineState {
     paused: false,
     spawnTimerMs: 0,
     nextAppearanceOrder: 0,
-    flash: 0,
+    errorSeq: 0,
+    errorPlanIndex: null,
   };
 }
 
@@ -109,7 +116,7 @@ function trySpawn(s: WordsEngineState, config: WordsEngineConfig): WordsWord | n
     y: 0,
     lane: 0, // host assigns a real lane when rendering
     progress: 0,
-    errors: [],
+    mistakes: 0,
     destroying: false,
   };
   s.words.push(word);
@@ -150,69 +157,50 @@ export function tickWords(s: WordsEngineState, config: WordsEngineConfig, dtMs: 
     advance(s, dtMs, config);
     if (s.failed) events.push({ type: "failed" });
   }
-  // flash decay
-  if (s.flash > 0) s.flash = Math.max(0, s.flash - dtMs);
   return { spawned: null, events };
 }
 
+/**
+ * A wrong key never changes the word (nothing is shown or to be deleted): it is counted, reported as a `miss` and the host
+ * shakes the text. A correct letter is one shot; the word is destroyed on its last letter. Backspace does nothing here.
+ */
 export function handleWordKey(s: WordsEngineState, config: WordsEngineConfig, key: string): WordsEvent[] {
   const events: WordsEvent[] = [];
   if (s.paused || s.failed || s.won) return events;
 
-  if (key === "Backspace") {
-    s.charsTyped += 1;
-    if (s.target === null) return events;
-    const w = s.words[s.target]!;
-    if (w.errors.length > 0) {
-      w.errors.pop();
-      return events;
-    }
-    if (w.progress > 0) {
-      w.progress--;
-      if (w.progress === 0) s.target = null; // clear lock when everything is deleted
-    }
-    return events;
-  }
-
   const k = key.toLowerCase();
-  if (!/^[a-z]$/.test(k)) return events;
+  if (!/^[a-z-]$/.test(k)) return events;
 
-  // no target: find the most dangerous available word whose first letter matches
+  const miss = (word: WordsWord | null) => {
+    s.errors += 1;
+    s.charsTyped += 1;
+    s.errorSeq += 1;
+    s.errorPlanIndex = word ? word.planIndex : null;
+    if (word) word.mistakes += 1;
+    events.push({ type: "miss", word });
+  };
+
+  // no target: lock the matching word that is closest to the defence line (the one that will reach the ship first)
   if (s.target === null || (s.words[s.target]?.destroying ?? true)) {
     const candidates = s.words
       .filter((w) => !w.destroying && firstLetter(w.lemma) === k)
-      .sort((a, b) => (1 - b.y) * config.fallMs(b.lemma.length) - (1 - a.y) * config.fallMs(a.lemma.length));
+      .sort((a, b) => b.y - a.y);
     if (candidates.length === 0) {
-      // wrong letter with no matching target: counts as an error, brief flash, nothing to delete
-      s.errors += 1;
-      s.charsTyped += 1;
-      s.flash = 250;
+      miss(null);
       return events;
     }
     s.target = s.words.indexOf(candidates[0]!);
   }
 
   const w = s.words[s.target]!;
-  const expected = w.lemma[w.progress + w.errors.length]?.toLowerCase();
-  if (k === expected) {
-    // correct: advance only when there are no pending red errors
-    if (w.errors.length > 0) {
-      w.errors.push(k);
-      s.errors += 1;
-      s.charsTyped += 1;
-      return events;
-    }
-    w.progress++;
-    s.charsTyped += 1;
-    if (w.progress >= w.lemma.length) {
-      destroyWord(s, w, events);
-    }
+  if (k !== w.lemma[w.progress]?.toLowerCase()) {
+    miss(w);
     return events;
   }
-  // wrong letter against the locked target
-  if (w.errors.length < 3) w.errors.push(k);
-  s.errors += 1;
+  w.progress++;
   s.charsTyped += 1;
+  events.push({ type: "hit", word: w });
+  if (w.progress >= w.lemma.length) destroyWord(s, w, events);
   return events;
 }
 

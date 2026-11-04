@@ -1,3 +1,4 @@
+import { splitSentences, tokensOf } from "@english-lab/contracts";
 import { randomUUID } from "node:crypto";
 import { z } from "zod";
 import type { Db } from "../../db/open.js";
@@ -292,6 +293,45 @@ export function recoverLegacyVocabularyFailures(db: Db, deps: Deps): number {
     }
     return recovered;
   }).immediate();
+}
+
+/**
+ * Which of these words (as they stand in a text) are saved vocabulary, counting regular endings and the forms the learner selected?
+ * One pass over the saved entries; used to show the translation of the learner's own words while they read.
+ */
+function savedFormIndex(db: Db): Map<string, EntryRow> {
+  const rows = (db.prepare("SELECT id, lemma, pos, learned, user_revision, surface_forms_json, created_at FROM vocabulary_entries").all() as EntryRow[]).filter((r) => !isRemoved(db, r.id));
+  const byForm = new Map<string, EntryRow>();
+  for (const r of rows) for (const f of formsOf(r)) if (!byForm.has(f)) byForm.set(f, r);
+  return byForm;
+}
+
+/** every occurrence of a saved word in a book passage (`base` is the passage's offset in the whole book); derived from the text, never counted twice */
+export function bookEncounters(db: Db, passage: string, base: number): Array<{ entryId: string; offset: number }> {
+  const index = savedFormIndex(db);
+  if (index.size === 0) return [];
+  const out: Array<{ entryId: string; offset: number }> = [];
+  for (const sentence of splitSentences(passage)) {
+    for (const tok of tokensOf(passage, sentence)) {
+      const entry = index.get(normalizeWord(passage.slice(tok.startOffset, tok.endOffset)));
+      if (entry) out.push({ entryId: entry.id, offset: base + tok.startOffset });
+    }
+  }
+  return out;
+}
+
+export function matchWords(db: Db, words: readonly string[]): Array<{ word: string; lemma: string; translationRu: string }> {
+  const byForm = savedFormIndex(db);
+  const found: Array<{ word: string; entry: EntryRow }> = [];
+  for (const raw of new Set(words.map(normalizeWord))) {
+    const entry = byForm.get(raw);
+    if (raw && entry) found.push({ word: raw, entry });
+  }
+  const translations = currentTranslations(db, found.map((f) => f.entry.id));
+  return found.flatMap((f) => {
+    const t = translations.get(f.entry.id);
+    return t ? [{ word: f.word, lemma: f.entry.lemma, translationRu: t }] : [];
+  });
 }
 
 /** For the popup: is the selected word (or a form of it) already saved? */

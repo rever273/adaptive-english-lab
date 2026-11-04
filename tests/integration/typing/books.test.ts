@@ -5,6 +5,7 @@ import { afterEach, describe, expect, it } from "vitest";
 import { runMigrations } from "../../../apps/server/src/db/migrate.js";
 import { openDatabase, type Db } from "../../../apps/server/src/db/open.js";
 import { booksOverview, checkpointBook, completeBook, computeBookEnd, startBook } from "../../../apps/server/src/domain/typing/books.js";
+import { addWord } from "../../../apps/server/src/domain/vocabulary/repository.js";
 import { countRequired } from "../../../packages/contracts/src/typingText.js";
 import { buildTypingResult } from "../../../apps/server/src/domain/typing/result.js";
 import { makeScratchRoot, projectRoot } from "../helpers.js";
@@ -45,6 +46,16 @@ describe("typing books domain", () => {
       start = end;
     }
     expect(covered).toBe(total);
+  });
+
+  it("cuts a level at a sentence boundary, so a short level is short even inside one long paragraph", async () => {
+    const sentence = "The clocks were striking thirteen today. ";
+    const text = sentence.repeat(20).trim();
+    const end = computeBookEnd(text, 0, 100);
+    expect(end).toBeLessThan(text.length / 2);
+    expect(text.slice(0, end).endsWith(".")).toBe(true);
+    expect(countRequired(text, 0, end)).toBeGreaterThanOrEqual(100);
+    expect(countRequired(text, 0, end)).toBeLessThan(100 + 45);
   });
 
   it("reports no_book when nothing is prepared", async () => {
@@ -100,6 +111,22 @@ describe("typing books domain", () => {
     expect(again.sessionId).toBe(result.sessionId);
     const xp2 = (d.prepare("SELECT COUNT(*) AS n FROM typing_xp_events WHERE session_id = ?").get(a.sessionId) as { n: number }).n;
     expect(xp2).toBe(1);
+  });
+
+  it("records one encounter per occurrence of a saved word when a level is completed, and none twice", async () => {
+    const d = await setup();
+    const text = "The clocks were striking. A clock struck once, and the clocks again.";
+    d.prepare("INSERT INTO typing_books(id, title, author, source, content_sha256, text_length, chapters_json, created_at) VALUES (?,?,?,?,?,?,?,?)")
+      .run("enc-book", "Nineteen Eighty-Four", "George Orwell", "test", requireSha(text), text.length, JSON.stringify([{ title: "Part One", startOffset: 0, endOffset: text.length }]), new Date().toISOString());
+    writeFileSync(path.join(booksDir, "enc-book.txt"), text, "utf8");
+    const saved = addWord(d, { now: () => new Date(), newId: randomUUID }, { word: "clock" });
+    const a = startBook(d, deps, booksDir);
+    completeBook(d, deps, booksDir, a.sessionId, { offset: a.endOffset, activeMs: 30000, charsTyped: 100, errors: 0 });
+    const rows = d.prepare("SELECT text_offset AS o FROM typing_book_encounters WHERE entry_id = ? ORDER BY text_offset").all(saved.entry.id) as Array<{ o: number }>;
+    expect(rows.map((r) => r.o)).toEqual([4, 28, 55]); // "clocks", "clock", "clocks"
+    completeBook(d, deps, booksDir, a.sessionId, { offset: a.endOffset, activeMs: 30000, charsTyped: 100, errors: 0 });
+    expect((d.prepare("SELECT COUNT(*) AS n FROM typing_book_encounters").get() as { n: number }).n).toBe(3);
+    expect(() => d.prepare("DELETE FROM typing_book_encounters").run()).toThrow(/append-only/);
   });
 
   it("refuses to complete before reaching the end offset", async () => {

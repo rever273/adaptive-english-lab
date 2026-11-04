@@ -1,4 +1,5 @@
 import { useCallback, useEffect, useRef, useState } from "react";
+import { firstTranslation } from "../format";
 import { ApiRequestError, addVocabulary, lookupVocabulary, type VocabEntry } from "../api";
 
 const LETTER = /[\p{L}'’-]/u;
@@ -107,7 +108,7 @@ export function WordCatcher() {
       {known && !saved && (
         <p className="small" data-testid="known-word">
           <i className="pi pi-bookmark-fill" aria-hidden="true" /> Already saved{known.learned ? " · learned" : ""}.{" "}
-          {known.translation.text ? <span className={known.translation.source === "ai_draft" ? "ai-text" : undefined}>{known.translation.text}</span> : <span className="muted">No translation yet.</span>}
+          {known.translation.text ? <span className={known.translation.source === "ai_draft" ? "ai-text" : undefined}>{firstTranslation(known.translation.text)}</span> : <span className="muted">No translation yet.</span>}
         </p>
       )}
       {!saved && (

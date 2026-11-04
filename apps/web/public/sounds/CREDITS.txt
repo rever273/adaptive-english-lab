@@ -5,3 +5,6 @@ https://github.com/Calinou/kenney-interface-sounds
 correct.wav: confirmation_001.wav
 incorrect.wav: error_001.wav
 complete.wav: confirmation_003.wav
+shoot.wav: pluck_001.wav
+explode.wav: glass_003.wav
+fail.wav: error_006.wav

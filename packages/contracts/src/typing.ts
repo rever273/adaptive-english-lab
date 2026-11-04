@@ -3,9 +3,9 @@ import { z } from "zod";
 export const TypingModeSchema = z.enum(["words", "books"]);
 export type TypingMode = z.infer<typeof TypingModeSchema>;
 
-export const TYPING_METRICS_VERSION = "typing-metrics-v1";
-export const TYPING_SPEED_VERSION = "typing-speed-v1";
-export const TYPING_XP_VERSION = "typing-xp-v1";
+export const TYPING_METRICS_VERSION = "typing-metrics-v2";
+export const TYPING_SPEED_VERSION = "typing-speed-v3";
+export const TYPING_XP_VERSION = "typing-xp-v2";
 
 export const TypingPlanWordSchema = z
   .object({
@@ -61,6 +61,8 @@ export const TypingWordsCompleteRequestSchema = z
     /** re-sent in full, so a lost /appearances request costs nothing */
     appearances: z.array(Appearance).max(200),
     destroyedPlanIndexes: z.array(z.number().int().nonnegative()).max(200),
+    /** wrong keys pressed while each word that appeared was locked (0 = clean); older clients send none */
+    wordErrors: z.array(z.object({ planIndex: z.number().int().nonnegative(), errors: z.number().int().min(0).max(1000) }).strict()).max(200).optional(),
   })
   .strict();
 export type TypingWordsCompleteRequest = z.infer<typeof TypingWordsCompleteRequestSchema>;
@@ -83,6 +85,8 @@ export const TypingBookStartResponseSchema = z
     /** the book text from startOffset to endOffset; the client indexes it as offset - startOffset */
     text: z.string(),
     chapters: z.array(z.object({ title: z.string(), startOffset: z.number().int(), endOffset: z.number().int() })),
+    /** length of the whole prepared book, to show progress through it */
+    textLength: z.number().int().nonnegative(),
     percentRead: z.number(),
     activeMs: z.number().int(),
     charsTyped: z.number().int(),
@@ -143,9 +147,11 @@ export const TypingResultSchema = z
     comparison: z.object({ percent: z.number(), faster: z.boolean() }).strict().nullable(),
     skill: z.enum(["Developing", "Comfortable", "Fast", "Very Fast", "Excellent"]),
     xpAwarded: z.number().int(),
-    words: z.array(TypingPlanWordSchema.omit({ fallMs: true }).extend({ destroyed: z.boolean(), order: z.number().int() })).optional(),
+    words: z.array(TypingPlanWordSchema.omit({ fallMs: true }).extend({ destroyed: z.boolean(), order: z.number().int(), errors: z.number().int().nullable() })).optional(),
     wordsShown: z.number().int().optional(),
     wordsDestroyed: z.number().int().optional(),
+    /** destroyed words by wrong keys: none, exactly one, two or more (only when the client reported them) */
+    wordErrorBands: z.object({ clean: z.number().int(), one: z.number().int(), many: z.number().int() }).strict().optional(),
     book: z.object({ title: z.string(), chapter: z.string().nullable(), percentRead: z.number(), finished: z.boolean() }).strict().optional(),
   })
   .strict();

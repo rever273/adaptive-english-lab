@@ -7,6 +7,28 @@ export function typingXpForWords(destroyed: number): number {
   return Math.max(1, Math.round((destroyed * 4) / 3));
 }
 
+export interface WordErrorBands {
+  clean: number;
+  one: number;
+  many: number;
+}
+
+/** Destroyed words by wrong keys pressed on them: none / exactly one / two or more. */
+export function wordErrorBands(errorsPerDestroyedWord: number[]): WordErrorBands {
+  const bands = { clean: 0, one: 0, many: 0 };
+  for (const e of errorsPerDestroyedWord) {
+    if (e === 0) bands.clean++;
+    else if (e === 1) bands.one++;
+    else bands.many++;
+  }
+  return bands;
+}
+
+/** typing-xp-v2: a clean word is worth 4 thirds of an XP, one wrong key 3, two or more 2 (an all-clean 30-word level still gives 40 XP). */
+export function typingXpForWordBands(b: WordErrorBands): number {
+  return Math.max(1, Math.round((4 * b.clean + 3 * b.one + 2 * b.many) / 3));
+}
+
 /** Books: one XP per 12 required characters (~50 XP for 5 minutes at 25 WPM). Never negative. */
 export function typingXpForBooks(requiredChars: number): number {
   return Math.max(1, Math.round(requiredChars / 12));

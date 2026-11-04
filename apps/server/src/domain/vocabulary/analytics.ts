@@ -115,6 +115,11 @@ export function vocabularyAnalytics(db: Db, p: { days: number | null; now: Date;
     .get({ since }) as { words: number; displays: number };
   const bank = db.prepare("SELECT COUNT(DISTINCT entry_id) AS words, COUNT(*) AS contexts FROM vocabulary_encounters WHERE kind = 'bank'").get() as { words: number; contexts: number };
 
+  // my saved words typed while reading a book (a third kind of encounter, kept apart from the exercise ones)
+  const typedInBooks = db
+    .prepare("SELECT COUNT(DISTINCT entry_id) AS words, COUNT(*) AS occurrences FROM typing_book_encounters WHERE (@since IS NULL OR created_at >= @since)")
+    .get({ since }) as { words: number; occurrences: number };
+
   // words that keep going wrong: first tries only, with the sentence of the latest miss
   const byLemma = new Map<string, Fact[]>();
   for (const x of f) (byLemma.get(x.lemma) ?? byLemma.set(x.lemma, []).get(x.lemma)!).push(x);
@@ -151,7 +156,7 @@ export function vocabularyAnalytics(db: Db, p: { days: number | null; now: Date;
     families,
     series,
     growth: { series: [...growth.values()].sort((a, b) => a.date.localeCompare(b.date)), learnedNow, learnedWithoutDate: learnedNow - learnedDated },
-    encounters: { uniqueWordsShown: shown.words, displays: shown.displays, bankWords: bank.words, bankContexts: bank.contexts },
+    encounters: { uniqueWordsShown: shown.words, displays: shown.displays, bankWords: bank.words, bankContexts: bank.contexts, typedInBooks },
     weak,
     words: words.sort((a, b) => b.lastSeen.localeCompare(a.lastSeen)),
     retention: rate(rc, rt),

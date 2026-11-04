@@ -1,19 +1,20 @@
-import { useEffect, useState } from "react";
-import { AITasks } from "./pages/AITasks";
-import { Analytics } from "./pages/Analytics";
-import { ContentStudio } from "./pages/ContentStudio";
-import { Practice } from "./pages/Practice";
-import { Vocabulary } from "./pages/Vocabulary";
-import { Typing } from "./pages/Typing";
-import { Tutor } from "./pages/Tutor";
-import { Settings } from "./pages/Settings";
-import { Status } from "./pages/Status";
+import { Suspense, lazy, useEffect, useState } from "react";
 import { AiActivity } from "./components/AiActivity";
 import { AiModelNotice } from "./components/AiModelNotice";
 import { XpTracks } from "./components/XpTracks";
 import { WordCatcher } from "./components/WordPopup";
 import { Kbd, useKeys } from "./components/hotkeys";
 import { ContentStockNotice } from "./components/ContentStockNotice";
+
+const AITasks = lazy(() => import("./pages/AITasks").then((m) => ({ default: m.AITasks })));
+const Analytics = lazy(() => import("./pages/Analytics").then((m) => ({ default: m.Analytics })));
+const ContentStudio = lazy(() => import("./pages/ContentStudio").then((m) => ({ default: m.ContentStudio })));
+const Practice = lazy(() => import("./pages/Practice").then((m) => ({ default: m.Practice })));
+const Vocabulary = lazy(() => import("./pages/Vocabulary").then((m) => ({ default: m.Vocabulary })));
+const Typing = lazy(() => import("./pages/Typing").then((m) => ({ default: m.Typing })));
+const Tutor = lazy(() => import("./pages/Tutor").then((m) => ({ default: m.Tutor })));
+const Settings = lazy(() => import("./pages/Settings").then((m) => ({ default: m.Settings })));
+const Status = lazy(() => import("./pages/Status").then((m) => ({ default: m.Status })));
 
 type Page = "practice" | "vocabulary" | "typing" | "tutor" | "analytics" | "studio" | "tasks" | "settings";
 
@@ -106,6 +107,7 @@ export function App() {
         </nav>
       </header>
       <main className="shell">
+        <Suspense fallback={null}>
         {page === "practice" ? (
           <Practice onNavigate={(p) => go(p)} />
         ) : page === "vocabulary" ? (
@@ -126,6 +128,7 @@ export function App() {
             <Status />
           </>
         )}
+        </Suspense>
       </main>
       <WordCatcher />
       {page !== "studio" && <ContentStockNotice onOpen={c => go("studio", c)} />}

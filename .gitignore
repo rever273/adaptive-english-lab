@@ -29,3 +29,11 @@ dictionary/
 
 # personal corrections of published exercises (never public)
 content/packs/fix-*/
+
+# generated pronunciation audio of the vocabulary (TTS cache): never published
+vocabulary-speech/
+*.mp3
+
+# personal launcher (stop, build, start attached)
+start.bat
+migrations/

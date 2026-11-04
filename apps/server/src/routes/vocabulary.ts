@@ -2,7 +2,7 @@ import type { FastifyInstance } from "fastify";
 import { z } from "zod";
 import type { Db } from "../db/open.js";
 import { ApiError } from "../errors.js";
-import { addWord, getEntry, listWords, lookupWord, patchWord, removeWord, revisionHistory, vocabularyTotals } from "../domain/vocabulary/repository.js";
+import { addWord, getEntry, listWords, lookupWord, matchWords, patchWord, removeWord, revisionHistory, vocabularyTotals } from "../domain/vocabulary/repository.js";
 
 const idParams = { schema: { params: { type: "object", properties: { id: { type: "string", minLength: 1, maxLength: 64 } }, required: ["id"] } } } as const;
 const ListQuery = z.object({ q: z.string().max(80).optional(), learned: z.enum(["true", "false"]).optional(), limit: z.coerce.number().int().min(1).max(1000).optional() }).strict();
@@ -29,6 +29,13 @@ export function registerVocabularyRoutes(app: FastifyInstance, db: Db, deps: { n
     if (!w.success) throw new ApiError(400, "VALIDATION_ERROR", "Query is invalid");
     const entry = lookupWord(db, w.data.word);
     return { known: entry !== null, entry };
+  });
+
+  // which words of a text are saved vocabulary (Books shows their translation while the learner types them)
+  app.post("/api/v1/vocabulary/match", async (req) => {
+    const b = z.object({ words: z.array(z.string().max(60)).max(3000) }).strict().safeParse(req.body);
+    if (!b.success) throw new ApiError(400, "VALIDATION_ERROR", "Body is invalid");
+    return { matches: matchWords(db, b.data.words) };
   });
 
   app.get<{ Params: { id: string } }>("/api/v1/vocabulary/:id", idParams, async (req) => ({ ...getEntry(db, req.params.id), history: revisionHistory(db, req.params.id) }));

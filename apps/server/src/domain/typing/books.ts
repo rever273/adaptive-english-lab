@@ -7,6 +7,7 @@ import { ApiError } from "../../errors.js";
 import { loadSettings } from "../sessions/policy.js";
 import { computeMetrics, METRICS_VERSION } from "./metrics.js";
 import { buildTypingResult, sessionRow, type TypingSessionRow } from "./result.js";
+import { bookEncounters } from "../vocabulary/repository.js";
 import { awardTypingXp, typingXpForBooks } from "./xp.js";
 
 export interface BooksDeps {
@@ -62,49 +63,23 @@ function completedBooksWpm(db: Db): number {
   return ms > 0 ? chars / 5 / (ms / 60000) : 25;
 }
 
-interface Paragraph {
-  start: number;
-  end: number;
-}
-
-function paragraphsAfter(text: string, start: number): Paragraph[] {
-  const out: Paragraph[] = [];
-  let pStart = start;
-  let i = start;
-  while (i < text.length) {
-    const sep = text.indexOf("\n\n", i);
-    const end = sep === -1 ? text.length : sep;
-    // a start inside a paragraph keeps the remainder of that paragraph (a level cut at a sentence boundary never loses text)
-    if (end > pStart) out.push({ start: pStart, end });
-    if (sep === -1) break;
-    pStart = sep + 2;
-    i = pStart;
-  }
-  return out;
-}
-
-/** end offset of the next book level: walk paragraphs until ~target required chars, end at a paragraph or sentence boundary. */
+/**
+ * End offset of the next book level: walk the sentences from `start` until about `targetChars` required characters are collected
+ * and end at that sentence boundary, so a short level (2 minutes) really is short even when paragraphs are long.
+ */
 export function computeBookEnd(text: string, start: number, targetChars: number): number {
   if (start >= text.length) return text.length;
-  const paragraphs = paragraphsAfter(text, start);
-  if (paragraphs.length === 0) return text.length;
-  let total = 0;
-  for (const p of paragraphs) {
-    const pCount = countRequired(text, p.start, p.end);
-    if (pCount === 0) continue;
-    if (total === 0 && pCount > 1.5 * targetChars) {
-      const sentences = splitSentences(text).filter((s) => s.start >= p.start && s.end <= p.end);
-      let acc = 0;
-      for (const s of sentences) {
-        acc += countRequired(text, s.start, s.end);
-        if (acc >= targetChars) return s.end;
-      }
-      return p.end;
-    }
-    total += pCount;
-    if (total >= targetChars) return p.end;
+  let acc = 0;
+  let last = -1;
+  for (const s of splitSentences(text)) {
+    if (s.end <= start) continue;
+    const count = countRequired(text, Math.max(s.start, start), s.end);
+    if (count === 0) continue;
+    acc += count;
+    last = s.end;
+    if (acc >= targetChars) return s.end;
   }
-  return text.length;
+  return last > start ? last : text.length;
 }
 
 function chaptersOf(row: BookRow): Chapter[] {
@@ -166,6 +141,7 @@ function bookStartResponse(db: Db, s: TypingSessionRow, row: BookRow, booksDir: 
     currentOffset: current,
     text: text.slice(start, end),
     chapters: chaptersOf(row),
+    textLength: row.text_length,
     percentRead,
     activeMs: s.active_ms,
     charsTyped: s.chars_typed,
@@ -183,8 +159,10 @@ export function startBook(db: Db, deps: BooksDeps, booksDir: string): TypingBook
   const settings = loadSettings(db);
   const minutes = settings.values.typingBookMinutes ?? 5;
   const completed = db.prepare("SELECT COALESCE(MAX(level_number), 0) AS n, COALESCE(MAX(end_offset), 0) AS o FROM typing_sessions WHERE mode = 'books' AND status = 'completed' AND book_id = ?").get(row.id) as { n: number; o: number };
-  const startOffset = completed.o;
   const text = loadBookTextOrThrow(row, booksDir);
+  // a level starts at the first character of the next paragraph, not on the blank line before it
+  let startOffset = completed.o;
+  while (startOffset < text.length && /\s/.test(text.charAt(startOffset))) startOffset++;
   if (startOffset >= row.text_length) throw new ApiError(409, "TYPING_BOOK_FINISHED", "You have reached the end of the book.");
 
   const wpm = completedBooksWpm(db);
@@ -246,6 +224,10 @@ export function completeBook(db: Db, deps: BooksDeps, booksDir: string, sessionI
       "UPDATE typing_sessions SET status = 'completed', ended_at = ?, current_offset = ?, active_ms = ?, chars_typed = ?, errors = ?, chars_correct = ?, wpm = ?, cpm = ?, accuracy = ?, score = ?, metrics_version = ? WHERE id = ?",
     ).run(now, end, req.activeMs, req.charsTyped, req.errors, charsCorrect, metrics.wpm, metrics.cpm, metrics.accuracy, metrics.score, METRICS_VERSION, sessionId);
     awardTypingXp(db, { id: deps.newId(), sessionId, amount: xp, at: now });
+    // the saved words that were in the passage just typed: one encounter per occurrence (re-completing adds nothing)
+    const start = row.start_offset ?? 0;
+    const putEncounter = db.prepare("INSERT OR IGNORE INTO typing_book_encounters(id, session_id, entry_id, text_offset, created_at) VALUES (?,?,?,?,?)");
+    for (const f of bookEncounters(db, text.slice(start, end), start)) putEncounter.run(deps.newId(), sessionId, f.entryId, f.offset, now);
   }).immediate();
 
   return buildTypingResult(db, sessionRow(db, sessionId));

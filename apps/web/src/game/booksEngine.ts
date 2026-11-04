@@ -11,16 +11,34 @@ export interface BooksEngineState {
   text: string;
   /** current position, as an index into `text` (0-based, relative to the level slice) */
   offset: number;
+  /** words of the level (with their trailing punctuation), in order; each one is a meteor */
+  tokens: TypingToken[];
+  /** end offsets of the tokens, to know when a word is finished */
+  tokenEnds: Set<number>;
+  /** every required key of the level, in order */
+  allKeys: Array<{ offset: number; key: string }>;
   /** required keys still to type, in order (offset relative to the level slice) */
   remaining: Array<{ offset: number; key: string }>;
-  /** incorrect characters pending deletion (red) */
+  /** incorrect characters pending deletion (shown red) */
   errors: string[];
+  /** text offsets where a wrong key was pressed before the right one (their typed letter is shown in the "had errors" colour) */
+  slipped: Set<number>;
+  /** capital letters typed in lower case: accepted, but flagged as a visual reminder, never an error */
+  capsMissed: Set<number>;
   activeMs: number;
   charsTyped: number;
   errorCount: number;
   /** time since the last keypress (capped when a key is pressed) */
   sinceLastKeyMs: number;
   finished: boolean;
+}
+
+/** what one key press did: `ignored` presses (a stray space, an unknown key) change and count nothing */
+export type BookKeyKind = "ok" | "error" | "capital" | "ignored" | "back";
+export interface BookKeyResult {
+  finished: boolean;
+  tokenComplete: boolean;
+  kind: BookKeyKind;
 }
 
 export interface BooksEngineConfig {
@@ -48,13 +66,19 @@ const MAX_GAP_MS = 5000;
 export function createBooksEngine(config: BooksEngineConfig): BooksEngineState {
   const localStart = Math.max(0, config.initialOffset - config.startOffset);
   const allKeys = keysForRange(config.text, 0, config.text.length);
+  const tokens = splitSentences(config.text).flatMap((sent) => tokensOf(config.text, sent));
   const remaining = allKeys.filter((k) => k.offset >= localStart);
   const offset = remaining.length ? remaining[0]!.offset : config.text.length;
   return {
     text: config.text,
     offset,
+    tokens,
+    tokenEnds: new Set(tokens.map((t) => t.endOffset)),
+    allKeys,
     remaining,
     errors: [],
+    slipped: new Set(),
+    capsMissed: new Set(),
     activeMs: config.initialActiveMs,
     charsTyped: config.initialCharsTyped,
     errorCount: config.initialErrors,
@@ -77,17 +101,19 @@ function recordGap(s: BooksEngineState): void {
   s.sinceLastKeyMs = 0;
 }
 
-export function handleBookKey(s: BooksEngineState, key: string): { finished: boolean; tokenComplete: boolean } {
-  if (s.finished) return { finished: true, tokenComplete: false };
+const isUpper = (ch: string): boolean => ch !== ch.toLowerCase() && ch === ch.toUpperCase();
+
+export function handleBookKey(s: BooksEngineState, key: string): BookKeyResult {
+  if (s.finished) return { finished: true, tokenComplete: false, kind: "ignored" };
 
   if (key === "Backspace") {
+    // deleting is not a typed character: counting it would dilute the error rate
     recordGap(s);
-    s.charsTyped += 1;
     if (s.errors.length > 0) {
       s.errors.pop();
-      return { finished: false, tokenComplete: false };
+      return { finished: false, tokenComplete: false, kind: "back" };
     }
-    const all = keysForRange(s.text, 0, s.text.length);
+    const all = s.allKeys;
     if (s.remaining.length > 0) {
       const front = s.remaining[0]!;
       const idx = all.findIndex((k) => k.offset === front.offset);
@@ -96,47 +122,47 @@ export function handleBookKey(s: BooksEngineState, key: string): { finished: boo
       s.remaining.unshift(all[all.length - 1]!);
     }
     s.offset = s.remaining.length ? s.remaining[0]!.offset : s.text.length;
-    return { finished: false, tokenComplete: false };
+    s.finished = false;
+    return { finished: false, tokenComplete: false, kind: "back" };
   }
 
   const expected = nextKey(s);
-  if (expected === null) return { finished: true, tokenComplete: false };
+  if (expected === null) return { finished: true, tokenComplete: false, kind: "ignored" };
+  // a space where none is expected is not a wrong letter: nothing is shown, counted or required to delete
+  if (key === " " && expected !== " ") return { finished: false, tokenComplete: false, kind: "ignored" };
 
   recordGap(s);
   s.charsTyped += 1;
   const k = key.length === 1 ? key.toLowerCase() : key;
+  const wrong = (): BookKeyResult => {
+    if (s.errors.length < 3) s.errors.push(key.length === 1 ? key : k);
+    s.slipped.add(s.offset);
+    s.errorCount += 1;
+    return { finished: false, tokenComplete: false, kind: "error" };
+  };
 
   if (k === expected) {
-    if (s.errors.length > 0) {
-      if (s.errors.length < 3) s.errors.push(k);
-      s.errorCount += 1;
-      return { finished: false, tokenComplete: false };
-    }
+    if (s.errors.length > 0) return wrong(); // the right key while a red mistake is pending still counts as a mistake
+    const at = s.offset;
+    const shown = s.text.charAt(at);
+    // a capital letter typed in lower case moves on, with a visual reminder (names, first word of a sentence)
+    const capital = key.length === 1 && /[A-Za-z]/.test(key) && isUpper(shown) && key === key.toLowerCase();
+    if (capital) s.capsMissed.add(at);
+    else s.capsMissed.delete(at);
     s.remaining.shift();
     s.offset = s.remaining.length ? s.remaining[0]!.offset : s.text.length;
     const finished = s.remaining.length === 0;
     if (finished) s.finished = true;
-    return { finished, tokenComplete: tokenBoundary(s) };
+    return { finished, tokenComplete: tokenBoundary(s), kind: capital ? "capital" : "ok" };
   }
-
-  if (s.errors.length < 3) s.errors.push(k);
-  s.errorCount += 1;
-  return { finished: false, tokenComplete: false };
+  return wrong();
 }
 
 function tokenBoundary(s: BooksEngineState): boolean {
-  const cursor = s.offset;
-  const tokens = splitSentences(s.text).flatMap((sent) => tokensOf(s.text, sent));
-  return tokens.some((t) => t.endOffset === cursor);
+  return s.tokenEnds.has(s.offset);
 }
 
 export function currentToken(s: BooksEngineState): TypingToken | null {
   const cursor = s.offset;
-  for (const sent of splitSentences(s.text)) {
-    if (cursor < sent.start || cursor > sent.end) continue;
-    for (const tok of tokensOf(s.text, sent)) {
-      if (cursor >= tok.startOffset && cursor <= tok.endOffset) return tok;
-    }
-  }
-  return null;
+  return s.tokens.find((t) => cursor >= t.startOffset && cursor <= t.endOffset) ?? null;
 }

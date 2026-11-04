@@ -4,7 +4,7 @@ import { afterEach, describe, expect, it } from "vitest";
 import { runMigrations } from "../../../apps/server/src/db/migrate.js";
 import { openDatabase, type Db } from "../../../apps/server/src/db/open.js";
 import { importWordBank } from "../../../apps/server/src/domain/typing/wordBank.js";
-import { buildWordsPlan, completeWords, recordAppearances, startWords, wordsNextLevel, wordsOverview } from "../../../apps/server/src/domain/typing/words.js";
+import { abortWords, buildWordsPlan, completeWords, recordAppearances, startWords, wordsNextLevel, wordsOverview } from "../../../apps/server/src/domain/typing/words.js";
 import { typingProgress } from "../../../apps/server/src/domain/typing/xp.js";
 import { loadSettings } from "../../../apps/server/src/domain/sessions/policy.js";
 import { makeScratchRoot, projectRoot } from "../helpers.js";
@@ -117,6 +117,59 @@ describe("typing words domain", () => {
     });
     expect(again.sessionId).toBe(result.sessionId);
     expect(typingProgress(d).total).toBe(xp1);
+  });
+
+  it("records wrong keys per word, awards XP by error bands and rates problem words for later levels", async () => {
+    const d = await setup();
+    seedBank(d);
+    setSmallLevel(d);
+    const started = startWords(d, deps);
+    const appearances = started.words.map((w, i) => ({ planIndex: w.planIndex, order: i }));
+    const idx = started.words.map((w) => w.planIndex);
+    // 10 words: 5 clean, 3 with one wrong key, 2 with several -> (5*4 + 3*3 + 2*2) / 3 = 11
+    const wordErrors = [
+      ...idx.slice(0, 5).map((planIndex) => ({ planIndex, errors: 0 })),
+      ...idx.slice(5, 8).map((planIndex) => ({ planIndex, errors: 1 })),
+      ...idx.slice(8).map((planIndex) => ({ planIndex, errors: 3 })),
+    ];
+    const result = completeWords(d, deps, started.sessionId, { status: "completed", activeMs: 60000, charsTyped: 80, errors: 9, appearances, destroyedPlanIndexes: idx, wordErrors });
+    expect(result.xpAwarded).toBe(11);
+    expect(result.wordErrorBands).toEqual({ clean: 5, one: 3, many: 2 });
+    expect(result.words!.filter((w) => w.errors === 3)).toHaveLength(2);
+    const rows = d.prepare("SELECT COUNT(*) AS n FROM typing_word_results WHERE session_id = ?").get(started.sessionId) as { n: number };
+    expect(rows.n).toBe(10);
+    expect(() => d.prepare("UPDATE typing_word_results SET errors = 0").run()).toThrow(/append-only/);
+    // a word typed with mistakes is rated below a clean one, so it is offered first next time
+    const problem = started.words[9]!.lemma;
+    const next = buildWordsPlan(d, 2, loadSettings(d).values, { ...deps, random: () => 0 });
+    expect(next.words.some((w) => w.lemma === problem)).toBe(true);
+  });
+
+  it("an interrupted session does not break a losing streak", async () => {
+    const d = await setup();
+    seedBank(d);
+    setSmallLevel(d);
+    const lose = () => {
+      const st = startWords(d, deps);
+      completeWords(d, deps, st.sessionId, { status: "failed", activeMs: 5000, charsTyped: 3, errors: 1, appearances: [{ planIndex: st.words[0]!.planIndex, order: 0 }], destroyedPlanIndexes: [] });
+    };
+    lose();
+    lose();
+    const quit = startWords(d, deps);
+    abortWords(d, deps, quit.sessionId, { activeMs: 1000, charsTyped: 0, errors: 0 });
+    const next = startWords(d, deps);
+    expect(next.speed.pressure).toBe(0.8);
+  });
+
+  it("older clients that send no per-word errors keep the clean-word XP", async () => {
+    const d = await setup();
+    seedBank(d);
+    setSmallLevel(d);
+    const started = startWords(d, deps);
+    const appearances = started.words.map((w, i) => ({ planIndex: w.planIndex, order: i }));
+    const result = completeWords(d, deps, started.sessionId, { status: "completed", activeMs: 60000, charsTyped: 60, errors: 0, appearances, destroyedPlanIndexes: started.words.map((w) => w.planIndex) });
+    expect(result.xpAwarded).toBe(13);
+    expect(result.wordErrorBands).toBeUndefined();
   });
 
   it("rejects completing a level without destroying exactly all words", async () => {

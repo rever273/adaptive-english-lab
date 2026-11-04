@@ -39,4 +39,11 @@ describe("typing metrics (typing-metrics-v1)", () => {
     // accuracy gate: high WPM but low accuracy drops a tier
     expect(skillOf("words", 90, 50)).toBe("Developing");
   });
+
+  it("scores a level the same whatever its word count (normalised to 30 words)", () => {
+    const big = computeMetrics({ mode: "words", activeMs: 90000, charsTyped: 150, errors: 0, charsCorrect: 150, level: 1, completed: true, plannedWords: 30 });
+    const small = computeMetrics({ mode: "words", activeMs: 30000, charsTyped: 50, errors: 0, charsCorrect: 50, level: 1, completed: true, plannedWords: 10 });
+    expect(small.wpm).toBe(big.wpm);
+    expect(small.score).toBe(big.score);
+  });
 });

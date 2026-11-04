@@ -1,4 +1,5 @@
 import { useEffect, useState } from "react";
+import { Chart } from "../components/Chart";
 import { ApiRequestError, fetchVocabAnalytics, type Rate, type VocabAnalytics as Data } from "../api";
 
 const FAMILY: Record<string, { label: string; icon: string; note: string }> = {
@@ -29,41 +30,22 @@ function RateBar({ r, label, icon, note, extra }: { r: Rate; label: string; icon
 /** main chart: per day, first-try accuracy (bars, only days with at least one scored try) and Vocabulary XP (line) */
 function DailyChart({ series }: { series: Data["series"] }) {
   if (series.length === 0) return <p className="muted">No vocabulary practice in this period yet.</p>;
-  const W = 640;
-  const H = 180;
-  const pad = 28;
-  const n = series.length;
-  const bw = Math.max(6, Math.min(36, (W - pad * 2) / n - 6));
-  const x = (i: number) => pad + ((W - pad * 2) * (i + 0.5)) / n;
   const maxXp = Math.max(10, ...series.map((s) => s.xp));
-  const y = (v: number) => H - pad - v * (H - pad * 2);
-  const line = series.map((s, i) => `${i === 0 ? "M" : "L"}${x(i).toFixed(1)},${y(s.xp / maxXp).toFixed(1)}`).join(" ");
   return (
-    <figure className="chart-wrap">
-      <svg className="chart" viewBox={`0 0 ${W} ${H}`} role="img" aria-label={`Daily first-try accuracy and XP over ${n} day(s)`}>
-        {[0, 0.5, 1].map((g) => (
-          <g key={g}>
-            <line className="chart-grid" x1={pad} x2={W - pad} y1={y(g)} y2={y(g)} />
-            <text className="chart-label" x={4} y={y(g) + 3}>{Math.round(g * 100)}%</text>
-          </g>
-        ))}
-        {series.map((s, i) => {
-          const r = s.total ? s.correct / s.total : 0;
-          return (
-            <g key={s.date}>
-              {s.total > 0 && <rect className={`chart-bar${s.total < 5 ? " chart-bar-thin" : ""}`} x={x(i) - bw / 2} y={y(r)} width={bw} height={Math.max(1, H - pad - y(r))} rx={3}><title>{`${s.date}: ${s.correct}/${s.total} first tries right, ${s.xp} XP`}</title></rect>}
-              {(n <= 14 || i % Math.ceil(n / 10) === 0) && <text className="chart-label" x={x(i)} y={H - 8} textAnchor="middle">{s.date.slice(5)}</text>}
-            </g>
-          );
-        })}
-        <path className="chart-line chart-line-xp" d={line} />
-        {series.map((s, i) => <circle key={s.date} className="chart-dot chart-dot-xp" cx={x(i)} cy={y(s.xp / maxXp)} r={3}><title>{`${s.date}: ${s.xp} XP`}</title></circle>)}
-        <text className="chart-label" x={W - pad} y={12} textAnchor="end">XP max {maxXp}</text>
-      </svg>
-      <figcaption className="muted small">
-        <span className="legend legend-bar" /> first-try accuracy per day (faded = fewer than 5 tries) · <span className="legend legend-xp" /> Vocabulary XP per day
-      </figcaption>
-    </figure>
+    <Chart
+      ariaLabel={`Daily first-try accuracy and XP over ${series.length} day(s)`}
+      bars={{ color: "#3fbf6f", format: (v) => `${Math.round(v * 100)}%`, max: 1 }}
+      line={{ color: "#f3c94d", format: (v) => `${Math.round(v)} XP`, max: maxXp }}
+      points={series.map((s) => ({
+        key: s.date,
+        label: s.date.slice(5),
+        bar: s.total > 0 ? s.correct / s.total : null,
+        line: s.xp,
+        muted: s.total > 0 && s.total < 5,
+        tip: [s.date, s.total > 0 ? `First-try: ${s.correct}/${s.total} (${Math.round((s.correct / s.total) * 100)}%)` : "No scored tries", `Vocabulary XP: ${s.xp}`],
+      }))}
+      legend="Green bars: first-try accuracy per day (faded = fewer than 5 tries) · yellow line: Vocabulary XP per day"
+    />
   );
 }
 
@@ -112,6 +94,7 @@ export function VocabularyAnalytics() {
             <div className="stat stat-info"><i className="pi pi-bookmark-fill" aria-hidden="true" /><span className="stat-value">Lv {d.xp.level}</span><span className="stat-label">{d.xp.total} Vocabulary XP (activity, not a grade)</span></div>
             <div className="stat stat-ok"><i className="pi pi-check-circle" aria-hidden="true" /><span className="stat-value">{pct(d.overall) === null ? "—" : `${pct(d.overall)}%`}</span><span className="stat-label">first try right · {d.overall.correct}/{d.overall.total}</span></div>
             <div className="stat stat-info"><i className="pi pi-eye" aria-hidden="true" /><span className="stat-value">{d.encounters.uniqueWordsShown}</span><span className="stat-label">your words actually shown · {d.encounters.displays} times</span></div>
+            <div className="stat stat-info"><i className="pi pi-book" aria-hidden="true" /><span className="stat-value">{d.encounters.typedInBooks.words}</span><span className="stat-label">your words typed in Books · {d.encounters.typedInBooks.occurrences} times</span></div>
             <div className="stat stat-skip"><i className="pi pi-database" aria-hidden="true" /><span className="stat-value">{d.encounters.bankWords}</span><span className="stat-label">words present in approved exercises · {d.encounters.bankContexts} places</span></div>
           </div>
 

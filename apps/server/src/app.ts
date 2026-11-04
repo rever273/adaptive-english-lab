@@ -34,6 +34,7 @@ import type { SttService } from "./domain/stt/sttService.js";
 import { registerSessionRoutes } from "./routes/sessions.js";
 import { registerSettingsRoutes } from "./routes/settings.js";
 import { registerTypingRoutes } from "./routes/typing.js";
+import { registerTranslateRoutes } from "./routes/translate.js";
 import { registerAiModelRoutes } from "./routes/aiModel.js";
 import { LOCAL_MODEL_TAG } from "./domain/ai/config.js";
 import type { ModelResidency } from "./queue/modelResidency.js";
@@ -62,6 +63,8 @@ export interface AppDeps {
   /** live AI component status; absent = nothing wired (tests, TASK_003 behaviour) */
   elevenLabsKey?: string;
   elevenLabsVoiceId?: string;
+  /** optional e-mail for the public translation service (raises its daily quota); from `.env` */
+  translateEmail?: string;
   groqKey?: string;
   aiStatus?: () => Capabilities["ai"] | Promise<Capabilities["ai"]>;
   /** HMAC key for the session cookie / CSRF token; random per start when omitted. */
@@ -114,6 +117,7 @@ export async function buildApp(deps: AppDeps): Promise<FastifyInstance> {
   registerSessionRoutes(app, db, base, { ...(deps.sessions ?? {}), onLease: () => deps.scheduler?.kick(), onSessionEnd: (id) => void deps.stt?.stopForSession(id), onVoiceDone: async (id) => { deps.scheduler?.releaseVoiceHold(id); await deps.stt?.stopForSession(id); deps.scheduler?.kick(); } });
   registerVocabularyPracticeRoutes(app, db, base);
   registerTypingRoutes(app, db, base, { booksDir: path.join(config.dataRoot, "typing-books") });
+  registerTranslateRoutes(app, { ...(deps.translateEmail ? { email: deps.translateEmail } : {}) });
   registerVocabularyImageRoutes(app, config.vocabularyImagesDir, db);
   registerVocabularySpeechRoutes(app, db, base, { key: deps.elevenLabsKey, voiceId: deps.elevenLabsVoiceId, cacheDir: path.join(config.dataRoot, "vocabulary-speech") });
   registerGroqStatusRoute(app, { key: deps.groqKey });

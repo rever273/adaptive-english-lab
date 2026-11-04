@@ -12,6 +12,7 @@ import { Kbd, isPressable, isTextField, useKeys } from "../components/hotkeys";
 import { AgentTasks } from "../components/AgentTasks";
 import { AI_CHECK_WAIT_S, AUTO_ADVANCE_MS, diagnosticFinished, isShortFormat, noSpeechLeft, shouldAutoAdvance, shouldPreloadSpeech, unconfirmedLabel } from "../practiceFlow";
 import { feedbackSound, playPracticeSound } from "../practiceSounds";
+import { firstTranslation } from "../format";
 
 /** One tab id per browser tab, kept across reloads, so a reload resumes the same practice lease instead of waiting 90 s. */
 function tabId(): string {
@@ -485,7 +486,7 @@ function VocabSentence({ v }: { v: NonNullable<FeedbackResponse["vocabulary"]> }
   return (
     <div className="vocab-sentence" data-testid="vocab-sentence">
       <p className="vocab-word" data-testid="vocab-word">
-        <i className="pi pi-bookmark-fill" aria-hidden="true" /> <strong>{v.lemma}</strong> <span className="muted small">{v.partOfSpeech}</span> — {v.translationRu ? <span lang="ru" className={`vt${v.translationSource === "ai_draft" ? " ai-text" : ""}`} title={v.translationSource === "ai_draft" ? "Written by the local AI" : undefined}>{v.translationRu}</span> : <span className="muted">no translation yet</span>}
+        <i className="pi pi-bookmark-fill" aria-hidden="true" /> <strong>{v.lemma}</strong> <span className="muted small">{v.partOfSpeech}</span> — {v.translationRu ? <span lang="ru" className={`vt${v.translationSource === "ai_draft" ? " ai-text" : ""}`} title={v.translationSource === "ai_draft" ? "Written by the local AI" : undefined}>{firstTranslation(v.translationRu)}</span> : <span className="muted">no translation yet</span>}
       </p>
       {v.sentence && (
         <p className="vocab-line">

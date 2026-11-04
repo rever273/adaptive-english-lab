@@ -19,6 +19,7 @@
     "watch:web": "npm run build -w @english-lab/web -- --watch",
     "start": "node scripts/start.mjs",
     "lab": "node scripts/start.mjs --attached",
+    "dev": "npm run stop && npm run build && npm run lab",
     "stop": "node scripts/stop.mjs",
     "backup": "node scripts/backup.mjs",
     "restore": "node scripts/restore.mjs",
