@@ -1,5 +1,6 @@
 import type { FastifyInstance } from "fastify";
-import type { ZodType } from "zod";
+import { z, type ZodType } from "zod";
+import { recordPracticeActivity } from "../domain/sessions/activity.js";
 import {
   CreateSessionRequestSchema,
   FinishRequestSchema,
@@ -58,6 +59,10 @@ export interface SessionRouteOptions {
 }
 
 export function registerSessionRoutes(app: FastifyInstance, db: Db, deps: SessionDeps, opts: SessionRouteOptions = {}): void {
+  app.post<{ Params: { id: string } }>("/api/v1/sessions/:id/activity", { schema: { params: idParam } }, async (req) => {
+    const b = parse(z.object({ id: z.string().uuid(), tabId: z.string().min(1).max(64), startMs: z.number().int().nonnegative(), endMs: z.number().int().nonnegative() }).strict(), req.body);
+    return recordPracticeActivity(db, deps, req.params.id, b);
+  });
   app.get("/api/v1/activity-progress", async () => ({ grammar: activityProgress(db, "grammar"), vocabulary: activityProgress(db, "vocabulary"), typing: typingProgress(db) }));
   app.post("/api/v1/sessions", async (req, reply): Promise<CreateSessionResponse> => {
     const body = parse(CreateSessionRequestSchema, req.body);

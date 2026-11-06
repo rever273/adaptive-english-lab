@@ -1,3 +1,4 @@
+import { usePracticeActivity } from "../practiceActivity";
 import { SpeakButton, isSpeakableSentence } from "../components/SpeakButton";
 import { MyThoughts } from "../components/MyThoughts.js";
 import type { Dashboard, FeedbackResponse, RevealResponse, SessionSnapshot, SessionSummary } from "@english-lab/contracts";
@@ -53,7 +54,7 @@ const emptySlot: SlotUi = { reveal: null, feedback: null, hint: null, translatio
  * The practice screen for both journeys. `grammar` (default) is the lesson dashboard and its sessions; `vocabulary` runs one vocabulary
  * session started from the Vocabulary page and hands control back with `onExit` (the two never resume each other's session).
  */
-export function Practice({ category = "grammar", onExit, onNavigate }: { category?: api.SessionCategory; onExit?: () => void; onNavigate?: (page: "vocabulary" | "analytics" | "studio") => void } = {}) {
+export function Practice({ category = "grammar", onExit, onNavigate, dailyStart = false, onDailyDone }: { category?: api.SessionCategory; onExit?: () => void; onNavigate?: (page: "vocabulary" | "analytics" | "studio") => void; dailyStart?: boolean; onDailyDone?: () => void } = {}) {
   const [stockBlock, setStockBlock] = useState<string | null>(null);
   const [view, setView] = useState<View>({ kind: "loading" });
   const [otherActive, setOtherActive] = useState<{ sessionId: string; category: api.SessionCategory } | null>(null);
@@ -102,7 +103,8 @@ export function Practice({ category = "grammar", onExit, onNavigate }: { categor
 
   // keep the practice lease alive while a session is open (heartbeat 15 s, D09)
   const sessionId = view.kind === "session" ? view.session.sessionId : null;
-  const voice = useVoice(sessionId, tabId(), stt.ready);
+  usePracticeActivity(sessionId, tab.current, view.kind === "session" && view.session.purpose === "practice" && !!slotUi.reveal && !readOnly);
+  const voice = useVoice(sessionId, tab.current, stt.ready);
   const spokenSlots = useRef(new Set<string>());
   const speechSlot = category === "vocabulary" && slotUi.feedback?.correct && slotUi.feedback.vocabulary ? slotUi.feedback.slotId : null;
   useEffect(() => {
@@ -216,6 +218,14 @@ export function Practice({ category = "grammar", onExit, onNavigate }: { categor
       await loadDashboard(e instanceof ApiRequestError && e.code === "CONTENT_SHORTAGE" ? null : errorText(e));
     }
   }
+
+  const dailyStarted = useRef(false);
+  useEffect(() => {
+    if (!dailyStart || category !== "grammar" || dailyStarted.current || view.kind !== "dashboard") return;
+    dailyStarted.current = true;
+    const next = view.dashboard.blueprints.find(b => b.unlocked && b.completed < MAX_LESSON_PLAYS && b.readySessions > 0);
+    if (next) void start(next.blueprintRevisionId);
+  }, [dailyStart, category, view]);
 
   async function startCheck(purpose: "diagnostic" | "heldout") {
     try {
@@ -356,7 +366,7 @@ export function Practice({ category = "grammar", onExit, onNavigate }: { categor
   if (view.kind === "loading") return <p role="status">Loading…</p>;
 
   if (view.kind === "summary") {
-    return <SummaryScreen summary={view.summary} onDone={() => (category === "vocabulary" ? onExit?.() : void loadDashboard())} onNavigate={onNavigate} />;
+    return <SummaryScreen summary={view.summary} onDone={() => (category === "vocabulary" ? onExit?.() : void loadDashboard())} onNavigate={onNavigate} onDailyDone={onDailyDone} />;
   }
 
   if (view.kind === "dashboard") {
@@ -874,7 +884,7 @@ function BlockReview({ sessionId }: { sessionId: string }) {
   );
 }
 
-function SummaryScreen({ summary: first, onDone, onNavigate }: { summary: SessionSummary; onDone: () => void; onNavigate?: (page: "vocabulary" | "analytics") => void }) {
+function SummaryScreen({ summary: first, onDone, onNavigate, onDailyDone }: { summary: SessionSummary; onDone: () => void; onNavigate?: (page: "vocabulary" | "analytics") => void; onDailyDone?: () => void }) {
   // T3c: the numbers were fixed at the moment the session ended; while local AI checks of its answers are still running they are re-read, so the counter counts down
   const [summary, setSummary] = useState(first);
   useEffect(() => setSummary(first), [first]);
@@ -891,6 +901,7 @@ function SummaryScreen({ summary: first, onDone, onNavigate }: { summary: Sessio
     <section aria-labelledby="sum-h" data-testid="summary">
       <h2 id="sum-h">{vocab ? "Vocabulary session " : "Session "}{summary.status === "completed" ? "complete" : "ended early"}</h2>
       <div className="actions">
+        {onDailyDone && <button type="button" className="btn btn-primary" onClick={onDailyDone}>Continue Daily Practice <i className="pi pi-arrow-right" /></button>}
         <button className="btn btn-primary" onClick={onDone} data-testid="done">
           <i className={`pi ${vocab ? "pi-bookmark" : "pi-home"}`} aria-hidden="true" /> {vocab ? "Back to Vocabulary" : "Back to start"}
         </button>

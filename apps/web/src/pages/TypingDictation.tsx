@@ -1,3 +1,4 @@
+import { useTypingActivity } from "../typingActivity";
 import { useCallback, useEffect, useReducer, useRef, useState } from "react";
 import * as api from "../api";
 import type { DictationResult, DictationState } from "../api";
@@ -70,6 +71,7 @@ export function DictationGame({ state, onResult, onExit }: { state: DictationSta
   const sceneRef = useRef<DictationScene | null>(null);
   const inputRef = useRef<HTMLTextAreaElement>(null);
   const clock = useRef(new ActiveClock(state.activeMs));
+  useTypingActivity(state.lessonId, "dictation", () => clock.current.ms);
   const soundsRef = useRef(true);
   const audio = useDictationAudio(state.lessonId);
   const playingRef = useRef(false);
@@ -331,7 +333,7 @@ function stuckNote(text: string, words: Array<{ text: string | null }>): string 
   return text.trim().length === 0 || words.some((w) => w.text === null) ? "Everything up to your first mistake is already shown above." : "Your answer looks complete. Press Enter.";
 }
 
-export function DictationResultView({ result, onNext, onDone }: { result: DictationResult; onNext: () => void; onDone: () => void }) {
+export function DictationResultView({ result, onNext, onDone, onDailyDone }: { result: DictationResult; onNext: () => void; onDone: () => void; onDailyDone?: () => void }) {
   const stats: Array<[string, string, string]> = [
     ["Score", String(result.score), "Average credit of the sentences, 0 to 100. Each mistake costs part of a sentence; a hint costs half a mistake; the translation caps a sentence at half; showing the answer (F5) removes it."],
     ["XP", String(result.xpAwarded), "Typing XP: up to 6 per sentence, in proportion to its credit."],
@@ -369,6 +371,7 @@ export function DictationResultView({ result, onNext, onDone }: { result: Dictat
       </details>
       <div className="actions">
         <button className="btn btn-primary" onClick={onNext}>Generate next lesson</button>
+        {onDailyDone && <button className="btn btn-primary" onClick={onDailyDone}>Continue Daily Practice</button>}
         <button className="btn" onClick={onDone}>Back to Typing</button>
       </div>
     </section>

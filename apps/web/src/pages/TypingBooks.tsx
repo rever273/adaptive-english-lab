@@ -1,3 +1,4 @@
+import { useTypingActivity } from "../typingActivity";
 import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
 import type { ReactNode } from "react";
 import { splitSentences } from "@english-lab/contracts";
@@ -57,6 +58,7 @@ export function BooksGame({ sessionId, data, onResult, onExit }: { sessionId: st
   const canvasRef = useRef<HTMLCanvasElement>(null);
   const sceneRef = useRef<BooksScene | null>(null);
   const engineRef = useRef<BooksEngineState | null>(null);
+  useTypingActivity(sessionId, "books", () => engineRef.current?.activeMs ?? 0);
   const [paused, setPaused] = useState(false);
   const pausedRef = useRef(false);
   const [version, setVersion] = useState(0);

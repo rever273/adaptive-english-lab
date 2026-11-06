@@ -32,3 +32,30 @@ describe("exercise presentation", () => {
     expect(positions).toEqual(new Set([1, 2]));
   });
 });
+
+describe("vocabulary recall letter tiles", () => {
+  const recall = (answer: string, family = "guided_recall", wordRu: string | undefined = "повторять") => JSON.stringify({ prompt_en: "I'd like to ___ that we meet on Friday.", payload: { cue_ru: "(глаг., на r...) повторять", max_words: 1, accepted_answers: [answer], allow_voice: false }, vocabulary: { family, wordRu } });
+  const tilesOf = (content: string, slot = "slot-1") => {
+    const p = buildPrompt("guided_short_answer", content, null, slot);
+    if (p.kind !== "short") throw new Error("wrong prompt");
+    return p.build;
+  };
+  it("gives the letters of the answer plus two decoys, in a stable order, never in the answer's order", () => {
+    const b = tilesOf(recall("reiterate"))!;
+    expect(b.pattern).toEqual([9]);
+    expect(b.meaning_ru).toBe("повторять");
+    expect(b.tiles).toHaveLength(11);
+    expect([...b.tiles].sort().join("")).toContain([..."reiterate"].sort().join("").slice(0, 3));
+    expect(tilesOf(recall("reiterate"))).toEqual(b);
+    expect(b.tiles.join("")).not.toBe("reiterate");
+    const rest = [...b.tiles];
+    for (const l of "reiterate") rest.splice(rest.indexOf(l), 1);
+    expect(rest).toHaveLength(2);
+  });
+  it("handles a phrase and leaves other items without tiles", () => {
+    expect(tilesOf(recall("pin down"))!.pattern).toEqual([3, 4]);
+    expect(tilesOf(recall("reiterate", "recognition"))).toBeUndefined();
+    expect(tilesOf(recall("reiterate", "guided_recall", ""))).toBeUndefined();
+    expect(tilesOf(recall("re-iterate"))).toBeUndefined();
+  });
+});

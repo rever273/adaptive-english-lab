@@ -94,9 +94,10 @@ export function registerTypingDictationRoutes(app: FastifyInstance, db: Db, deps
     const unused = "NOT EXISTS (SELECT 1 FROM typing_dictation_pool_use u WHERE u.pool_id = p.id)";
     const total = db.prepare(`SELECT COUNT(*) AS n, COALESCE(SUM(audio_ms), 0) AS ms, COALESCE(MIN(word_count), 0) AS minWords, COALESCE(MAX(word_count), 0) AS maxWords, MIN(created_at) AS oldest, MAX(created_at) AS newest FROM typing_dictation_pool p WHERE ${unused}`).get() as { n: number; ms: number; minWords: number; maxWords: number; oldest: string | null; newest: string | null };
     const topics = db.prepare(`SELECT topic, COUNT(*) AS n FROM typing_dictation_pool p WHERE ${unused} GROUP BY topic ORDER BY n DESC, topic LIMIT 12`).all() as Array<{ topic: string; n: number }>;
+    const topicTotal = (db.prepare(`SELECT COUNT(DISTINCT topic) AS n FROM typing_dictation_pool p WHERE ${unused}`).get() as { n: number }).n;
     const voices = db.prepare(`SELECT voice_name AS name, COUNT(*) AS n FROM typing_dictation_pool p WHERE ${unused} GROUP BY voice_name ORDER BY n DESC, voice_name`).all() as Array<{ name: string; n: number }>;
     const used = (db.prepare("SELECT COUNT(*) AS n FROM typing_dictation_pool_use").get() as { n: number }).n;
-    return { ready: total.n, used, audioSeconds: Math.round(total.ms / 1000), minWords: total.minWords, maxWords: total.maxWords, oldest: total.oldest, newest: total.newest, topics, voices };
+    return { ready: total.n, used, audioSeconds: Math.round(total.ms / 1000), minWords: total.minWords, maxWords: total.maxWords, oldest: total.oldest, newest: total.newest, topics, topicTotal, voices };
   });
 
   // tracks made ahead of time, so the next lessons start at once

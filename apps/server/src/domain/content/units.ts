@@ -36,7 +36,9 @@ export function extractUnits(ex: Exercise): PromptUnitFingerprint[] {
           add("answer", markBlanks(ex.prompt_en).replace(BLANK, o.text)); // the sentence the learner will see when correct
         }
       }
-      for (const o of options) add("option", o.text); // kept only if it is itself a full sentence
+      // a gap task's options fill the gap, they are never sentences the learner reads; counting a three-word option such as "keep up with" as a sentence
+      // made every later exercise for the same word collide with it. Options are units only when the prompt has no gap (full-sentence options).
+      if (!hasBlank) for (const o of options) add("option", o.text); // kept only if it is itself a full sentence
       break;
     }
     case "detect_error": {

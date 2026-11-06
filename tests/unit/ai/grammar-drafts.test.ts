@@ -53,6 +53,13 @@ describe("generation-v8 word-level error detection", () => {
     expect(p?.fixes).toEqual(["updates are"]);
     expect(p?.accept_any).toBe(true);
   });
+  it("gives two different sentences different template clusters (the fixed instruction must not make them look alike)", () => {
+    const cluster = (r: ReturnType<typeof detect>) => (r.ok ? (r.exercise as { template_cluster: string }).template_cluster : "");
+    const a = detect({}), b = detect({ sentence: "This reports are ready for the board meeting tomorrow morning.", error_words: "reports are", fix_words: "These reports are" });
+    expect(cluster(a)).not.toBe("");
+    expect(cluster(b)).not.toBe("");
+    expect(cluster(a)).not.toBe(cluster(b));
+  });
   it("refuses an error that is not in the sentence, is not whole words or is not fixed", () => {
     expect(detect({ error_words: "update" }).ok).toBe(false);
     expect(detect({ fix_words: "updates is" }).ok).toBe(false);

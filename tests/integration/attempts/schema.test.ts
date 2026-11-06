@@ -1,4 +1,4 @@
-import { copyFileSync, mkdirSync, readFileSync } from "node:fs";
+import { copyFileSync, mkdirSync, readFileSync, readdirSync } from "node:fs";
 import path from "node:path";
 import { randomUUID } from "node:crypto";
 import { afterEach, describe, expect, it } from "vitest";
@@ -35,7 +35,9 @@ describe("migration 002 on an existing 001 database", () => {
       appVersion: "t",
       backup: () => createBackup(db!, { backupsDir, kind: "premigration", schemaVersion: currentSchemaVersion(db!), appVersion: "t" }),
     });
-    expect(r).toMatchObject({ applied: [2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16, 17, 18, 19, 20, 21, 22, 23, 24, 25], fromVersion: 1, toVersion: 25 });
+    // every migration after 001, whatever their number is today (the list used to be written out by hand and went stale with each new migration)
+    const latest = Math.max(...readdirSync(migrations).map((f) => Number(/^(\d+)_/.exec(f)?.[1] ?? 0)));
+    expect(r).toMatchObject({ applied: Array.from({ length: latest - 1 }, (_, i) => i + 2), fromVersion: 1, toVersion: latest });
     expect(r.premigrationBackup?.schemaVersion).toBe(1);
     const [b] = listBackups(backupsDir);
     expect(verifyBackup(backupsDir, b!)).toEqual({ checksumOk: true, integrity: "ok", foreignKeyViolations: 0 });

@@ -1,6 +1,6 @@
 import { useEffect, useRef, useState } from "react";
 import { fetchAiActivity, type AiActivity as Activity, type AiWave } from "../api";
-import { GPU_WAIT, KIND_LABEL } from "../pages/AITasks";
+import { GPU_WAIT, KIND_LABEL } from "./aiLabels";
 
 const minutes = (ms: number): string => (ms < 60_000 ? `${Math.max(1, Math.round(ms / 1000))} s` : `${Math.round(ms / 60_000)} min`);
 

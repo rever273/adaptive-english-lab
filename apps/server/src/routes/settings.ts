@@ -27,6 +27,9 @@ const SettingsPatchSchema = z
     typingBookMinutes: z.number().int().min(1).max(30).optional(),
     typingDictationExercisesPerLesson: z.number().int().min(5).max(20).optional(),
     typingRecallWords: z.number().int().min(0).max(3).optional(),
+    dailyOrder: z.array(z.enum(["grammar", "vocabulary", "words", "books", "dictation"])).length(5).refine(v => new Set(v).size === 5).optional(),
+    journeyHours: z.object({ b2: z.number().int().min(1).max(5000), c1: z.number().int().min(1).max(5000), c2: z.number().int().min(1).max(5000) }).strict().optional(),
+    dailyMinutes: z.object({ grammar: z.number().int().min(0).max(180), vocabulary: z.number().int().min(0).max(180), words: z.number().int().min(0).max(180), books: z.number().int().min(0).max(180), dictation: z.number().int().min(0).max(180) }).strict().optional(),
   })
   .strict();
 

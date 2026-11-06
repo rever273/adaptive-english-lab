@@ -74,7 +74,15 @@ export const PromptSchema = z.discriminatedUnion("kind", [
   z.object({ kind: z.literal("choice"), prompt_en: z.string(), options: z.array(z.object({ id: z.string(), text: z.string() })), multiple: z.boolean() }),
   z.object({ kind: z.literal("segments"), prompt_en: z.string(), sentence: z.string(), segments: z.array(z.object({ id: z.string(), text: z.string() })), noMistakeId: z.string() }),
   z.object({ kind: z.literal("blocks"), prompt_en: z.string(), cue_ru: z.string(), blocks: z.array(z.object({ id: z.string(), text: z.string() })) }),
-  z.object({ kind: z.literal("short"), prompt_en: z.string(), cue_ru: z.string(), max_words: z.number().int(), allow_voice: z.boolean() }),
+  z.object({
+    kind: z.literal("short"),
+    prompt_en: z.string(),
+    cue_ru: z.string(),
+    max_words: z.number().int(),
+    allow_voice: z.boolean(),
+    /** vocabulary recall only: letter tiles for "build the word" (the letters of the answer plus two decoys, shuffled) and the word's Russian meaning for the gap */
+    build: z.object({ pattern: z.array(z.number().int().positive()), tiles: z.array(z.string().length(1)), meaning_ru: z.string() }).optional(),
+  }),
   z.object({
     kind: z.literal("reading"),
     prompt_en: z.string(),

@@ -1,3 +1,4 @@
+import { JourneySettings } from "./Journey";
 import { useEffect, useState } from "react";
 import type { AiModelStatus } from "@english-lab/contracts";
 import * as api from "../api";
@@ -43,6 +44,7 @@ export function Settings() {
   return (
     <section aria-labelledby="settings-h" className="settings-page">
       <h2 id="settings-h">Settings</h2>
+      <JourneySettings />
       <div className="settings-grid">
         <div className="card settings-card">
           <h3>Practice</h3>

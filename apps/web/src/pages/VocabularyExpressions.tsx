@@ -46,6 +46,7 @@ function Row({ e, onChanged }: { e: ExpressionView; onChanged: () => void }) {
           {e.state === "failed" && <button className="btn btn-small" onClick={() => void run(() => retryExpression(e.id))}>Try again</button>}
         </td>
       )}
+      <td className="narrow" title="Approved practice sentences that contain this expression, and how many times you have answered one">{e.inSentences} · {e.shown}</td>
       <td className="actions">
         {editing ? (
           <>
@@ -119,7 +120,7 @@ export function VocabularyExpressions() {
         <div className="table-wrap">
           <table className="data-table" data-testid="expressions-table">
             <thead>
-              <tr><th>Expression</th><th>Translation</th><th>Example</th><th title="Short Russian explanation of what the expression means (written by the local AI)">Description</th><th className="narrow" /></tr>
+              <tr><th>Expression</th><th>Translation</th><th>Example</th><th title="Short Russian explanation of what the expression means (written by the local AI)">Description</th><th className="narrow" title="Practice sentences with this expression · times you answered one">Used · Shown</th><th className="narrow" /></tr>
             </thead>
             <tbody>{items.map((e) => <Row key={`${e.id}:${e.state}:${e.translationRu}:${e.source}`} e={e} onChanged={load} />)}</tbody>
           </table>

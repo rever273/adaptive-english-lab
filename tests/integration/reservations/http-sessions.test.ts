@@ -141,25 +141,22 @@ describe("errors and shortage are explicit", () => {
     expect(env2.error).toMatchObject({ code: "SESSION_ACTIVE", details: { sessionId } });
   });
 
-  it("insufficient bank: 409 CONTENT_SHORTAGE with exact deficits and a suggested N; the dashboard shows the same", async () => {
-    for (const seed of ["s1", "s2"]) {
-      const { sessionId, snapshot } = await start(seed);
-      await post(`/api/v1/sessions/${sessionId}/lease`, { tabId: "t" });
-      for (const s of snapshot.slots) {
-        await post(`/api/v1/sessions/${sessionId}/reveal`, { slotId: s.slotId, tabId: "t" });
-        await post(`/api/v1/sessions/${sessionId}/events`, { slotId: s.slotId, type: "skip", clientEventId: `skip-${seed}-${s.ordinal}` });
-      }
-      expect((await post(`/api/v1/sessions/${sessionId}/finish`, { mode: "ended_early" })).statusCode).toBe(200);
+  it("insufficient lesson stock: 409 LESSON_STOCK_LOW with the deficit and a suggested batch size", async () => {
+    const { sessionId, snapshot } = await start("s1");
+    await post(`/api/v1/sessions/${sessionId}/lease`, { tabId: "t" });
+    for (const s of snapshot.slots) {
+      await post(`/api/v1/sessions/${sessionId}/reveal`, { slotId: s.slotId, tabId: "t" });
+      await post(`/api/v1/sessions/${sessionId}/events`, { slotId: s.slotId, type: "skip", clientEventId: `skip-s1-${s.ordinal}` });
     }
+    expect((await post(`/api/v1/sessions/${sessionId}/finish`, { mode: "ended_early" })).statusCode).toBe(200);
     const res = await post("/api/v1/sessions", { purpose: "practice", blueprintRevisionId: env.blueprintRevisionId, seed: "s3" });
     expect(res.statusCode).toBe(409);
     const e = ErrorEnvelopeSchema.parse(res.json()).error;
-    expect(e.code).toBe("CONTENT_SHORTAGE");
-    const d = e.details as { deficits: Array<{ format: string; needed: number; available: number }>; requestedN: number; largestFeasibleN: number | null };
-    expect(d.requestedN).toBe(18);
-    expect(d.deficits.length).toBeGreaterThan(0); // D68: skipped exercises are due repeats (capped at 30%), which still cannot fill 18 slots
-    const dash = DashboardSchema.parse((await get("/api/v1/dashboard")).json());
-    expect(dash.blueprints[0]).toMatchObject({ readySessions: 0, shortage: { requestedN: 18 } });
+    // the lesson stock gate (an estimate for the lesson's remaining sessions) refuses before the slot-level shortage is reached
+    expect(e.code).toBe("LESSON_STOCK_LOW");
+    const d = e.details as unknown as { lesson: string; deficit: number; recommended: number };
+    expect(d.deficit).toBeGreaterThan(0);
+    expect(d.recommended).toBeGreaterThanOrEqual(d.deficit);
   });
 
   it("a lesson is played at most twice: the third start is refused with LESSON_DONE and the dashboard counts 2", async () => {

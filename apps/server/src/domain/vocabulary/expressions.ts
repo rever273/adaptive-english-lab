@@ -40,6 +40,25 @@ export interface ExpressionView {
   source: "model" | "user" | null;
   state: "ready" | "generating" | "failed";
   createdAt: string;
+  /** approved vocabulary sentences that contain the phrase, and how many of them the learner has answered (a sentence counts once per time it was presented) */
+  inSentences: number;
+  shown: number;
+}
+
+/** counted from the stored sentences and the learner's answered slots: nothing is written for this, so it can never drift */
+function expressionUse(db: Db, phrase: string): { inSentences: number; shown: number } {
+  const like = `%${phrase.toLowerCase().replace(/[%_!]/g, "!$&")}%`;
+  const rows = db
+    .prepare(
+      `SELECT DISTINCT er.id AS revisionId, er.exercise_id AS exerciseId FROM prompt_units u
+         JOIN revision_prompt_units rpu ON rpu.unit_id = u.id JOIN exercise_revisions er ON er.id = rpu.revision_id
+        WHERE er.template_cluster LIKE 'vocab-%' AND u.canonical_text NOT LIKE '%⟦%' AND u.canonical_text LIKE ? ESCAPE '!'
+          AND er.id IN (SELECT revision_id FROM selectable_revisions)`,
+    )
+    .all(like) as Array<{ revisionId: string; exerciseId: string }>;
+  if (rows.length === 0) return { inSentences: 0, shown: 0 };
+  const shown = db.prepare("SELECT COUNT(DISTINCT s.id) AS n FROM session_slots s JOIN attempts a ON a.slot_id = s.id WHERE s.exercise_revision_id = ?");
+  return { inSentences: new Set(rows.map((r) => r.exerciseId)).size, shown: rows.reduce((n, r) => n + (shown.get(r.revisionId) as { n: number }).n, 0) };
 }
 
 const isRemoved = (db: Db, expressionId: string): boolean =>
@@ -50,7 +69,7 @@ const OPEN = "('queued','waiting_for_gpu','running','paused')";
 function view(db: Db, e: { id: string; phrase: string; created_at: string }): ExpressionView {
   const r = db.prepare("SELECT translation_ru AS t, example_en AS x, description_ru AS d, source FROM vocabulary_expression_revisions WHERE expression_id = ? ORDER BY revision DESC LIMIT 1").get(e.id) as { t: string; x: string; d: string; source: "model" | "user" } | undefined;
   const open = (db.prepare(`SELECT COUNT(*) AS n FROM jobs WHERE kind = 'generation' AND json_extract(payload_json, '$.expressionId') = ? AND state IN ${OPEN}`).get(e.id) as { n: number }).n;
-  return { id: e.id, phrase: e.phrase, translationRu: r?.t ?? "", exampleEn: r?.x ?? "", descriptionRu: r?.d ?? "", source: r?.source ?? null, state: r ? "ready" : open > 0 ? "generating" : "failed", createdAt: e.created_at };
+  return { id: e.id, phrase: e.phrase, translationRu: r?.t ?? "", exampleEn: r?.x ?? "", descriptionRu: r?.d ?? "", source: r?.source ?? null, state: r ? "ready" : open > 0 ? "generating" : "failed", createdAt: e.created_at, ...expressionUse(db, e.phrase) };
 }
 
 const row = (db: Db, expressionId: string): { id: string; phrase: string; created_at: string } => {

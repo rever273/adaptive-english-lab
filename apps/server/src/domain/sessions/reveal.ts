@@ -41,7 +41,7 @@ function loadSlot(db: Db, slotId: string): SlotRow {
 
 /** Prompt and options only: accepted ids, rubric, explanation and hints never leave the server at reveal. */
 export function buildPrompt(format: string, contentJson: string, questionId: string | null, slotId = ""): Prompt {
-  const c = JSON.parse(contentJson) as { prompt_en: string; payload: Record<string, any> };
+  const c = JSON.parse(contentJson) as { prompt_en: string; payload: Record<string, any>; vocabulary?: { family?: string; wordRu?: string } };
   const p = c.payload;
   const order = <T extends { id: string }>(items: T[]): T[] => [...items].sort((a, b) => {
     const hash = (id: string) => createHash("sha256").update(`${slotId}:${id}`).digest("hex");
@@ -55,7 +55,7 @@ export function buildPrompt(format: string, contentJson: string, questionId: str
       return { kind: "segments", prompt_en: c.prompt_en, sentence: p.sentence, segments: displaySegments(p.segments, Boolean(p.no_mistake), p.accepted_segment_ids ?? [], slotId), noMistakeId: NO_MISTAKE_ID };
     case "guided_short_answer":
     case "russian_to_english_short":
-      return { kind: "short", prompt_en: c.prompt_en, cue_ru: p.cue_ru, max_words: p.max_words, allow_voice: Boolean(p.allow_voice) };
+      return { kind: "short", prompt_en: c.prompt_en, cue_ru: p.cue_ru, max_words: p.max_words, allow_voice: Boolean(p.allow_voice), ...buildTiles(c, slotId) };
     case "assemble_sentence":
       return { kind: "blocks", prompt_en: c.prompt_en, cue_ru: p.cue_ru, blocks: shuffledBlocks(p.blocks, p.distractor_block_ids ?? [], p.accepted_answers, slotId) };
     case "context_reading": {
@@ -66,6 +66,24 @@ export function buildPrompt(format: string, contentJson: string, questionId: str
     default:
       throw new ApiError(500, "UNKNOWN_FORMAT", `Unknown exercise format ${format}`);
   }
+}
+
+const DECOY_LETTERS = "etaoinshrdlcumwfgypbvk";
+
+/**
+ * Vocabulary recall only: the letters of the first accepted answer plus two decoys in a per-slot stable order, so the same word can be built from
+ * tiles instead of typed. The tiles reveal which letters the word has, never their order; the answer is still checked exactly like typed text.
+ */
+function buildTiles(c: { vocabulary?: { family?: string; wordRu?: string }; payload: Record<string, any> }, slotId: string): { build?: { pattern: number[]; tiles: string[]; meaning_ru: string } } {
+  const answer = (c.payload.accepted_answers as string[] | undefined)?.[0]?.trim().toLowerCase();
+  const meaning = c.vocabulary?.wordRu?.trim();
+  if (c.vocabulary?.family !== "guided_recall" || !answer || !meaning || !/^[a-z]+(?: [a-z]+){0,2}$/.test(answer)) return {};
+  const letters = answer.replace(/ /g, "").split("");
+  if (letters.length < 3 || letters.length > 18) return {};
+  const hash = (s: string): string => createHash("sha256").update(`${slotId}:${s}`).digest("hex");
+  const decoys = [...DECOY_LETTERS].filter((l) => !letters.includes(l)).sort((a, b) => hash(a).localeCompare(hash(b))).slice(0, 2);
+  const tiles = [...letters, ...decoys].map((l, i) => ({ l, k: hash(`${l}${i}`) })).sort((a, b) => a.k.localeCompare(b.k)).map((x) => x.l);
+  return { build: { pattern: answer.split(" ").map((w) => w.length), tiles, meaning_ru: meaning } };
 }
 
 /**

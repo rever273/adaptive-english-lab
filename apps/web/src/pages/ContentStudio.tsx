@@ -1,7 +1,7 @@
 import { useCallback, useEffect, useState } from "react";
 import { VocabularyStudio } from "./VocabularyStudio";
 import { batchCache, coverageCache, stockCache } from "./studioCache";
-import { ApiRequestError, createBatchApi, createThoughtBatchApi, fetchThoughts, fetchBatch, fetchRevisionContent, fetchContentStock, fetchTypingOverview, fetchDictationPool, prepareDictationTracks, type DictationPoolSummary, type BatchItem, type BatchSummary, type StudioBatchSummary, type Coverage, type ItemStatus } from "../api";
+import { ApiRequestError, createBatchApi, createAgentBatchApi, createThoughtBatchApi, fetchThoughts, fetchBatch, fetchRevisionContent, fetchContentStock, fetchTypingOverview, fetchDictationPool, prepareDictationTracks, type DictationPoolSummary, type BatchItem, type BatchSummary, type StudioBatchSummary, type Coverage, type ItemStatus } from "../api";
 
 const STATUS_LABEL: Record<ItemStatus, string> = { queued: "Generating", invalid: "Needs agent repair", generated: "Draft", ready_for_review: "Awaiting agent", approved: "Approved", released: "Accepted", flagged: "Flagged", rejected: "Rejected" };
 const errorText = (e: unknown) => e instanceof ApiRequestError ? e.message : "Something went wrong.";
@@ -14,6 +14,9 @@ const THOUGHTS_AGENT_TASK = `English Lab: choose the grammar skills for my saved
 export const batchAgentTask = (id: string, category: "grammar" | "vocabulary") => `Complete and publish ${category} replenishment batch ${id}. Read content/agent-workflows/${category}.md and common.md in that directory. Run npm run content:agent -- prepare ${id}, review every item, repair suitable drafts as new revisions and reject unsuitable ones. Use the check and finalize commands in the instructions. Independent review by a separate agent is explicitly requested for every final candidate, especially corrections; do not self-approve. Do the review through the content-reviewer agent and the tools in .claude/tools (see your project memory for the workflow), after you have rejected duplicates and fixed the known defects yourself. Apply the reviewed results to the local app yourself. Do not ask me to copy JSON or run commands. Preserve lesson selection, dictionary edits and raw attempt history. Reply briefly with accepted, corrected and rejected counts, and end with one short line: how many tokens the review subagent(s) used in total.`;
 
 const VIEWS = [["grammar", "Grammar exercises"], ["vocabulary", "Vocabulary exercises"], ["typing", "Typing"]] as const;
+/** The agent writes the exercises itself: the batch is stored (no local model runs) and this task tells it exactly what to do. */
+export const authoringAgentTask = (id: string, count: number, category: "grammar" | "vocabulary" = "vocabulary") => `Write and publish ${category} batch ${id} (${count} items) yourself; no local model is used. Read content/agent-workflows/${category}.md and common.md in that directory, then run npm run content:agent -- prepare ${id} and read author-packet.json in the reported work directory (${category === "vocabulary" ? "the planned words, families, CEFR levels, topic ideas, meanings, synonyms, sentences to avoid and wrong-option candidates" : "the planned skills with their rule cards, formats, CEFR levels and topics, plus the draft format of every exercise type"} are ready there). Plan the items of one ${category === "vocabulary" ? "word" : "skill"} together so each has its own scene, people and sentence type: the author command rejects repeated frames. Write one draft per item into drafts.json in the format shown in that packet, then run npm run content:agent -- author ${id}; fix every PROBLEM it prints and run it again until none remain. Aim for exercises you would accept yourself: natural Australian English at the item's level, one defensible answer, wrong options that clearly do not fit, accurate Russian. Then set plan.author, run check, have the content-reviewer agent review every final candidate through the tools in .claude/tools (see your project memory), apply its FIX lines as patches and re-review only the changed hashes, then finalize. Do not ask me to copy JSON or run commands. Preserve lesson selection, dictionary edits and raw attempt history. Reply briefly with accepted, corrected and rejected counts, then report tokens separately: the review subagent(s) exactly, and your own work as an estimate (say it is an estimate), so the result can be compared with a locally generated batch.`;
+
 export function ContentStudio({ initialView = "grammar" }: { initialView?: "grammar" | "vocabulary" | "typing" } = {}) {
   const [category, setCategory] = useState(initialView);
   return <>
@@ -56,7 +59,7 @@ function DictationTracks() {
     <section className="card"><h2>Prepared tracks</h2>
       {!pool || (pool.ready === 0 && pool.used === 0) ? <p className="muted">No prepared tracks yet.</p> : <>
         <p className="small" data-testid="dictation-pool-summary">{pool.ready} ready ({minutes > 0 ? `${minutes} min ` : ""}{pool.audioSeconds % 60} s of audio{pool.ready > 0 ? `, ${pool.minWords}–${pool.maxWords} words each` : ""}); {pool.used} already used in lessons.{pool.oldest ? ` Prepared ${day(pool.oldest)}${pool.newest && day(pool.newest) !== day(pool.oldest) ? ` to ${day(pool.newest)}` : ""}.` : ""}</p>
-        {pool.topics.length > 0 && <><h3>Topics</h3><p className="chips">{pool.topics.map((t) => <span key={t.topic} className="chip">{t.topic} · {t.n}</span>)}</p></>}
+        {pool.topics.length > 0 && <><h3>Topics ({pool.topicTotal})</h3><p className="chips">{pool.topics.map((t) => <span key={t.topic} className="chip">{t.topic} · {t.n}</span>)}</p>{pool.topicTotal > pool.topics.length && <p className="muted small">The {pool.topics.length} most frequent of {pool.topicTotal} topics are shown; the rest have one or two tracks each.</p>}</>}
         {pool.voices.length > 0 && <><h3>Voices</h3><p className="chips">{pool.voices.map((v) => <span key={v.name} className="chip">{v.name} · {v.n}</span>)}</p></>}
       </>}
     </section>
@@ -102,6 +105,16 @@ function BatchStudio({ category, onCategoryChange }: { category: "grammar" | "vo
   };
   const [thoughts, setThoughts] = useState({ ready: 0, needSkills: 0 });
   useEffect(() => { void fetchThoughts().then(r => setThoughts({ ready: r.readyForBatch, needSkills: r.needSkills })).catch(() => undefined); }, [note]);
+  const copyAgentPrompt = async () => {
+    setBusy(true); setError(null); setNote(null);
+    try {
+      const r = await createAgentBatchApi({ count, mode: "adaptive", category });
+      setOpen(r.batchId);
+      await navigator.clipboard?.writeText(authoringAgentTask(r.batchId, r.items, category));
+      setNote(`Batch #${r.batchId.slice(0, 8)} of ${r.items} exercises is stored for your agent and the task is copied. Paste it to your coding agent.`);
+      await batchCache.get(); await loadBatches(true);
+    } catch (e) { setError(errorText(e)); } finally { setBusy(false); }
+  };
   const startThoughts = async () => {
     setBusy(true); setError(null); setNote(null);
     try { const r = await createThoughtBatchApi(); setOpen(r.batchId); setNote(`Started ${r.items} drafts from ${r.thoughts} thought${r.thoughts === 1 ? "" : "s"}. They wait for independent review like any other draft.`); await batchCache.get(); await loadBatches(true); }
@@ -145,7 +158,7 @@ function BatchStudio({ category, onCategoryChange }: { category: "grammar" | "vo
       <p className="lede">Create new {category === "grammar" ? "exercises for your learning skills" : "exercises using your saved words"}. When generation finishes, copy the task to your agent. It checks, repairs and publishes the results for you.</p>
       {error && <p className="notice notice-error" role="alert">{error}</p>}
       {note && <p className="notice notice-info" role="status">{note}</p>}
-      <div className="actions"><label className="inline"><span>Batch size</span><input type="number" min={1} max={500} value={count} onChange={e => { setCountTouched(true); setCount(Number(e.target.value)); }} aria-label="Batch size" /></label><button className="btn btn-primary" disabled={busy || !Number.isInteger(count) || count < 1 || count > 500} onClick={() => void start()}>Start batch</button>{category === "grammar" ? <button className="btn" disabled={busy} onClick={() => void calculateCourse()}>Calculate for lessons</button> : <button className="btn" disabled={busy} onClick={() => void calculateVocabulary()}>Calculate for words</button>}</div>
+      <div className="actions"><label className="inline"><span>Batch size</span><input type="number" min={1} max={500} value={count} onChange={e => { setCountTouched(true); setCount(Number(e.target.value)); }} aria-label="Batch size" /></label><button className="btn btn-primary" disabled={busy || !Number.isInteger(count) || count < 1 || count > 500} onClick={() => void start()}>Start batch</button><button className="btn" disabled={busy || !Number.isInteger(count) || count < 1 || count > 500} onClick={() => void copyAgentPrompt()} title="No local model: your coding agent writes the exercises itself. Creates the batch and copies its task." data-testid="copy-agent-task"><i className="pi pi-copy" aria-hidden="true" /> Copy agent prompt</button>{category === "grammar" ? <button className="btn" disabled={busy} onClick={() => void calculateCourse()}>Calculate for lessons</button> : <button className="btn" disabled={busy} onClick={() => void calculateVocabulary()}>Calculate for words</button>}</div>
       {category === "grammar" && (thoughts.ready > 0 || thoughts.needSkills > 0) && <div className="actions" data-testid="thoughts-ready">
         {thoughts.needSkills > 0 && <><span className="small">{thoughts.needSkills} saved thought{thoughts.needSkills === 1 ? " needs" : "s need"} a grammar-skill check by your agent.</span><button className="btn" onClick={() => void navigator.clipboard?.writeText(THOUGHTS_AGENT_TASK).then(() => setNote("Task copied. Paste it to your coding agent."))}>Copy task for agent</button></>}
         {thoughts.ready > 0 && <><span className="small">{thoughts.ready} checked thought{thoughts.ready === 1 ? "" : "s"} ready to become practice patterns.</span><button className="btn" disabled={busy} onClick={() => void startThoughts()}>Create drafts from my thoughts</button></>}

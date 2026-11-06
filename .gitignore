@@ -37,3 +37,9 @@ vocabulary-speech/
 # personal launcher (stop, build, start attached)
 start.bat
 migrations/
+
+# Journey activity migrations are required to run the feature.
+!migrations/
+migrations/*
+!migrations/038_practice_activity.sql
+!migrations/039_journey_typing_activity.sql

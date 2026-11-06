@@ -249,7 +249,7 @@ function PracticeBlock({ status, onStart, onStudio, error }: { status: VocabPrac
   );
 }
 
-export function Vocabulary({ onNavigate }: { onNavigate?: (page: "vocabulary" | "analytics" | "studio") => void } = {}) {
+export function Vocabulary({ onNavigate, dailyStart = false, onDailyDone }: { onNavigate?: (page: "vocabulary" | "analytics" | "studio") => void; dailyStart?: boolean; onDailyDone?: () => void } = {}) {
   const [words, setWords] = useState<VocabEntry[] | null>(null);
   const [practice, setPractice] = useState<VocabPracticeStatus | null>(null);
   const [practising, setPractising] = useState(false);
@@ -287,6 +287,13 @@ export function Vocabulary({ onNavigate }: { onNavigate?: (page: "vocabulary" | 
       void loadPractice();
     }
   };
+
+  const dailyStarted = useRef(false);
+  useEffect(() => {
+    if (!dailyStart || !practice || dailyStarted.current) return;
+    dailyStarted.current = true;
+    if (!practice.activeSessionId && practice.available > 0) void start(practice.shortage ? practice.available : undefined);
+  }, [dailyStart, practice]);
 
   const load = useCallback(async () => {
     try {
@@ -337,6 +344,7 @@ export function Vocabulary({ onNavigate }: { onNavigate?: (page: "vocabulary" | 
     return (
       <Practice
         category="vocabulary"
+        onDailyDone={onDailyDone}
         onExit={() => {
           setPractising(false);
           void loadPractice();

@@ -135,7 +135,7 @@ describe("generation through the dispatcher produces DRAFTS only", () => {
     await run(r, batchId);
     const b = getBatch(r.env.db, batchId);
     expect(b.counts.invalid).toBe(24);
-    expect(r.model.calls).toBe(76); // initial unit attempts and bounded individual retries
+    expect(r.model.calls).toBe(172); // initial unit attempts and bounded individual retries (up to 3 per failed item)
     expect(rows(r.env.db, "SELECT state FROM jobs WHERE state <> 'completed'")).toHaveLength(0);
     expect(one<{ n: number }>(r.env.db, "SELECT COUNT(*) AS n FROM exercise_revisions").n).toBe(0);
     expect(JSON.stringify(b.items![0]!.error)).toContain("NOT_JSON");

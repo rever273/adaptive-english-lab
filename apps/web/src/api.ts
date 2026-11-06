@@ -137,6 +137,7 @@ export const createSession = (blueprintRevisionId: string) =>
   send("POST", "/api/v1/sessions", CreateSessionResponseSchema, { purpose: "practice", blueprintRevisionId, timezone: Intl.DateTimeFormat().resolvedOptions().timeZone || "UTC" });
 export const createCheckSession = (purpose: "diagnostic" | "heldout") =>
   send("POST", "/api/v1/sessions", CreateSessionResponseSchema, { purpose, timezone: Intl.DateTimeFormat().resolvedOptions().timeZone || "UTC" });
+export const recordPracticeActivity = (sessionId: string, body: { id: string; tabId: string; startMs: number; endMs: number }) => send("POST", `/api/v1/sessions/${encodeURIComponent(sessionId)}/activity`, typed<{ recorded: boolean }>(), { id: body.id, tabId: body.tabId, startMs: body.startMs, endMs: body.endMs });
 export const takeLease = (sessionId: string, tabId: string) => send("POST", `/api/v1/sessions/${sessionId}/lease`, LeaseResponseSchema, { tabId });
 export const revealSlot = (sessionId: string, slotId: string, tabId: string) => send("POST", `/api/v1/sessions/${sessionId}/reveal`, RevealResponseSchema, { slotId, tabId });
 export const submitAttempt = (body: { slotId: string; submissionId: string; answer?: string | string[]; idk?: boolean; transcriptId?: string }) =>
@@ -210,6 +211,7 @@ export const fetchStudioBatches = () => send("GET", "/api/v1/content/batch-summa
 export const fetchBatches = () => send("GET", "/api/v1/content/batches", typed<{ batches: BatchSummary[]; trialGate: TrialGate }>());
 export const fetchBatch = (id: string) => send("GET", `/api/v1/content/batches/${id}`, typed<BatchSummary & { items: BatchItem[]; trialGate: TrialGate }>());
 export const createBatchApi = (body: { count: number; mode: "adaptive" | "balanced" | "manual"; trial?: boolean; category?: "grammar" | "vocabulary" }) => send("POST", "/api/v1/content/batches", typed<{ batchId: string; items: number; units: number }>(), body);
+export const createAgentBatchApi = (body: { count: number; mode: "adaptive" | "balanced" | "manual"; trial?: boolean; category?: "grammar" | "vocabulary" }) => send("POST", "/api/v1/content/batches/agent", typed<{ batchId: string; items: number; units: number }>(), body);
 export const fetchContentStock = () => send("GET", "/api/v1/content/stock", typed<Record<"grammar" | "vocabulary", { available: number; threshold: number; low: boolean; message?: string; recommended?: number; plan?: { words: number; deficit: number; recommended: number; targetPerWord: number }; course?: { lessons: number; sessions: number; first: string | null; last: string | null; deficit: number; recommended: number; sessionsPerLesson: number }; lesson?: { key: string; label: string; range: string } }>>());
 export const fetchCoverage = () => send("GET", "/api/v1/content/coverage", typed<Coverage>());
 export const fetchRevisionContent = (id: string) => send("GET", `/api/v1/content/revisions/${id}`, typed<{ revisionId: string; contentHash: string; status: string; content: Record<string, unknown> }>());
@@ -401,7 +403,7 @@ export async function fetchBookSpeech(body: { text: string; sessionId: string; p
 }
 export const warmBookSpeech = () => send("POST", "/api/v1/typing/books/speech/warm", anyOf<{ ok: boolean }>(), {}).catch(() => undefined);
 // ---- Expressions (the second part of the dictionary) ----
-export interface ExpressionView { id: string; phrase: string; translationRu: string; exampleEn: string; descriptionRu: string; source: "model" | "user" | null; state: "ready" | "generating" | "failed"; createdAt: string }
+export interface ExpressionView { id: string; phrase: string; translationRu: string; exampleEn: string; descriptionRu: string; source: "model" | "user" | null; state: "ready" | "generating" | "failed"; createdAt: string; inSentences: number; shown: number }
 export const fetchExpressions = () => send("GET", "/api/v1/vocabulary/expressions", typed<{ expressions: ExpressionView[] }>());
 export const addExpression = (phrase: string) => send("POST", "/api/v1/vocabulary/expressions", typed<ExpressionView & { created: boolean }>(), { phrase });
 export const editExpression = (id: string, body: { translationRu?: string; exampleEn?: string; descriptionRu?: string }) => send("POST", `/api/v1/vocabulary/expressions/${encodeURIComponent(id)}/edit`, typed<ExpressionView>(), body);
@@ -420,7 +422,7 @@ export const sendDictationPlay = (exerciseId: string, source: "auto" | "manual" 
 export const setDictationSoundFlag = (exerciseId: string, flagged: boolean) => send("POST", `${DICT}/exercises/${encodeURIComponent(exerciseId)}/sound-flag`, typed<{ flagged: boolean }>(), { flagged });
 export const requestDictationHint = (exerciseId: string, typedText: string) => send("POST", `${DICT}/exercises/${encodeURIComponent(exerciseId)}/hint`, typed<DictationHintResponse>(), { typedText });
 export const revealDictationAnswer = (exerciseId: string) => send("POST", `${DICT}/exercises/${encodeURIComponent(exerciseId)}/reveal`, typed<DictationHintResponse>(), {});
-export type DictationPoolSummary = { ready: number; used: number; audioSeconds: number; minWords: number; maxWords: number; oldest: string | null; newest: string | null; topics: Array<{ topic: string; n: number }>; voices: Array<{ name: string; n: number }> };
+export type DictationPoolSummary = { ready: number; used: number; audioSeconds: number; minWords: number; maxWords: number; oldest: string | null; newest: string | null; topics: Array<{ topic: string; n: number }>; topicTotal: number; voices: Array<{ name: string; n: number }> };
 export const fetchDictationPool = () => send("GET", `${DICT}/pool`, typed<DictationPoolSummary>());
 export const prepareDictationTracks = (count: number) => send("POST", `${DICT}/pool`, typed<{ queued: number }>(), { count });
 export const openDictationTranslation = (exerciseId: string) => send("POST", `${DICT}/exercises/${encodeURIComponent(exerciseId)}/translation`, typed<{ translationRu: string }>(), {});
@@ -488,3 +490,9 @@ export async function fetchVoiceSample(key: string, lengthScale?: number): Promi
   try { const h = res.headers.get("X-Sample-Stats"); stats = h ? (JSON.parse(h) as VoiceSampleStats) : null; } catch { stats = null; }
   return { blob: await res.blob(), stats };
 }
+
+export type JourneyMode = "grammar" | "vocabulary" | "words" | "books" | "dictation";
+export type JourneyData = { version: string; timezone: string; today: string; totals: Record<JourneyMode, number>; todayMs: Record<JourneyMode, number>; activeDays: number; journeyHours: {b2:number;c1:number;c2:number}; dailyMinutes: Record<JourneyMode,number>; dailyOrder: JourneyMode[]; bookMinutes:number };
+export const fetchJourney = () => send("GET", "/api/v1/journey", typed<JourneyData>());
+export const saveJourneySettings = (body: { journeyHours?: JourneyData["journeyHours"]; dailyMinutes?: JourneyData["dailyMinutes"]; dailyOrder?: JourneyMode[] }) => send("POST", "/api/v1/settings", typed<SettingsView>(), body);
+export const recordTypingInterval = (body: {id:string;sessionId:string;mode:"words"|"books"|"dictation";startMs:number;endMs:number}) => send("POST", "/api/v1/journey/typing-interval", typed<{recorded:boolean}>(), body);

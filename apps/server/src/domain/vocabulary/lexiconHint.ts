@@ -89,4 +89,11 @@ export class LexiconHints {
     this.loaded ??= readFile(this.file, "utf8").then(parseLexicon, () => new Map<string, LexiconHint>());
     return (await this.loaded).get(lemma.trim().toLowerCase()) ?? null;
   }
+
+  /** every row (empty without a file), for lookalike wrong options */
+  async all(): Promise<ReadonlyMap<string, LexiconHint>> {
+    if (!this.file) return new Map();
+    this.loaded ??= readFile(this.file, "utf8").then(parseLexicon, () => new Map<string, LexiconHint>());
+    return this.loaded;
+  }
 }

@@ -1,16 +1,7 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import { ApiRequestError, fetchGpu, fetchJobs, jobAction, type GpuInfo, type PublicJob } from "../api";
+import { GPU_WAIT, KIND_LABEL } from "../components/aiLabels";
 
-export const KIND_LABEL: Record<string, string> = {
-  free_text_analysis: "Check a written answer",
-  generation: "Write draft exercises",
-  dictation: "Audio Dictation",
-  expression: "Write an expression draft",
-  triage: "Quick screen of a draft",
-  benchmark: "Model benchmark",
-  vocabulary_enrichment: "Translate a saved word",
-  tutor: "Tutor answer",
-};
 const STATE_LABEL: Record<string, string> = {
   queued: "Waiting its turn",
   waiting_for_gpu: "Waiting for the graphics card",
@@ -27,16 +18,7 @@ const ACTIONS: Record<string, Array<"pause" | "resume" | "retry" | "cancel">> = 
   paused: ["resume", "cancel"],
   failed: ["retry"],
 };
-export const GPU_WAIT: Record<string, string> = {
-  practice_active: "a practice session is in progress",
-  insufficient_vram: "not enough free graphics memory",
-  ollama_in_use: "another program is using the language model server",
-  profile_unknown: "the model has not been measured yet",
-  telemetry_unavailable: "the graphics card cannot be read",
-  release_unproven: "the previous model has not been shown to be unloaded",
-  no_adapter: "nothing is installed to run this kind of task",
-  oom_pressure: "the card ran out of memory",
-};
+
 const VALIDATION_REASON: Record<string, string> = {
   EXAMPLE_WITHOUT_WORD: "the example did not use the saved word",
   TRANSLATION: "the translation was missing or not in Russian",

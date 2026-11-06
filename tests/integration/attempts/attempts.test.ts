@@ -372,9 +372,11 @@ describe("voice transcripts (text provenance only)", () => {
     const ok = recordAttempt(env.db, env.deps, submit(slotId, { answer: row.submitted_text, inputMode: "voice", transcriptId: t }));
     expect(ok.status).toBe(201);
     expect(one(env.db, "SELECT input_mode, transcript_id FROM attempts")).toEqual({ input_mode: "voice", transcript_id: t });
-    // no audio columns or tables exist anywhere in the schema
+    // no audio columns or tables exist anywhere in the schema, except the Audio Dictation tables, which hold the file name and length of the
+    // app's OWN synthesised sentences (never the learner's voice): exactly these four columns and nothing else
     const cols = rows<{ name: string }>(env.db, "SELECT m.name || '.' || p.name AS name FROM sqlite_master m, pragma_table_info(m.name) p WHERE m.type = 'table'");
-    expect(cols.filter((c) => /audio|wav|pcm|blob/i.test(c.name))).toEqual([]);
+    const ownSpeech = ["typing_dictation_exercises.audio_file", "typing_dictation_exercises.audio_ms", "typing_dictation_pool.audio_file", "typing_dictation_pool.audio_ms"];
+    expect(cols.filter((c) => /audio|wav|pcm|blob/i.test(c.name) && !ownSpeech.includes(c.name))).toEqual([]);
   });
 });
 

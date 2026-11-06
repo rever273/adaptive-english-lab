@@ -16,8 +16,11 @@ import { validateExercise } from "../validator.js";
 import { GENERATION_PROMPT } from "./repository.js";
 import { GENERATION_SYSTEM_V3, GENERATION_SYSTEM_V4, GENERATION_SYSTEM_V5, GENERATION_SYSTEM_V6, GENERATION_SYSTEM_V7, GENERATION_SYSTEM_V8, GENERATION_SYSTEM_V9, assembleExercise, buildGenerationUser, buildGenerationUserV4, draftFormat, draftFormatsText, type Built } from "./draftFormats.js";
 import type { ItemPlan } from "./plan.js";
-import { VOCABULARY_SYSTEM, VOCABULARY_SYSTEM_V2, VOCABULARY_SYSTEM_V3, VOCABULARY_SYSTEM_V4, VOCABULARY_SYSTEM_V5, assembleVocabulary, vocabularyFormat } from "./vocabularyDrafts.js";
+import { articleMismatch } from "./languageChecks.js";
+import { VOCABULARY_SYSTEM, VOCABULARY_SYSTEM_V2, VOCABULARY_SYSTEM_V3, VOCABULARY_SYSTEM_V4, VOCABULARY_SYSTEM_V5, VOCABULARY_SYSTEM_V6, VOCABULARY_SYSTEM_V7, VOCABULARY_SYSTEM_V8, assembleVocabulary, vocabularyFormat } from "./vocabularyDrafts.js";
 import { itContext } from "./itContext.js";
+import { pickVocabularyTopic } from "./vocabularyTopics.js";
+import type { LexiconHint } from "../../vocabulary/lexiconHint.js";
 import { dictationFormat } from "../../typing/dictation/prompt.js";
 import { runDictationJob, type DictationJobPayload as DictationPayload } from "../../typing/dictation/runner.js";
 import type { DictationEnv } from "../../typing/dictation/lessons.js";
@@ -53,11 +56,19 @@ export interface GenerationRunnerOptions {
   advisoryEnabled?: boolean;
   /** Audio Dictation (TASK_028): one sentence per job; absent = such jobs fail as unavailable */
   dictation?: DictationEnv;
+  /** the learner's 20k word list (a local CSV): lookalike wrong options for vocabulary v8; absent = none */
+  lexicon?: { all(): Promise<ReadonlyMap<string, LexiconHint>> };
 }
 
 /** Generation uses the pinned Qwen with a livelier temperature (spec/06: .6) and a 2048-token output cap. */
 export const GENERATION_PARAMS = { numCtx: RESIDENT_NUM_CTX, temperature: 0.6, seed: 42, numPredict: 2048 } as const;
 
+const OPTION_CHECK_SYSTEM = `You check one multiple-choice vocabulary item for a learner of Australian English. The sentence has a gap ___. The key is the intended answer. Decide for EVERY wrong option separately: if it is put into the gap (in the form shown, with the words around the gap), is the sentence grammatical and sensible enough that a fair teacher would have to accept it? "fits" is true when it works grammatically and could mean something reasonable here, even if it is less natural than the key. "fits" is false when it is ungrammatical (wrong form, missing particle or article, impossible with the next word) or its meaning clearly contradicts the context. Return JSON only: {"options":[{"id":"b","fits":false}]} listing every wrong option.`;
+const RIVALS_SYSTEM = `You check a fill-in-the-gap item for a learner of English. The sentence has one gap ___ and the intended answer is given. List up to 5 OTHER English words or phrases (not forms of the answer) that a fluent speaker would also accept in the gap with the same overall meaning. Return JSON only: {"alternatives":[...]}; an empty list when nothing else fits well.`;
+/** vocabulary v7: lower than the shared .6 so options and Russian stay accurate; variety comes from the topic and the scene hints */
+const VOCABULARY_TEMPERATURE = 0.4;
+/** single-item retries for a failed draft, after the unit-level repair */
+const RETRY_ATTEMPTS = 3;
 const sha = (s: string): string => createHash("sha256").update(s).digest("hex");
 
 /** Stable UUID per (batch, ordinal): a re-delivered unit reproduces the same exercise id instead of inventing a second exercise. */
@@ -232,27 +243,55 @@ export class GenerationJobRunner implements JobRunner<GenerationPayload | Though
 
     const skills = taxonomyForNewRevisions(this.o.db).skills;
     const version = (this.o.db.prepare("SELECT prompt_version_id AS v FROM batches WHERE id = ?").get(payload.batchId) as { v: string } | undefined)?.v;
-    const vocabulary = version === "vocabulary-generation-v1" || version === "vocabulary-generation-v2" || version === "vocabulary-generation-v3" || version === "vocabulary-generation-v4" || version === "vocabulary-generation-v5";
-    const targetedRetry = (version === "generation-v5" || version === "generation-v6" || version === "generation-v7" || version === "generation-v8" || (version === "generation-v9" || version === "generation-v10")) || version === "vocabulary-generation-v2" || version === "vocabulary-generation-v3" || version === "vocabulary-generation-v4" || version === "vocabulary-generation-v5";
+    const vocabulary = version === "vocabulary-generation-v1" || version === "vocabulary-generation-v2" || version === "vocabulary-generation-v3" || version === "vocabulary-generation-v4" || version === "vocabulary-generation-v5" || version === "vocabulary-generation-v6" || version === "vocabulary-generation-v7" || version === "vocabulary-generation-v8";
+    const targetedRetry = (version === "generation-v5" || version === "generation-v6" || version === "generation-v7" || version === "generation-v8" || (version === "generation-v9" || version === "generation-v10")) || version === "vocabulary-generation-v2" || version === "vocabulary-generation-v3" || version === "vocabulary-generation-v4" || version === "vocabulary-generation-v5" || version === "vocabulary-generation-v6" || version === "vocabulary-generation-v7" || version === "vocabulary-generation-v8";
     if (version !== "generation-v3" && version !== "generation-v4" && version !== "generation-v5" && version !== "generation-v6" && version !== "generation-v7" && version !== "generation-v8" && version !== "generation-v9" && version !== "generation-v10" && !vocabulary) throw new RunnerError("unsupported_prompt_version", "This batch uses an unavailable historical generation prompt.", false);
     const first = items[0]!.plan;
     const model = { tag: m.tag, digest: m.digest };
-    const v4 = version === "vocabulary-generation-v4" || version === "vocabulary-generation-v5";
-    const v5 = version === "vocabulary-generation-v5";
-    const withAvoid = (plan: ItemPlan): ItemPlan => v4 ? { ...plan, avoid_sentences: this.avoidSentences(plan), ...(plan.topic === "technology" ? { it_context: itContext(plan.ordinal) } : {}), ...(v5 ? this.expressionHint(plan) : {}) } as ItemPlan : plan;
-    const user = vocabulary ? JSON.stringify({ batch_id: payload.batchId, items: items.map(i => withAvoid(i.plan)), count: items.length }) : (version === "generation-v4" || version === "generation-v5" || version === "generation-v6" || version === "generation-v7" || version === "generation-v8" || (version === "generation-v9" || version === "generation-v10") ? (b: string, p: ItemPlan[]) => buildGenerationUserV4(b, p, version) : (b: string, p: ItemPlan[]) => buildGenerationUser(b, p, version))(payload.batchId, items.map((i) => i.plan));
-    const system = vocabulary ? (version === "vocabulary-generation-v5" ? VOCABULARY_SYSTEM_V5 : version === "vocabulary-generation-v4" ? VOCABULARY_SYSTEM_V4 : version === "vocabulary-generation-v3" ? VOCABULARY_SYSTEM_V3 : version === "vocabulary-generation-v2" ? VOCABULARY_SYSTEM_V2 : VOCABULARY_SYSTEM) : (version === "generation-v9" || version === "generation-v10") ? GENERATION_SYSTEM_V9 : version === "generation-v8" ? GENERATION_SYSTEM_V8 : version === "generation-v7" ? GENERATION_SYSTEM_V7 : version === "generation-v6" ? GENERATION_SYSTEM_V6 : version === "generation-v5" ? GENERATION_SYSTEM_V5 : version === "generation-v4" ? GENERATION_SYSTEM_V4 : GENERATION_SYSTEM_V3;
-    const buildVocabulary = (raw: unknown, item: QueuedItem): Built => {
-      const built = assembleVocabulary(raw, item.plan, exerciseIdFor(payload.batchId, item.ordinal), model, skills, version);
-      if (!built.ok || !v4) return built;
-      // an exact repeat of a sentence already in the bank would be refused at registration: let the targeted retry fix it now
+    const v4 = version === "vocabulary-generation-v4" || version === "vocabulary-generation-v5" || version === "vocabulary-generation-v6" || version === "vocabulary-generation-v7" || version === "vocabulary-generation-v8";
+    const v8 = version === "vocabulary-generation-v8";
+    const v7 = version === "vocabulary-generation-v7" || v8;
+    const v5 = version === "vocabulary-generation-v5" || version === "vocabulary-generation-v6" || version === "vocabulary-generation-v7" || version === "vocabulary-generation-v8";
+    const withAvoid = (plan: ItemPlan): ItemPlan => v4 ? { ...plan, avoid_sentences: this.avoidSentences(plan), ...(plan.topic === "technology" ? { it_context: itContext(plan.ordinal) } : {}), ...(v5 ? this.expressionHint(plan) : {}), ...(v7 ? this.meaningHint(plan) : {}) } as ItemPlan : plan;
+    // v8: three topic suggestions instead of one fixed topic; the model may ignore them when the word does not suit any
+    const ideas = (plan: ItemPlan): ItemPlan => {
+      if (!v8) return plan;
+      const { topic, it_context: _it, ...rest } = plan as ItemPlan & { it_context?: unknown };
+      const first = topic === "technology" ? "software development or other IT work" : topic;
+      return { ...rest, topic_ideas: [first, pickVocabularyTopic(plan.ordinal + 57, 1), pickVocabularyTopic(plan.ordinal + 113, 2)] } as unknown as ItemPlan;
+    };
+    const user = vocabulary ? JSON.stringify({ batch_id: payload.batchId, items: items.map(i => ideas(withAvoid(i.plan))), count: items.length }) : (version === "generation-v4" || version === "generation-v5" || version === "generation-v6" || version === "generation-v7" || version === "generation-v8" || (version === "generation-v9" || version === "generation-v10") ? (b: string, p: ItemPlan[]) => buildGenerationUserV4(b, p, version) : (b: string, p: ItemPlan[]) => buildGenerationUser(b, p, version))(payload.batchId, items.map((i) => i.plan));
+    const system = vocabulary ? (version === "vocabulary-generation-v8" ? VOCABULARY_SYSTEM_V8 : version === "vocabulary-generation-v7" ? VOCABULARY_SYSTEM_V7 : version === "vocabulary-generation-v6" ? VOCABULARY_SYSTEM_V6 : version === "vocabulary-generation-v5" ? VOCABULARY_SYSTEM_V5 : version === "vocabulary-generation-v4" ? VOCABULARY_SYSTEM_V4 : version === "vocabulary-generation-v3" ? VOCABULARY_SYSTEM_V3 : version === "vocabulary-generation-v2" ? VOCABULARY_SYSTEM_V2 : VOCABULARY_SYSTEM) : (version === "generation-v9" || version === "generation-v10") ? GENERATION_SYSTEM_V9 : version === "generation-v8" ? GENERATION_SYSTEM_V8 : version === "generation-v7" ? GENERATION_SYSTEM_V7 : version === "generation-v6" ? GENERATION_SYSTEM_V6 : version === "generation-v5" ? GENERATION_SYSTEM_V5 : version === "generation-v4" ? GENERATION_SYSTEM_V4 : GENERATION_SYSTEM_V3;
+    // A repeat of a sentence already in the bank is found here, in code, before any agent sees the draft: the targeted retry then writes a new one.
+    // Exact repeats are errors; near repeats (trigram Jaccard >= .80) are treated the same way so the reviewer never spends tokens on them.
+    const rejectRepeats = (built: Built, item: QueuedItem): Built => {
+      if (!built.ok || !(v4 || targetedRetry)) return built;
       const v = validateExercise(built.exercise, { taxonomySkillIds: skills });
       if (!v.ok) return built;
       const c = built.exercise as { template_cluster: string; target_skill: string };
       const dups = checkDuplicates(this.o.db, { exerciseId: exerciseIdFor(payload.batchId, item.ordinal), templateCluster: c.template_cluster, targetSkill: c.target_skill, units: v.units });
-      return dups.errors.length > 0 ? { ok: false, issues: [{ code: "DUPLICATE_SENTENCE", path: "", message: "This sentence is already in the bank. Write a different sentence in a different situation." }] } : built;
+      const near = dups.warnings.some(w => w.code === "NEAR_DUPLICATE" || w.code === "SAME_TEMPLATE_CLUSTER");
+      return dups.errors.length > 0 || near ? { ok: false, issues: [{ code: "DUPLICATE_SENTENCE", path: "", message: "This sentence is already in the bank or is almost the same as one. Write a different sentence in a different situation, with different people, objects and wording." }] } : built;
     };
-    const build = (raw: unknown, item: QueuedItem): Built => vocabulary ? buildVocabulary(raw, item) : assembleExercise(raw, item.plan, { exerciseId: exerciseIdFor(payload.batchId, item.ordinal), model, promptVersion: version!, taxonomySkillIds: skills });
+    // v7: the local model reads the wrong options once more; a draft with a wrong option that also fits is sent back like any other failed draft
+    const fitIssue = async (built: Built, item: QueuedItem): Promise<Built> => {
+      if (!v7 || !built.ok) return built;
+      const recall = (built.exercise.vocabulary as { family?: string } | undefined)?.family === "guided_recall";
+      if (recall) {
+        if (!v8) return built;
+        const e = built.exercise as { prompt_en: string; payload: { accepted_answers: string[] }; vocabulary: { target: { surfaceForm: string } } };
+        const rivals = await this.recallRivals(e.prompt_en, e.vocabulary.target.surfaceForm, e.payload.accepted_answers, m.tag, ctx.signal);
+        return rivals.length === 0 ? built : { ok: false, issues: [{ code: "ANSWER_NOT_UNIQUE", path: "", message: `"${rivals.join('", "')}" also fits the gap and the cue (same first letter and length). Change the sentence so only the target word fits.` }] };
+      }
+      const replaced = await this.replaceDistractors(built, item.plan, m.tag, ctx.signal, v8);
+      if (replaced) return replaced;
+      const bad = await this.optionsThatFit(built.exercise, m.tag, ctx.signal);
+      if (bad.length === 0) return built;
+      const texts = (built.exercise.payload as { options: Array<{ id: string; text: string }> }).options.filter((o) => bad.includes(o.id)).map((o) => `"${o.text}"`).join(", ");
+      return { ok: false, issues: [{ code: "OPTION_ALSO_FITS", path: "", message: `The wrong option ${texts} also fits the gap. Add a clause that excludes it, or replace it with an option that is clearly wrong here (another word class or a different meaning).` }] };
+    };
+    const buildVocabulary = (raw: unknown, item: QueuedItem): Built => rejectRepeats(assembleVocabulary(raw, item.plan, exerciseIdFor(payload.batchId, item.ordinal), model, skills, version, this.synonymsFor(item.plan.vocabulary?.lemma)), item);
+    const build = (raw: unknown, item: QueuedItem): Built => vocabulary ? buildVocabulary(raw, item) : rejectRepeats(assembleExercise(raw, item.plan, { exerciseId: exerciseIdFor(payload.batchId, item.ordinal), model, promptVersion: version!, taxonomySkillIds: skills }), item);
 
     const parse = (text: string): { ok: true; list: unknown[] } | { ok: false; issues: ValidationIssue[] } => {
       let v: unknown;
@@ -285,7 +324,7 @@ export class GenerationJobRunner implements JobRunner<GenerationPayload | Though
         { role: "user", content: user },
       ],
       format: vocabulary ? vocabularyFormat(items.length) : draftFormat(first.type as ExerciseType, items.length, version ?? "", first.variant),
-      options: { num_ctx: GENERATION_PARAMS.numCtx, num_predict: GENERATION_PARAMS.numPredict, temperature: GENERATION_PARAMS.temperature, seed: GENERATION_PARAMS.seed },
+      options: { num_ctx: GENERATION_PARAMS.numCtx, num_predict: GENERATION_PARAMS.numPredict, temperature: v7 ? VOCABULARY_TEMPERATURE : GENERATION_PARAMS.temperature, seed: GENERATION_PARAMS.seed },
       validate,
       signal: ctx.signal,
       sleep: this.o.sleep,
@@ -305,19 +344,22 @@ export class GenerationJobRunner implements JobRunner<GenerationPayload | Though
       proposal: parsed.ok && !ambiguousCount ? parsed.list[i] : undefined,
       built: parsed.ok && !ambiguousCount && i < parsed.list.length ? build(parsed.list[i], item) : { ok: false, issues: [{ code: parsed.ok ? "MISSING_OUTPUT" : parsed.issues[0]!.code, path: "", message: parsed.ok ? "the model returned fewer exercises than requested; ordinal mapping is ambiguous" : parsed.issues[0]!.message }] },
     }));
+    if (v7) for (const candidate of proposals) candidate.built = await fitIssue(candidate.built, candidate.item);
     // Retry only failed ordinals individually. A short unit response cannot be mapped safely;
     // single-item requests recover it without guessing or overwriting valid siblings.
     let individualCalls = 0;
     if (targetedRetry) for (const candidate of proposals) {
       if (candidate.built.ok) continue;
       const item = candidate.item;
-      const retryUser = vocabulary ? JSON.stringify({ batch_id: payload.batchId, items: [withAvoid(item.plan)], count: 1 }) : buildGenerationUserV4(payload.batchId, [item.plan]);
+      const retryUser = vocabulary ? JSON.stringify({ batch_id: payload.batchId, items: [ideas(withAvoid(item.plan))], count: 1 }) : buildGenerationUserV4(payload.batchId, [item.plan]);
+      // up to RETRY_ATTEMPTS single-item attempts, each told why the previous one failed
+      for (let attempt = 1; attempt <= RETRY_ATTEMPTS && !candidate.built.ok; attempt++) {
       const failure = candidate.built.issues.map(i => `${i.code}: ${i.message}`).join("; ");
       const retry = await runStructured<unknown>({
         client: this.o.chat, model: m.tag,
         messages: [{ role: "system", content: system }, { role: "user", content: retryUser }, { role: "user", content: `Previous validation failed: ${failure}. Generate one corrected draft for this item.` }],
         format: vocabulary ? vocabularyFormat(1) : draftFormat(item.plan.type as ExerciseType, 1, version ?? "", item.plan.variant),
-        options: { num_ctx: GENERATION_PARAMS.numCtx, num_predict: GENERATION_PARAMS.numPredict, temperature: GENERATION_PARAMS.temperature, seed: GENERATION_PARAMS.seed + 1 + item.ordinal },
+        options: { num_ctx: GENERATION_PARAMS.numCtx, num_predict: GENERATION_PARAMS.numPredict, temperature: v7 ? VOCABULARY_TEMPERATURE : GENERATION_PARAMS.temperature, seed: GENERATION_PARAMS.seed + attempt + item.ordinal * 7 },
         validate: text => {
           try {
             const drafts = (JSON.parse(text) as { drafts?: unknown }).drafts;
@@ -328,7 +370,8 @@ export class GenerationJobRunner implements JobRunner<GenerationPayload | Though
         }, signal: ctx.signal, sleep: this.o.sleep,
       });
       individualCalls += retry.usage.calls;
-      if (retry.ok) { candidate.proposal = retry.value; candidate.built = build(retry.value, item); }
+      if (retry.ok) { candidate.proposal = retry.value; candidate.built = await fitIssue(build(retry.value, item), item); }
+      }
     }
     const modelVersionId = this.modelVersionId;
     const usage = { calls: result.usage.calls + individualCalls, individualCalls, repaired: result.usage.repaired, transportRetries: result.usage.transportRetries };
@@ -340,12 +383,216 @@ export class GenerationJobRunner implements JobRunner<GenerationPayload | Though
     };
   }
 
+  /** synonyms the lexicon lists for a saved word (draft reference facts); empty when there are none */
+  private synonymsFor(lemma: string | undefined): string[] {
+    if (!lemma) return [];
+    const rows = this.o.db.prepare("SELECT l.synonyms_json AS s FROM vocabulary_lexicon l JOIN vocabulary_entries e ON e.id = l.entry_id WHERE e.lemma = ? COLLATE NOCASE").all(lemma) as Array<{ s: string }>;
+    return rows.flatMap(r => { try { return JSON.parse(r.s) as string[]; } catch { return []; } });
+  }
+
+  /**
+   * Everything the program knows about one planned item, for an agent that writes the sentence itself: topic ideas, the word's meaning and synonyms,
+   * sentences to avoid, an expression to weave in, and wrong-option candidates (studied words of the same part of speech, lookalikes from the 20k list).
+   */
+  async authoringContext(plan: ItemPlan): Promise<Record<string, unknown>> {
+    const lemma = plan.vocabulary!.lemma;
+    const pos = (this.o.db.prepare("SELECT (SELECT r.part_of_speech FROM vocabulary_revisions r WHERE r.entry_id = e.id ORDER BY r.revision DESC LIMIT 1) AS pos FROM vocabulary_entries e WHERE e.lemma = ? COLLATE NOCASE").get(lemma) as { pos: string | null } | undefined)?.pos ?? null;
+    const first = plan.topic === "technology" ? "software development or other IT work" : plan.topic;
+    return {
+      topic_ideas: [first, pickVocabularyTopic(plan.ordinal + 57, 1), pickVocabularyTopic(plan.ordinal + 113, 2)],
+      target_level: plan.level ?? "B2",
+      ...this.meaningHint(plan),
+      avoid_sentences: this.avoidSentences(plan),
+      ...this.expressionHint(plan),
+      distractor_candidates: {
+        part_of_speech: pos,
+        studied_words: this.distractorPool(lemma, plan.ordinal).slice(0, 6),
+        lookalikes: pos && pos !== "unknown" ? await this.lookalikes(lemma, pos, plan.ordinal) : [],
+      },
+    };
+  }
+
+  /** synonyms the lexicon lists for a word: the program rejects them as wrong options */
+  synonymsOf(lemma: string): string[] {
+    return this.synonymsFor(lemma);
+  }
+
+  /** the sense to illustrate and the words that must not be wrong options (the lexicon's own facts about the saved word) */
+  private meaningHint(plan: ItemPlan): { definition_ru?: string; synonyms_not_to_use_as_distractors?: string[] } {
+    const lemma = plan.vocabulary?.lemma;
+    if (!lemma) return {};
+    const row = this.o.db.prepare("SELECT l.definition_ru AS d FROM vocabulary_lexicon l JOIN vocabulary_entries e ON e.id = l.entry_id WHERE e.lemma = ? COLLATE NOCASE ORDER BY l.created_at DESC, l.rowid DESC LIMIT 1").get(lemma) as { d: string } | undefined;
+    const synonyms = this.synonymsFor(lemma);
+    return { ...(row?.d ? { definition_ru: row.d } : {}), ...(synonyms.length ? { synonyms_not_to_use_as_distractors: synonyms } : {}) };
+  }
+
+  /** the local model's verdict for each wrong option: true = it also fits the gap. null when the call failed or the answer is unreadable. */
+  private async fitVerdicts(sentence: string, key: string, wrong: Array<{ id: string; text: string }>, model: string, signal?: AbortSignal): Promise<Map<string, boolean> | null> {
+    if (wrong.length === 0) return new Map();
+    try {
+      const r = await this.o.chat.chat({
+        model,
+        messages: [
+          { role: "system", content: OPTION_CHECK_SYSTEM },
+          { role: "user", content: JSON.stringify({ sentence, key, wrong_options: wrong }) },
+        ],
+        format: { type: "object", required: ["options"], properties: { options: { type: "array", items: { type: "object", required: ["id", "fits"], properties: { id: { type: "string" }, fits: { type: "boolean" } } } } } },
+        options: { num_ctx: GENERATION_PARAMS.numCtx, num_predict: 40 + 30 * wrong.length, temperature: 0, seed: GENERATION_PARAMS.seed },
+        signal,
+      });
+      const parsed = JSON.parse(r.text) as { options?: Array<{ id?: string; fits?: boolean }> };
+      const ids = new Set(wrong.map((o) => o.id));
+      const out = new Map<string, boolean>();
+      for (const o of parsed.options ?? []) if (typeof o.id === "string" && ids.has(o.id) && typeof o.fits === "boolean") out.set(o.id, o.fits);
+      return out;
+    } catch (e) {
+      if (signal?.aborted || (e as Error).name === "AbortError") throw e;
+      return null;
+    }
+  }
+
+  /**
+   * Local-model check of the wrong options of one multiple-choice draft: the ids of the wrong options that would also fit the gap.
+   * It can only reject a draft, never approve one; a failed call or an unreadable answer returns nothing (the draft is kept for the reviewer).
+   */
+  private async optionsThatFit(exercise: Record<string, unknown>, model: string, signal?: AbortSignal): Promise<string[]> {
+    const payload = exercise.payload as { options?: Array<{ id: string; text: string }>; accepted_option_ids?: string[] } | undefined;
+    const keyId = payload?.accepted_option_ids?.[0];
+    const options = payload?.options;
+    if (!options || !keyId || options.length < 2) return [];
+    const verdicts = await this.fitVerdicts(String(exercise.prompt_en), options.find((o) => o.id === keyId)?.text ?? "", options.filter((o) => o.id !== keyId), model, signal);
+    return verdicts ? [...verdicts].filter(([, fits]) => fits).map(([id]) => id) : [];
+  }
+
+  /**
+   * Words of the learner's own dictionary that are the same part of speech and shape as the target: wrong options that the program, not the model, chooses.
+   * Part of speech comes from the latest saved revision of each word; words without one are skipped.
+   */
+  private distractorPool(lemma: string, ordinal: number): string[] {
+    const rows = this.o.db.prepare(
+      "SELECT e.lemma AS lemma, (SELECT r.part_of_speech FROM vocabulary_revisions r WHERE r.entry_id = e.id ORDER BY r.revision DESC LIMIT 1) AS pos FROM vocabulary_entries e",
+    ).all() as Array<{ lemma: string; pos: string | null }>;
+    const mine = rows.find((r) => r.lemma.toLowerCase() === lemma.toLowerCase());
+    if (!mine?.pos || mine.pos === "unknown") return [];
+    const shape = (w: string): number => Math.min(2, w.trim().split(/\s+/).length);
+    const synonyms = new Set(this.synonymsFor(lemma).map((x) => x.toLowerCase()));
+    const pool = rows.filter((r) => r.pos === mine.pos && r.lemma.toLowerCase() !== lemma.toLowerCase() && shape(r.lemma) === shape(lemma) && !synonyms.has(r.lemma.toLowerCase())).map((r) => r.lemma);
+    // a stable shuffle per item: the same draft always meets the same candidates
+    let h = (ordinal * 2654435761) >>> 0;
+    return pool.map((w) => { h = (h * 1103515245 + 12345) >>> 0; return { w, k: h }; }).sort((x, y) => x.k - y.k).map((x) => x.w).slice(0, 8);
+  }
+
+  /**
+   * Common words of the learner's 20k list that look like the target (same part of speech, same first letter, similar length, similar frequency):
+   * wrong options that do not give the answer away by being the only unfamiliar word. Empty without the list.
+   */
+  private async lookalikes(lemma: string, pos: string, ordinal: number): Promise<string[]> {
+    const all = await this.o.lexicon?.all();
+    if (!all || all.size === 0 || /\s/.test(lemma)) return [];
+    const target = all.get(lemma.toLowerCase());
+    const want = pos.toLowerCase();
+    const synonyms = new Set([...(target?.synonyms ?? []), ...this.synonymsFor(lemma)].map((x) => x.toLowerCase()));
+    const freq = target?.frequency ?? null;
+    const scored: Array<{ w: string; d: number }> = [];
+    for (const [w, h] of all) {
+      if (w === lemma.toLowerCase() || synonyms.has(w) || !/^[a-z]+$/.test(w)) continue;
+      if (!h.partOfSpeech.toLowerCase().includes(want) || w[0] !== lemma[0]!.toLowerCase() || Math.abs(w.length - lemma.length) > 2) continue;
+      if (h.frequency !== null && h.frequency < 1) continue;
+      scored.push({ w, d: freq && h.frequency ? Math.abs(Math.log10(h.frequency + 1) - Math.log10(freq + 1)) : 1 });
+    }
+    scored.sort((a, b) => a.d - b.d || (a.w < b.w ? -1 : 1));
+    const near = scored.slice(0, 12).map((x) => x.w);
+    // a stable pick per item from the closest dozen
+    return near.map((w, i) => ({ w, k: ((ordinal + 1) * 2654435761 + i * 40503) >>> 0 })).sort((a, b) => a.k - b.k).slice(0, 4).map((x) => x.w);
+  }
+
+  /**
+   * Replace the model's wrong options with checked ones. v7: two dictionary words of the same part of speech. v8: a mix of the model's own options,
+   * up to four studied words and up to four lookalikes from the 20k list, all read by the local model in ONE call; two that do not fit are taken,
+   * at most one of them a studied word, so the familiar words do not reveal the unfamiliar answer. Only for a target in its base form.
+   */
+  private async replaceDistractors(built: Built, plan: ItemPlan, model: string, signal: AbortSignal | undefined, mix: boolean): Promise<Built | null> {
+    if (!built.ok) return null;
+    const e = built.exercise as { prompt_en: string; payload: { options?: Array<{ id: string; text: string }>; accepted_option_ids?: string[] }; vocabulary: { target: { lemma: string; surfaceForm: string; partOfSpeech?: string }; options?: Array<{ id: string; text: string; rationaleRu: string }>; acceptedOptionId?: string } };
+    const options = e.payload.options, keyId = e.payload.accepted_option_ids?.[0];
+    if (!options || !keyId || !e.vocabulary.options) return null;
+    if (e.vocabulary.target.surfaceForm.toLowerCase() !== e.vocabulary.target.lemma.toLowerCase()) return null;
+    const keyOpt = e.vocabulary.options.find((o) => o.id === keyId);
+    if (!keyOpt) return null;
+    type Cand = { id: string; text: string; from: "model" | "studied" | "lookalike"; rationaleRu: string };
+    const seen = new Set([keyOpt.text.toLowerCase()]);
+    const cands: Cand[] = [];
+    const push = (text: string, from: Cand["from"], rationaleRu: string): void => {
+      if (seen.has(text.toLowerCase())) return;
+      seen.add(text.toLowerCase());
+      cands.push({ id: `c${cands.length}`, text, from, rationaleRu });
+    };
+    const generic = (t: string): string => `«${t}» не подходит по смыслу в этом предложении.`;
+    if (mix) for (const o of e.vocabulary.options) if (o.id !== keyId) push(o.text, "model", o.rationaleRu);
+    for (const w of this.distractorPool(e.vocabulary.target.lemma, plan.ordinal).slice(0, mix ? 4 : 8)) push(w, "studied", generic(w));
+    if (mix) for (const w of await this.lookalikes(e.vocabulary.target.lemma, e.vocabulary.target.partOfSpeech ?? "", plan.ordinal)) push(w, "lookalike", generic(w));
+    if (cands.filter((c) => c.from !== "model").length === 0) return null;
+    const verdicts = await this.fitVerdicts(e.prompt_en, keyOpt.text, cands.map(({ id, text }) => ({ id, text })), model, signal);
+    if (!verdicts) return null;
+    const safe = cands.filter((c) => verdicts.get(c.id) === false);
+    const head = e.prompt_en.split("___")[0] ?? "";
+    // preference: one unfamiliar word (lookalike or the model's own) first, then anything else, never two studied words in v8
+    const rank = (c: Cand): number => (!mix ? 0 : c.from === "lookalike" ? 0 : c.from === "model" ? 1 : 2);
+    const ordered = [...safe].sort((a, b) => rank(a) - rank(b) || (((plan.ordinal * 31 + Number(a.id.slice(1))) % 7) - ((plan.ordinal * 31 + Number(b.id.slice(1))) % 7)));
+    let chosen: Cand[] | null = null;
+    for (let i = 0; i < ordered.length && !chosen; i++) {
+      for (let j = i + 1; j < ordered.length && !chosen; j++) {
+        const pair = [ordered[i]!, ordered[j]!];
+        if (mix && pair.every((c) => c.from === "studied")) continue;
+        if (!articleMismatch(head, [keyOpt.text, ...pair.map((c) => c.text)])) chosen = pair;
+      }
+    }
+    if (!chosen) return null;
+    const list: Array<{ text: string; rationaleRu: string; key: boolean }> = chosen.map((c) => ({ text: c.text, rationaleRu: c.rationaleRu, key: false }));
+    list.splice(plan.ordinal % 3, 0, { text: keyOpt.text, rationaleRu: keyOpt.rationaleRu, key: true });
+    const withIds = list.map((o, i) => ({ id: "abc"[i]!, ...o }));
+    const newKey = withIds.find((o) => o.key)!.id;
+    const exercise = JSON.parse(JSON.stringify(built.exercise)) as Record<string, unknown> & typeof e;
+    exercise.payload = { ...exercise.payload, options: withIds.map(({ id, text }) => ({ id, text })), accepted_option_ids: [newKey] };
+    exercise.vocabulary = { ...exercise.vocabulary, options: withIds.map(({ id, text, rationaleRu }) => ({ id, text, rationaleRu })), acceptedOptionId: newKey };
+    return { ok: true, exercise };
+  }
+
+  /**
+   * v8 recall check: other English words the local model says would fit the gap. Only rivals with the answer's first letter and length count,
+   * because the cue gives both. A failed call returns nothing (the draft goes on; the reviewer still reads it).
+   */
+  private async recallRivals(sentence: string, answer: string, accepted: readonly string[], model: string, signal?: AbortSignal): Promise<string[]> {
+    try {
+      const r = await this.o.chat.chat({
+        model,
+        messages: [
+          { role: "system", content: RIVALS_SYSTEM },
+          { role: "user", content: JSON.stringify({ sentence, answer }) },
+        ],
+        format: { type: "object", required: ["alternatives"], properties: { alternatives: { type: "array", items: { type: "string" } } } },
+        options: { num_ctx: GENERATION_PARAMS.numCtx, num_predict: 120, temperature: 0, seed: GENERATION_PARAMS.seed },
+        signal,
+      });
+      const list = (JSON.parse(r.text) as { alternatives?: unknown }).alternatives;
+      if (!Array.isArray(list)) return [];
+      const ok = new Set(accepted.map((a) => a.trim().toLowerCase()));
+      const shape = (w: string): string => w.trim().toLowerCase().split(/\s+/).map((p) => `${p[0]}${p.length}`).join(" ");
+      const want = shape(answer);
+      return [...new Set(list.filter((x): x is string => typeof x === "string").map((x) => x.trim().toLowerCase()))].filter((x) => x && !ok.has(x) && shape(x) === want).slice(0, 3);
+    } catch (err) {
+      if (signal?.aborted || (err as Error).name === "AbortError") throw err;
+      return [];
+    }
+  }
+
   /** a saved expression that contains the item's word (one of them, by ordinal), for the model to use when it fits; nothing when there is none */
   private expressionHint(plan: ItemPlan): { expression?: string } {
     const lemma = plan.vocabulary?.lemma;
     if (!lemma) return {};
     const phrases = expressionsForForms(this.o.db, matchForms(lemma, []));
-    return phrases.length > 0 ? { expression: phrases[plan.ordinal % phrases.length]! } : {};
+    // only every third item carries the phrase, so expressions come back now and then and the sentences stay varied
+    return phrases.length > 0 && plan.ordinal % 3 === 0 ? { expression: phrases[Math.floor(plan.ordinal / 3) % phrases.length]! } : {};
   }
 
   /** Up to 5 existing bank sentences with the item's word, evenly sampled, so a local model sees what to avoid without a long list. */

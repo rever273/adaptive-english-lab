@@ -61,6 +61,12 @@ describe("sentence units per format (spec/04 + spec/05 invariant 7)", () => {
     return extractUnits({ type: e.type, prompt_en: e.prompt_en, payload: e.payload });
   };
 
+  it("a gap task's three-word options (phrasal verbs) are not sentence units, so the same word can be practised again", () => {
+    const units = (key: string) => extractUnits({ type: "choose_missing_fragment", prompt_en: "I can barely ___ her when we jog.", payload: { options: [{ id: "a", text: key }, { id: "b", text: "iron out" }, { id: "c", text: "stay away from" }], accepted_option_ids: ["a"] } });
+    expect(units("keep up with").filter((x) => x.role === "option")).toEqual([]);
+    expect(units("keep up with").map((x) => x.role)).toEqual(["prompt", "answer"]);
+  });
+
   it("blank tasks: the whole prompt with a BLANK marker plus the sentence restored from the accepted fragment; options are fragments", () => {
     const u = byRole("choose_form");
     expect(u.map((x) => [x.role, x.text])).toEqual([

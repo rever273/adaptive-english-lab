@@ -259,6 +259,8 @@ export function assembleExercise(raw: unknown, plan: ItemPlan, ctx: { exerciseId
   if (typeof d.explanation_ru === "string" && d.explanation_ru.trim().length < MIN_EXPLANATION) issues.push(issue("EXPLANATION_TOO_SHORT", "/explanation_ru", "explanation is too short to teach anything"));
 
   let promptEn = "";
+  /** the prompt is one fixed instruction shared by every item of the format, so it cannot tell two items apart */
+  let genericPrompt = false;
   let payload: Record<string, unknown> = {};
   switch (type) {
     case "choose_form":
@@ -305,7 +307,7 @@ export function assembleExercise(raw: unknown, plan: ItemPlan, ctx: { exerciseId
           if (seg !== "" || fix !== "") issues.push(issue("EXPECTED_NO_MISTAKE", "/error_words", "this item must be a fully correct sentence: leave error_words and fix_words empty"));
           else payload = { sentence, segments, accepted_segment_ids: [], no_mistake: true, corrections: [], optional_correction: false };
         }
-        promptEn = "Find the word that is wrong, or choose No mistake.";
+        promptEn = "Find the word that is wrong, or choose No mistake."; genericPrompt = true;
         break;
       }
       const sentence = String(d.sentence ?? "").trim();
@@ -334,7 +336,7 @@ export function assembleExercise(raw: unknown, plan: ItemPlan, ctx: { exerciseId
         const chunks = [w.slice(0, a).join(" ") + " ", w.slice(a, b).join(" ") + " ", w.slice(b).join(" ")];
         payload = { sentence, segments: chunks.map((text, i) => ({ id: `s${i + 1}`, text })), accepted_segment_ids: [], no_mistake: true, corrections: [], optional_correction: false };
       }
-      promptEn = "Find the part of the sentence that contains a mistake, or choose No mistake.";
+      promptEn = "Find the part of the sentence that contains a mistake, or choose No mistake."; genericPrompt = true;
       break;
     }
     case "guided_short_answer": {
@@ -375,7 +377,7 @@ export function assembleExercise(raw: unknown, plan: ItemPlan, ctx: { exerciseId
       checkRussian("cue_ru", d.cue_ru, issues);
       for (const [i, a] of answers.entries()) checkEnglish(`accepted_answers/${i}`, a, issues);
       if (new Set(answers.map(norm)).size !== answers.length) issues.push(issue("ANSWERS_NOT_DISTINCT", "/accepted_answers", "accepted answers must differ"));
-      promptEn = "Translate the idea into natural English.";
+      promptEn = "Translate the idea into natural English."; genericPrompt = true;
       if (wordHint) {
         const wh = String(d.word_hint_ru ?? "");
         checkRussian("word_hint_ru", wh, issues);
@@ -426,7 +428,7 @@ export function assembleExercise(raw: unknown, plan: ItemPlan, ctx: { exerciseId
         if (q.options.some((o) => CYRILLIC.test(o))) issues.push(issue("NOT_ENGLISH", `/questions/${i}/options`, "options must be English"));
         if (!Number.isInteger(q.correct_index) || q.correct_index < 0 || q.correct_index >= q.options.length) issues.push(issue("KEY_OUT_OF_RANGE", `/questions/${i}/correct_index`, "correct_index must point at one of the options"));
       });
-      promptEn = "Read the text and answer the questions.";
+      promptEn = "Read the text and answer the questions."; genericPrompt = true;
       payload = {
         paragraphs,
         questions: questions.map((q, i) => ({ id: `q${i + 1}`, prompt: q.prompt, options: q.options.map((text, k) => ({ id: ids[k]!, text })), accepted_option_ids: [ids[q.correct_index] ?? "a"], target_skill: plan.target_skill })),
@@ -436,7 +438,7 @@ export function assembleExercise(raw: unknown, plan: ItemPlan, ctx: { exerciseId
   }
   if (issues.length > 0) return { ok: false, issues };
 
-  const fingerprint = createHash("sha256").update(type === ASSEMBLE_TYPE ? norm(JSON.stringify((payload as { accepted_answers: string[] }).accepted_answers)) : norm(promptEn || JSON.stringify(payload))).digest("hex").slice(0, 10);
+  const fingerprint = createHash("sha256").update(type === ASSEMBLE_TYPE ? norm(JSON.stringify((payload as { accepted_answers: string[] }).accepted_answers)) : norm(promptEn && !genericPrompt ? promptEn : JSON.stringify(payload))).digest("hex").slice(0, 10);
   const exercise: Record<string, unknown> = {
     schema_version: "exercise-v1",
     id: ctx.exerciseId,

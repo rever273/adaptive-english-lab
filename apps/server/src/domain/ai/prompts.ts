@@ -110,7 +110,7 @@ export const NIMBLE_TRIAGE_V2 = {
 } as const;
 
 import { GENERATION_SYSTEM_V2, GENERATION_SYSTEM_V3, GENERATION_SYSTEM_V4, GENERATION_SYSTEM_V5, GENERATION_SYSTEM_V6, GENERATION_SYSTEM_V7, GENERATION_SYSTEM_V8, GENERATION_SYSTEM_V9 } from "../content/batches/draftFormats.js";
-import { VOCABULARY_SYSTEM, VOCABULARY_SYSTEM_V2 as VOCABULARY_GENERATION_SYSTEM_V2, VOCABULARY_SYSTEM_V3 as VOCABULARY_GENERATION_SYSTEM_V3, VOCABULARY_SYSTEM_V4 as VOCABULARY_GENERATION_SYSTEM_V4, VOCABULARY_SYSTEM_V5 as VOCABULARY_GENERATION_SYSTEM_V5 } from "../content/batches/vocabularyDrafts.js";
+import { VOCABULARY_SYSTEM, VOCABULARY_SYSTEM_V2 as VOCABULARY_GENERATION_SYSTEM_V2, VOCABULARY_SYSTEM_V3 as VOCABULARY_GENERATION_SYSTEM_V3, VOCABULARY_SYSTEM_V4 as VOCABULARY_GENERATION_SYSTEM_V4, VOCABULARY_SYSTEM_V5 as VOCABULARY_GENERATION_SYSTEM_V5, VOCABULARY_SYSTEM_V6 as VOCABULARY_GENERATION_SYSTEM_V6, VOCABULARY_SYSTEM_V7 as VOCABULARY_GENERATION_SYSTEM_V7, VOCABULARY_SYSTEM_V8 as VOCABULARY_GENERATION_SYSTEM_V8 } from "../content/batches/vocabularyDrafts.js";
 
 export interface PromptDef {
   id: string;
@@ -160,6 +160,9 @@ export const PROMPTS: Record<string, PromptDef> = {
   "vocabulary-generation-v3": { id: "vocabulary-generation-v3", purpose: "generation", template: VOCABULARY_GENERATION_SYSTEM_V3 },
   "vocabulary-generation-v4": { id: "vocabulary-generation-v4", purpose: "generation", template: VOCABULARY_GENERATION_SYSTEM_V4 },
   "vocabulary-generation-v5": { id: "vocabulary-generation-v5", purpose: "generation", template: VOCABULARY_GENERATION_SYSTEM_V5 },
+  "vocabulary-generation-v6": { id: "vocabulary-generation-v6", purpose: "generation", template: VOCABULARY_GENERATION_SYSTEM_V6 },
+  "vocabulary-generation-v7": { id: "vocabulary-generation-v7", purpose: "generation", template: VOCABULARY_GENERATION_SYSTEM_V7 },
+  "vocabulary-generation-v8": { id: "vocabulary-generation-v8", purpose: "generation", template: VOCABULARY_GENERATION_SYSTEM_V8 },
   "thought-interpret-v1": { id: "thought-interpret-v1", purpose: "generation", template: THOUGHT_SYSTEM_V1 },
   "expression-v1": { id: "expression-v1", purpose: "generation", template: EXPRESSION_SYSTEM_V1 },
   "dictation-v1": { id: "dictation-v1", purpose: "generation", template: DICTATION_SYSTEM_V1 },

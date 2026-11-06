@@ -16,6 +16,7 @@ import type { GpuScheduler } from "./queue/scheduler.js";
 import { registerQueueRoutes } from "./routes/queue.js";
 import { ClosedFormAssessor } from "./domain/content/grader.js";
 import type { DiscoveryConfig } from "@english-lab/learning";
+import { registerJourneyRoutes } from "./routes/journey.js";
 import { registerAnalyticsRoutes } from "./routes/analytics.js";
 import { registerReportRoutes } from "./routes/reports.js";
 import { registerBackupRoutes } from "./routes/backups.js";
@@ -118,6 +119,7 @@ export async function buildApp(deps: AppDeps): Promise<FastifyInstance> {
     ...deps.attempts,
   });
   registerAnalyticsRoutes(app, db, deps.attempts?.now ?? (() => new Date()));
+  registerJourneyRoutes(app, db);
   registerVocabularyRoutes(app, db, { now: deps.attempts?.now ?? (() => new Date()), newId: deps.attempts?.newId });
   registerVocabularyExpressionRoutes(app, db, { now: deps.attempts?.now ?? (() => new Date()), newId: deps.attempts?.newId }, { onQueued: () => deps.scheduler?.kick() });
   registerBackupRoutes(app, db, config);

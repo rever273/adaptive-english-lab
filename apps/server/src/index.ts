@@ -101,15 +101,17 @@ async function main(): Promise<void> {
     runtimeVersion: async (): Promise<string> => (await ollama.json<{ version: string }>("/api/version", { method: "GET", timeoutMs: 5000 })).version,
   };
   const analysis = new AnalysisJobRunner({ db, chat: new OllamaChatClient(ollama), ...analysisOpts, deps: { now: () => new Date(), newId: randomUUID } });
+  const lexicon = new LexiconHints(config.lexiconCsv);
   const generation = new GenerationJobRunner({
     db,
+    lexicon,
     chat: new OllamaChatClient(ollama),
     installedDigest: (tag) => analysisOpts.installedDigest(tag),
     runtimeVersion: () => analysisOpts.runtimeVersion(),
     deps: { now: () => new Date(), newId: randomUUID },
     dictation,
   });
-  const vocabulary = new VocabularyJobRunner({ db, hints: new LexiconHints(config.lexiconCsv), chat: new OllamaChatClient(ollama), installedDigest: (tag) => analysisOpts.installedDigest(tag), runtimeVersion: () => analysisOpts.runtimeVersion(), deps: { now: () => new Date(), newId: randomUUID } });
+  const vocabulary = new VocabularyJobRunner({ db, hints: lexicon, chat: new OllamaChatClient(ollama), installedDigest: (tag) => analysisOpts.installedDigest(tag), runtimeVersion: () => analysisOpts.runtimeVersion(), deps: { now: () => new Date(), newId: randomUUID } });
   const tutor = new TutorJobRunner({ db, chat: new OllamaChatClient(ollama), installedDigest: (tag) => analysisOpts.installedDigest(tag), runtimeVersion: () => analysisOpts.runtimeVersion(), deps: { now: () => new Date(), newId: randomUUID } });
   let analysisReady = false;
   let warmed = false;

@@ -61,6 +61,13 @@ export function PromptView({ reveal, busy, hint, voice, onSubmit, onIdk, onSkip,
   const [text, setText] = useState("");
   const [noMistake, setNoMistake] = useState(false);
   const [draftId, setDraftId] = useState<string | null>(null);
+  // vocabulary recall can be built from letter tiles; every second task starts that way, and the learner can switch either way
+  const build = reveal.prompt.kind === "short" ? reveal.prompt.build : undefined;
+  const [tilesOn, setTilesOn] = useState(() => !!build && [...reveal.slotId].reduce((n, ch) => n + ch.charCodeAt(0), 0) % 2 === 0);
+  const [placed, setPlaced] = useState<number[]>([]);
+  const useTiles = vocabulary && !!build && tilesOn;
+  const tileCount = build ? build.pattern.reduce((a, b) => a + b, 0) : 0;
+  const built = build ? build.pattern.reduce<{ words: string[]; at: number }>((acc, n) => ({ words: [...acc.words, placed.slice(acc.at, acc.at + n).map((i) => build.tiles[i]).join("")], at: acc.at + n }), { words: [], at: 0 }).words.filter(Boolean).join(" ") : "";
   const groupId = useId();
   // a recording made on THIS task fills the text box once; a draft left over from the previous task never does
   const vs = voice?.state;
@@ -80,11 +87,11 @@ export function PromptView({ reveal, busy, hint, voice, onSubmit, onIdk, onSkip,
   // blocks: a block joins the end of the sentence; a block already placed leaves it (the others keep their order)
   const pickBlock = (id: string) => setSelected((cur) => (cur.includes(id) ? cur.filter((x) => x !== id) : [...cur, id]));
   const toggle = (id: string, multiple: boolean) => setSelected((cur) => (multiple ? (cur.includes(id) ? cur.filter((x) => x !== id) : [...cur, id]) : [id]));
-  const canSubmit = p.kind === "short" ? text.trim().length > 0 : p.kind === "blocks" ? selected.length >= 2 : p.kind === "segments" ? noMistake || selected.length > 0 : selected.length > 0;
+  const canSubmit = p.kind === "short" ? (useTiles ? placed.length === tileCount : text.trim().length > 0) : p.kind === "blocks" ? selected.length >= 2 : p.kind === "segments" ? noMistake || selected.length > 0 : selected.length > 0;
 
   function submit() {
     if (!canSubmit || busy) return;
-    if (p.kind === "short") onSubmit(text, draftId ?? undefined);
+    if (p.kind === "short") onSubmit(useTiles ? built : text, useTiles ? undefined : draftId ?? undefined);
     else if (p.kind === "segments") onSubmit(noMistake ? [p.noMistakeId] : selected);
     else onSubmit(selected);
   }
@@ -103,6 +110,11 @@ export function PromptView({ reveal, busy, hint, voice, onSubmit, onIdk, onSkip,
         return;
       }
       if (e.altKey) return;
+      if (useTiles && e.key === "Backspace" && !typing) {
+        e.preventDefault();
+        setPlaced((cur) => cur.slice(0, -1));
+        return;
+      }
       if (typing) {
         if (e.key === "Enter" && !e.shiftKey) {
           e.preventDefault();
@@ -220,12 +232,40 @@ export function PromptView({ reveal, busy, hint, voice, onSubmit, onIdk, onSkip,
         </fieldset>
       )}
 
-      {p.kind === "short" && vocabulary && (
+      {p.kind === "short" && vocabulary && build && useTiles && (
+        <div className="short gap-fill tile-build" data-testid="tile-build">
+          <p className="prompt" data-testid="prompt" data-word-area>
+            {p.prompt_en.split("___").map((part, i, all) => <span key={i}>{part}{i < all.length - 1 && <em lang="ru" className="tile-meaning">{build.meaning_ru}</em>}</span>)}
+          </p>
+          {translation && <p lang="ru" className="vocab-translation" role="status">{translation}</p>}
+          <p lang="ru" className="ru cue small">{p.cue_ru}</p>
+          <div className="tile-slots" aria-live="polite" aria-label="Your word">
+            {build.pattern.map((n, w) => {
+              const from = build.pattern.slice(0, w).reduce((a, b) => a + b, 0);
+              return <span key={w} className="tile-word">{Array.from({ length: n }, (_, k) => {
+                const at = placed[from + k];
+                return at === undefined ? <span key={k} className="tile-slot" /> : <button key={k} type="button" className="tile-slot tile-slot-filled" disabled={locked || from + k !== placed.length - 1} onClick={() => setPlaced((cur) => cur.slice(0, -1))} aria-label={`Remove letter ${build.tiles[at]}`}>{build.tiles[at]}</button>;
+              })}</span>;
+            })}
+          </div>
+          <div className="tile-pool" role="group" aria-label="Letters">
+            {build.tiles.map((letter, i) => <button key={i} type="button" className="tile" disabled={locked || busy || placed.includes(i) || placed.length >= tileCount} onClick={() => setPlaced((cur) => [...cur, i])}>{letter}</button>)}
+          </div>
+          {!locked && <p className="small muted">
+            <button type="button" className="link" disabled={placed.length === 0} onClick={() => setPlaced([])}>Clear</button>{" · "}
+            <button type="button" className="link" onClick={() => { setPlaced([]); setTilesOn(false); }}>Type it instead</button>
+            {" · "}Two letters are extra. A wrong word counts as a mistake, like a wrong typed answer.
+          </p>}
+        </div>
+      )}
+
+      {p.kind === "short" && vocabulary && !useTiles && (
         <div className="short gap-fill">
           <p className="prompt" data-testid="prompt" data-word-area>{p.prompt_en}</p>
           {translation && <p lang="ru" className="vocab-translation" role="status">{translation}</p>}
           <p lang="ru" className="ru cue small">{p.cue_ru}</p>
           <label htmlFor={`${groupId}-t`} className="visually-hidden">The missing word</label>
+          {build && !locked && <button type="button" className="link" onClick={() => { setText(""); setTilesOn(true); }}>Build it from letters</button>}
           <input id={`${groupId}-t`} className="gap-input" maxLength={80} value={text} readOnly={locked} onChange={(e) => setText(e.target.value)} placeholder={p.max_words === 1 ? "one word" : `${p.max_words} words`} autoComplete="off" spellCheck={false} data-testid="answer-text" />
         </div>
       )}

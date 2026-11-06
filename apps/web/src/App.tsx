@@ -1,4 +1,7 @@
 import { Suspense, lazy, useEffect, useState } from "react";
+import { JourneyButton } from "./pages/Journey";
+import { dailyOrder } from "./pages/dailyOrder";
+import * as api from "./api";
 import { AiActivity } from "./components/AiActivity";
 import { AiModelNotice } from "./components/AiModelNotice";
 import { XpTracks } from "./components/XpTracks";
@@ -6,6 +9,7 @@ import { WordCatcher } from "./components/WordPopup";
 import { Kbd, useKeys } from "./components/hotkeys";
 import { ContentStockNotice } from "./components/ContentStockNotice";
 
+const DailyPractice = lazy(() => import("./pages/DailyPractice").then((m) => ({ default: m.DailyPractice })));
 const AITasks = lazy(() => import("./pages/AITasks").then((m) => ({ default: m.AITasks })));
 const Analytics = lazy(() => import("./pages/Analytics").then((m) => ({ default: m.Analytics })));
 const ContentStudio = lazy(() => import("./pages/ContentStudio").then((m) => ({ default: m.ContentStudio })));
@@ -16,9 +20,10 @@ const Tutor = lazy(() => import("./pages/Tutor").then((m) => ({ default: m.Tutor
 const Settings = lazy(() => import("./pages/Settings").then((m) => ({ default: m.Settings })));
 const Status = lazy(() => import("./pages/Status").then((m) => ({ default: m.Status })));
 
-type Page = "practice" | "vocabulary" | "typing" | "tutor" | "analytics" | "studio" | "tasks" | "settings";
+type Page = "daily" | "practice" | "vocabulary" | "typing" | "tutor" | "analytics" | "studio" | "tasks" | "settings";
 
-const PAGES: Array<{ id: Page; label: string; icon: string; path: string; group: "tasks" | "tools" }> = [
+const PAGES: Array<{ id: Page; label: string; icon: string; path: string; group: "daily" | "tasks" | "tools" }> = [
+  { id: "daily", label: "Daily Practice", icon: "pi-calendar", path: "/daily", group: "daily" },
   { id: "practice", label: "Practice", icon: "pi-play-circle", path: "/practice", group: "tasks" },
   { id: "vocabulary", label: "Vocabulary", icon: "pi-bookmark", path: "/vocabulary", group: "tasks" },
   { id: "typing", label: "Typing", icon: "pi-bullseye", path: "/typing", group: "tasks" },
@@ -57,12 +62,25 @@ export function App() {
   const serverDown = useServerLink();
   const [page, setPage] = useState<Page>(() => pageAtPath(window.location.pathname));
   // a link from one page to a sub-view of another (Vocabulary -> Content Studio's vocabulary category, a vocabulary summary -> its analytics)
-  const [focus, setFocus] = useState<"grammar" | "vocabulary">("grammar");
-  const go = (p: Page, sub: "grammar" | "vocabulary" = "grammar") => {
+  const [focus, setFocus] = useState<"grammar" | "vocabulary" | "journey">("grammar");
+  const go = (p: Page, sub: "grammar" | "vocabulary" | "journey" = "grammar") => {
     setFocus(sub);
     setPage(p);
     const path = PAGES.find((x) => x.id === p)!.path;
     if (window.location.pathname !== path) window.history.pushState(null, "", path);
+  };
+  const [dailyMode, setDailyMode] = useState<api.JourneyMode | null>(() => { try { return sessionStorage.getItem("el_daily_mode") as api.JourneyMode | null; } catch { return null; } });
+  const [sequential, setSequential] = useState(() => { try { return localStorage.getItem("el_daily_sequence") === "1"; } catch { return false; } });
+  const launchDaily = (mode: api.JourneyMode) => {
+    setDailyMode(mode); try { sessionStorage.setItem("el_daily_mode", mode); } catch { /* storage unavailable */ }
+    go(mode === "grammar" ? "practice" : mode === "vocabulary" ? "vocabulary" : "typing");
+  };
+  const leaveDaily = () => { setDailyMode(null); try { sessionStorage.removeItem("el_daily_mode"); } catch { /* storage unavailable */ } go("daily"); };
+  const dailyDone = async () => {
+    if (sequential && dailyMode) {
+      try { const d = await api.fetchJourney(); const next = dailyOrder(d.today,d.dailyOrder).find(m => m !== dailyMode && d.dailyMinutes[m] > 0 && d.todayMs[m] < d.dailyMinutes[m] * 60000); if (next) { launchDaily(next); return; } } catch { /* return to the plan */ }
+    }
+    leaveDaily();
   };
   // the browser's Back and Forward buttons move between tabs
   useEffect(() => {
@@ -95,10 +113,11 @@ export function App() {
             <i className="pi pi-graduation-cap" aria-hidden="true" /> English Lab
           </h1>
           <XpTracks />
+          <JourneyButton onOpen={() => go("analytics", "journey")} />
         </div>
         <nav aria-label="Main">
           {PAGES.map((p, i) => (
-            <button key={p.id} className={`tab has-kbd${page === p.id ? " tab-on" : ""}${i > 0 && p.group === "tools" && PAGES[i - 1]!.group === "tasks" ? " tab-group-start" : ""}`} aria-current={page === p.id ? "page" : undefined} onClick={() => go(p.id)} title={`Alt+${i + 1}`}>
+            <button key={p.id} className={`tab has-kbd${page === p.id ? " tab-on" : ""}${i > 0 && p.group !== PAGES[i - 1]!.group ? " tab-group-start" : ""}`} aria-current={page === p.id ? "page" : undefined} onClick={() => { setDailyMode(null); try { sessionStorage.removeItem("el_daily_mode"); } catch { /* unavailable */ } go(p.id); }} title={`Alt+${i + 1}`}>
               <Kbd k={String(i + 1)} />
               <i className={`pi ${p.icon}`} aria-hidden="true" />
               {p.label}
@@ -108,18 +127,20 @@ export function App() {
       </header>
       <main className="shell">
         <Suspense fallback={null}>
-        {page === "practice" ? (
-          <Practice onNavigate={(p) => go(p)} />
+        {page === "daily" ? (
+          <DailyPractice onStart={launchDaily} sequential={sequential} onSequential={v => { setSequential(v); try { localStorage.setItem("el_daily_sequence", v ? "1" : "0"); } catch { /* unavailable */ } }} />
+        ) : page === "practice" ? (
+          <Practice dailyStart={dailyMode === "grammar"} onDailyDone={dailyMode === "grammar" ? () => void dailyDone() : undefined} onNavigate={(p) => go(p)} />
         ) : page === "vocabulary" ? (
-          <Vocabulary onNavigate={(p) => go(p, "vocabulary")} />
+          <Vocabulary dailyStart={dailyMode === "vocabulary"} onDailyDone={dailyMode === "vocabulary" ? () => void dailyDone() : undefined} onNavigate={(p) => go(p, "vocabulary")} />
         ) : page === "typing" ? (
-          <Typing onNavigate={(p) => go(p)} />
+          <Typing key={dailyMode ?? "typing"} dailyStart={dailyMode === "words" || dailyMode === "books" || dailyMode === "dictation" ? dailyMode : undefined} onDailyDone={dailyMode === "words" || dailyMode === "books" || dailyMode === "dictation" ? () => void dailyDone() : undefined} onNavigate={(p) => go(p)} />
         ) : page === "tutor" ? (
           <Tutor />
         ) : page === "analytics" ? (
           <Analytics key={`a-${focus}`} initialView={focus} />
         ) : page === "studio" ? (
-          <ContentStudio key={`s-${focus}`} initialView={focus} />
+          <ContentStudio key={`s-${focus}`} initialView={focus === "journey" ? "grammar" : focus} />
         ) : page === "tasks" ? (
           <AITasks />
         ) : (

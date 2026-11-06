@@ -36,6 +36,12 @@ export function registerContentRoutes(app: FastifyInstance, db: Db, deps: Conten
     hooks.onBatchQueued?.();
     return reply.code(202).send(created);
   });
+  // A batch whose exercises the coding agent writes itself: the plan is stored, no local model runs. Nothing is published without review.
+  app.post("/api/v1/content/batches/agent", async (req, reply) => {
+    const parsed = CreateBatchRequestSchema.safeParse(req.body);
+    if (!parsed.success) throw bad(parsed.error);
+    return reply.code(201).send(createBatch(db, deps, parsed.data, { agentAuthored: true }));
+  });
   app.get("/api/v1/content/batches", async () => ({ batches: listBatches(db), trialGate: trialGate(db) }));
   app.get("/api/v1/content/batch-summaries", async () => ({ batches: listStudioBatches(db) }));
   app.get<{ Params: { id: string } }>("/api/v1/content/batches/:id", idParams, async (req) => ({ ...getBatch(db, req.params.id), trialGate: trialGate(db) }));

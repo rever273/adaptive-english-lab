@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { assembleVocabulary, australian } from "../../../apps/server/src/domain/content/batches/vocabularyDrafts.js";
+import { assembleVocabulary, australian, withLength } from "../../../apps/server/src/domain/content/batches/vocabularyDrafts.js";
 
 const skills = new Set(["collocations.natural_phrases"]);
 const model = { tag: "gemma4:12b", digest: "d" };
@@ -18,6 +18,11 @@ describe("vocabulary draft checks (v3)", () => {
   it("rejects answers that repeat the words around the gap", () => {
     expect(message(build(recall({ accepted_answers: ["cope", "cope with"] }), "guided_recall", "cope"))).toMatch(/repeats the words/);
     expect(message(build(recog({ sentence: "We need to ___ every effort now.", surface_form: "make every effort", options: [{ text: "make every effort", rationale_ru: "a" }, { text: "do every effort", rationale_ru: "b" }, { text: "give every effort", rationale_ru: "c" }] }), "recognition", "endeavour"))).toMatch(/repeats the words/);
+  });
+  it("rejects a listed synonym of the word as a distractor", () => {
+    const withSyn = (raw: unknown, syn: string[]) => assembleVocabulary(raw, plan("recognition", "undermine"), "11111111-1111-4111-8111-111111111111", model, skills, "vocabulary-generation-v5", syn);
+    expect(message(withSyn(recog(), ["Weaken", "strengthen"]))).toMatch(/synonym/);
+    expect(withSyn(recog(), ["weaken"]).ok).toBe(true);
   });
   it("rejects a letter glued to the gap, a bad sense id and a placeholder answer", () => {
     expect(message(build(recall({ sentence: "Severe budget ___s hurt us badly." }), "guided_recall", "cope"))).toMatch(/attach letters/);
@@ -41,3 +46,13 @@ describe("vocabulary draft checks (v3)", () => {
     expect(message(build(recog({ sentence: "The speech was so ___ that nobody followed it.", surface_form: "incoherent", options: opt("incoherent", "clear", "brief") }), "recognition", "coherent"))).toMatch(/not a form of the planned word/);
   });
 });
+
+describe("v8 recall cue", () => {
+  it("adds the length of the answer", () => {
+    expect(withLength("(глаг., на r...) повторить", "reiterate")).toBe("(глаг., на r...) повторить — 9 букв");
+    expect(withLength("(сущ., на u...) язва", "ulcer")).toBe("(сущ., на u...) язва — 5 букв");
+    expect(withLength("(фраз. глаг., на p...) точно определить", "pin down")).toBe("(фраз. глаг., на p...) точно определить — 2 слова: 3 + 4 буквы");
+    expect(withLength("x", "a")).toBe("x — 1 буква");
+  });
+});
+
