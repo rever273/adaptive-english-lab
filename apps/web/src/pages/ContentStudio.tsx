@@ -1,7 +1,7 @@
 import { useCallback, useEffect, useState } from "react";
 import { VocabularyStudio } from "./VocabularyStudio";
 import { batchCache, coverageCache, stockCache } from "./studioCache";
-import { ApiRequestError, createBatchApi, createThoughtBatchApi, fetchThoughts, fetchBatch, fetchRevisionContent, fetchContentStock, type BatchItem, type BatchSummary, type StudioBatchSummary, type Coverage, type ItemStatus } from "../api";
+import { ApiRequestError, createBatchApi, createThoughtBatchApi, fetchThoughts, fetchBatch, fetchRevisionContent, fetchContentStock, fetchTypingOverview, fetchDictationPool, prepareDictationTracks, type DictationPoolSummary, type BatchItem, type BatchSummary, type StudioBatchSummary, type Coverage, type ItemStatus } from "../api";
 
 const STATUS_LABEL: Record<ItemStatus, string> = { queued: "Generating", invalid: "Needs agent repair", generated: "Draft", ready_for_review: "Awaiting agent", approved: "Approved", released: "Accepted", flagged: "Flagged", rejected: "Rejected" };
 const errorText = (e: unknown) => e instanceof ApiRequestError ? e.message : "Something went wrong.";
@@ -13,15 +13,56 @@ const THOUGHTS_AGENT_TASK = `English Lab: choose the grammar skills for my saved
 
 export const batchAgentTask = (id: string, category: "grammar" | "vocabulary") => `Complete and publish ${category} replenishment batch ${id}. Read content/agent-workflows/${category}.md and common.md in that directory. Run npm run content:agent -- prepare ${id}, review every item, repair suitable drafts as new revisions and reject unsuitable ones. Use the check and finalize commands in the instructions. Independent review by a separate agent is explicitly requested for every final candidate, especially corrections; do not self-approve. Do the review through the content-reviewer agent and the tools in .claude/tools (see your project memory for the workflow), after you have rejected duplicates and fixed the known defects yourself. Apply the reviewed results to the local app yourself. Do not ask me to copy JSON or run commands. Preserve lesson selection, dictionary edits and raw attempt history. Reply briefly with accepted, corrected and rejected counts, and end with one short line: how many tokens the review subagent(s) used in total.`;
 
-export function ContentStudio({ initialView = "grammar" }: { initialView?: "grammar" | "vocabulary" } = {}) {
+const VIEWS = [["grammar", "Grammar exercises"], ["vocabulary", "Vocabulary exercises"], ["typing", "Typing"]] as const;
+export function ContentStudio({ initialView = "grammar" }: { initialView?: "grammar" | "vocabulary" | "typing" } = {}) {
   const [category, setCategory] = useState(initialView);
   return <>
     <div className="segmented page-switch" role="radiogroup" aria-label="Which exercises">
-      {(["grammar", "vocabulary"] as const).map(c => <label key={c} className={category === c ? "on" : ""}><input type="radio" name="cs-view" checked={category === c} onChange={() => setCategory(c)} data-testid={`studio-${c}`} />{c === "grammar" ? "Grammar exercises" : "Vocabulary exercises"}</label>)}
+      {VIEWS.map(([c, label]) => <label key={c} className={category === c ? "on" : ""}><input type="radio" name="cs-view" checked={category === c} onChange={() => setCategory(c)} data-testid={`studio-${c}`} />{label}</label>)}
     </div>
-    <BatchStudio key={category} category={category} onCategoryChange={setCategory} />
+    {category === "typing" ? <DictationTracks /> : <BatchStudio key={category} category={category} onCategoryChange={setCategory} />}
   </>;
 }
+
+function DictationTracks() {
+  const [info, setInfo] = useState<Awaited<ReturnType<typeof fetchTypingOverview>>["dictation"] | null>(null);
+  const [pool, setPool] = useState<DictationPoolSummary | null>(null);
+  const [count, setCount] = useState(10);
+  const [error, setError] = useState<string | null>(null);
+  const load = useCallback(() => {
+    void fetchTypingOverview().then((o) => setInfo(o.dictation)).catch(() => undefined);
+    void fetchDictationPool().then(setPool).catch(() => undefined);
+  }, []);
+  useEffect(load, [load]);
+  const generating = (info?.pool.generating ?? 0) > 0;
+  useEffect(() => {
+    if (!generating) return;
+    const id = window.setInterval(load, 2500);
+    return () => window.clearInterval(id);
+  }, [generating, load]);
+  const minutes = pool ? Math.floor(pool.audioSeconds / 60) : 0;
+  const day = (iso: string) => new Date(iso).toLocaleDateString();
+  return <>
+    <section className="card"><h2>Audio Dictation tracks</h2>
+      <p className="lede">Prepare spoken sentences ahead of time, so Audio Dictation lessons start without waiting. Sentences stay hidden here so the dictation is not spoiled.</p>
+      {error && <p className="notice notice-error" role="alert">{error}</p>}
+      {info && !info.available && <p className="notice notice-warning small" role="status">Audio Dictation is not available yet{info.reason ? `: ${info.reason}` : ""}.</p>}
+      <div className="dictation-prepare">
+        <label className="small">Prepare <input type="number" min={1} max={50} value={count} onChange={(e) => setCount(Math.min(50, Math.max(1, Math.round(Number(e.target.value) || 1))))} aria-label="Number of audio tracks to prepare" data-testid="dictation-prepare-count" /> audio tracks for later</label>
+        <button className="btn" disabled={!info?.available} onClick={() => { setError(null); void prepareDictationTracks(count).catch((e) => setError(errorText(e))).finally(load); }} data-testid="dictation-prepare">Prepare</button>
+        {info && <p className="muted small" role="status">{info.pool.prepared} ready for the next lessons{info.pool.generating > 0 ? ` · ${info.pool.generating} being prepared` : ""}</p>}
+      </div>
+    </section>
+    <section className="card"><h2>Prepared tracks</h2>
+      {!pool || (pool.ready === 0 && pool.used === 0) ? <p className="muted">No prepared tracks yet.</p> : <>
+        <p className="small" data-testid="dictation-pool-summary">{pool.ready} ready ({minutes > 0 ? `${minutes} min ` : ""}{pool.audioSeconds % 60} s of audio{pool.ready > 0 ? `, ${pool.minWords}–${pool.maxWords} words each` : ""}); {pool.used} already used in lessons.{pool.oldest ? ` Prepared ${day(pool.oldest)}${pool.newest && day(pool.newest) !== day(pool.oldest) ? ` to ${day(pool.newest)}` : ""}.` : ""}</p>
+        {pool.topics.length > 0 && <><h3>Topics</h3><p className="chips">{pool.topics.map((t) => <span key={t.topic} className="chip">{t.topic} · {t.n}</span>)}</p></>}
+        {pool.voices.length > 0 && <><h3>Voices</h3><p className="chips">{pool.voices.map((v) => <span key={v.name} className="chip">{v.name} · {v.n}</span>)}</p></>}
+      </>}
+    </section>
+  </>;
+}
+
 function BatchStudio({ category, onCategoryChange }: { category: "grammar" | "vocabulary"; onCategoryChange: (category: "grammar" | "vocabulary") => void }) {
   const [batches, setBatches] = useState<StudioBatchSummary[]>(() => (batchCache.peek()?.batches ?? []).filter(b => (b.category ?? "grammar") === category));
   const [otherCount, setOtherCount] = useState(() => (batchCache.peek()?.batches ?? []).filter(b => (b.category ?? "grammar") !== category).length);

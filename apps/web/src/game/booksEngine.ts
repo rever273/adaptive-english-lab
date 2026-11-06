@@ -31,7 +31,27 @@ export interface BooksEngineState {
   /** time since the last keypress (capped when a key is pressed) */
   sinceLastKeyMs: number;
   finished: boolean;
+  /** letter-pair facts of the level (see wordsEngine): correct presses with the gap since the previous key, and wrong keys */
+  keyStats: Map<string, { count: number; totalMs: number; errors: number }>;
+  /** Precision Combo: characters in a row typed correctly the first time. A wrong key resets it; Backspace, pauses and speed do not matter, and a character that was
+   *  corrected after a mistake is never counted. */
+  combo: number;
+  bestCombo: number;
+  /** game score: one point per combo character times the tier multiplier. Display only. */
+  comboScore: number;
+  /** counts the milestones reached (the scene flashes when it changes) */
+  milestoneSeq: number;
 }
+
+/** the combo milestones, in characters */
+export const COMBO_MILESTONES = [10, 25, 50, 100, 200] as const;
+const TIER_MULTIPLIER = [1, 1.1, 1.2, 1.3, 1.5, 2] as const;
+
+/** 0 below the first milestone, up to 5 from 200 characters */
+export const comboTier = (n: number): number => COMBO_MILESTONES.filter((m) => n >= m).length;
+export const comboMultiplier = (n: number): number => TIER_MULTIPLIER[comboTier(n)]!;
+/** the next milestone above `n`, or null after the last one */
+export const nextMilestone = (n: number): number | null => COMBO_MILESTONES.find((m) => m > n) ?? null;
 
 /** what one key press did: `ignored` presses (a stray space, an unknown key) change and count nothing */
 export type BookKeyKind = "ok" | "error" | "capital" | "ignored" | "back";
@@ -84,6 +104,11 @@ export function createBooksEngine(config: BooksEngineConfig): BooksEngineState {
     errorCount: config.initialErrors,
     sinceLastKeyMs: 0,
     finished: remaining.length === 0,
+    keyStats: new Map(),
+    combo: 0,
+    bestCombo: 0,
+    comboScore: 0,
+    milestoneSeq: 0,
   };
 }
 
@@ -131,10 +156,20 @@ export function handleBookKey(s: BooksEngineState, key: string): BookKeyResult {
   // a space where none is expected is not a wrong letter: nothing is shown, counted or required to delete
   if (key === " " && expected !== " ") return { finished: false, tokenComplete: false, kind: "ignored" };
 
+  const gap = s.sinceLastKeyMs;
   recordGap(s);
   s.charsTyped += 1;
   const k = key.length === 1 ? key.toLowerCase() : key;
+  const pairAt = (at: number): string | null => {
+    const pair = (s.text.charAt(at - 1) + s.text.charAt(at)).toLowerCase();
+    return at >= 1 && /^[a-z-]{2}$/.test(pair) ? pair : null;
+  };
+  const facts = (pair: string) => s.keyStats.get(pair) ?? s.keyStats.set(pair, { count: 0, totalMs: 0, errors: 0 }).get(pair)!;
   const wrong = (): BookKeyResult => {
+    s.combo = 0;
+    const wp = pairAt(s.offset);
+    if (wp && s.errors.length === 0) facts(wp).errors++; // the first wrong key of an expected letter counts against its pair
+
     if (s.errors.length < 3) s.errors.push(key.length === 1 ? key : k);
     s.slipped.add(s.offset);
     s.errorCount += 1;
@@ -144,6 +179,19 @@ export function handleBookKey(s: BooksEngineState, key: string): BookKeyResult {
   if (k === expected) {
     if (s.errors.length > 0) return wrong(); // the right key while a red mistake is pending still counts as a mistake
     const at = s.offset;
+    const cp = pairAt(at);
+    if (cp && !s.slipped.has(at) && gap > 0 && gap <= 2000) {
+      const f = facts(cp);
+      f.count++;
+      f.totalMs += Math.round(gap);
+    }
+    // a character that was corrected after a mistake does not count again; every other one extends the combo
+    if (!s.slipped.has(at)) {
+      s.combo++;
+      s.bestCombo = Math.max(s.bestCombo, s.combo);
+      s.comboScore += comboMultiplier(s.combo);
+      if ((COMBO_MILESTONES as readonly number[]).includes(s.combo)) s.milestoneSeq++;
+    }
     const shown = s.text.charAt(at);
     // a capital letter typed in lower case moves on, with a visual reminder (names, first word of a sentence)
     const capital = key.length === 1 && /[A-Za-z]/.test(key) && isUpper(shown) && key === key.toLowerCase();

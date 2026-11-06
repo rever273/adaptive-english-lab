@@ -1,5 +1,6 @@
 import type { RevealResponse } from "@english-lab/contracts";
 import { useEffect, useId, useRef, useState } from "react";
+import { SpeakButton, isSpeakableSentence } from "./SpeakButton";
 import type { VoiceController } from "../voice";
 import { Kbd, isPressable, isTextField, useKeys } from "./hotkeys";
 
@@ -165,14 +166,16 @@ export function PromptView({ reveal, busy, hint, voice, onSubmit, onIdk, onSkip,
       {p.kind === "choice" && (
         <fieldset className="options">
           <legend className="prompt" data-testid="prompt" data-word-area>{wordMeaning?.[2] ?? p.prompt_en}</legend>
+          {!checkMode && isSpeakableSentence(wordMeaning?.[2] ?? p.prompt_en) && <SpeakButton text={wordMeaning?.[2] ?? p.prompt_en} />}
           {wordMeaning && <p lang="ru" className="vocab-word-meaning">{"\u041f\u0435\u0440\u0435\u0432\u043e\u0434 \u0441\u043b\u043e\u0432\u0430: \u00ab"}{wordMeaning[1]}{"\u00bb"}</p>}
           {vocabulary && translation && <p lang="ru" className="vocab-translation" role="status">{translation}</p>}
           {p.options.map((o, i) => (
-            <label key={o.id} className="option has-kbd">
+            <div key={o.id} className="option has-kbd">
               {!locked && key(i)}
-              <input type={p.multiple ? "checkbox" : "radio"} name={groupId} value={o.id} checked={selected.includes(o.id)} disabled={locked} onChange={() => toggle(o.id, p.multiple)} />
-              <span data-word-area>{o.text}</span>
-            </label>
+              <input id={`${groupId}-${i}`} type={p.multiple ? "checkbox" : "radio"} name={groupId} value={o.id} checked={selected.includes(o.id)} disabled={locked} onChange={() => toggle(o.id, p.multiple)} />
+              {!checkMode && isSpeakableSentence(o.text) && <SpeakButton text={o.text} />}
+              <label htmlFor={`${groupId}-${i}`} data-word-area>{o.text}</label>
+            </div>
           ))}
         </fieldset>
       )}
@@ -180,6 +183,7 @@ export function PromptView({ reveal, busy, hint, voice, onSubmit, onIdk, onSkip,
       {p.kind === "segments" && (
         <fieldset className="options">
           <legend className="visually-hidden">Choose the part of the sentence that contains a mistake</legend>
+          {!checkMode && isSpeakableSentence(p.segments.map((s) => s.text).join(" ")) && <SpeakButton text={p.segments.map((s) => s.text).join(" ")} />}
           <p className="prompt sentence" data-testid="prompt" data-word-area>
             {p.segments.map((s, i) => (
               <button
@@ -262,11 +266,12 @@ export function PromptView({ reveal, busy, hint, voice, onSubmit, onIdk, onSkip,
           <fieldset className="options">
             <legend className="prompt" data-testid="prompt" data-word-area>{p.question.prompt}</legend>
             {p.question.options.map((o, i) => (
-              <label key={o.id} className="option has-kbd">
+              <div key={o.id} className="option has-kbd">
                 {!locked && key(i)}
-                <input type="radio" name={groupId} value={o.id} checked={selected.includes(o.id)} disabled={locked} onChange={() => toggle(o.id, false)} />
-                <span data-word-area>{o.text}</span>
-              </label>
+                <input id={`${groupId}-${i}`} type="radio" name={groupId} value={o.id} checked={selected.includes(o.id)} disabled={locked} onChange={() => toggle(o.id, false)} />
+                {!checkMode && isSpeakableSentence(o.text) && <SpeakButton text={o.text} />}
+              <label htmlFor={`${groupId}-${i}`} data-word-area>{o.text}</label>
+              </div>
             ))}
           </fieldset>
         </div>

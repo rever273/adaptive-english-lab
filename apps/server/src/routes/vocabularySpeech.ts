@@ -1,5 +1,5 @@
 ﻿import { createHash, randomUUID } from "node:crypto";
-import { mkdir, readFile, rename, rm, writeFile } from "node:fs/promises";
+import { mkdir, readFile, readdir, rename, rm, writeFile } from "node:fs/promises";
 import path from "node:path";
 import type { FastifyInstance, FastifyReply } from "fastify";
 import type { Db } from "../db/open.js";
@@ -10,12 +10,16 @@ import type { SessionDeps } from "../domain/sessions/policy.js";
 
 const DAY = 86_400_000;
 const MODEL = "eleven_multilingual_v2";
-type Options = { key?: string; voiceId?: string; cacheDir: string; request?: typeof fetch };
+/** `voiceIds`: every ElevenLabs voice in use (equal weight); `voiceId` is the single-voice form kept for older callers; `random` is for tests */
+type Options = { key?: string; voiceId?: string; voiceIds?: string[]; cacheDir: string; request?: typeof fetch; random?: () => number };
+/** a voice id as a folder name */
+export const voiceFolder = (id: string): string => id.replace(/[^A-Za-z0-9_-]/g, "_");
 
 /** Generated audio is shared by the dictionary and practice, never keyed by user-provided file paths. */
 export function registerVocabularySpeechRoutes(app: FastifyInstance, db: Db, deps: SessionDeps, options: Options): void {
   const pending = new Map<string, Promise<Buffer>>();
   const request = options.request ?? fetch;
+  const voiceIds = [...new Set((options.voiceIds ?? (options.voiceId ? [options.voiceId] : [])).filter(Boolean))];
   // The old provider's cooldown is not an ElevenLabs limit. Preserve usage history but count the new provider separately.
   db.transaction(() => {
     if (!db.prepare("SELECT 1 FROM vocabulary_speech_requests WHERE slot_id = 'eleven:init'").get()) {
@@ -28,7 +32,7 @@ export function registerVocabularySpeechRoutes(app: FastifyInstance, db: Db, dep
     const settings = db.prepare("SELECT enabled, blocked_until AS blockedUntil FROM vocabulary_speech_settings WHERE id = 1").get() as { enabled: number; blockedUntil: string | null };
     const oldest = new Date(now.getTime() - DAY).toISOString();
     const count = (db.prepare("SELECT COUNT(*) AS n FROM vocabulary_speech_requests WHERE slot_id LIKE 'eleven:req:%' AND requested_at > ?").get(oldest) as { n: number }).n;
-    return { enabled: !!settings.enabled, configured: !!options.key && !!options.voiceId, requests: count, blockedUntil: settings.blockedUntil && settings.blockedUntil > now.toISOString() ? settings.blockedUntil : null };
+    return { enabled: !!settings.enabled, configured: !!options.key && voiceIds.length > 0, requests: count, blockedUntil: settings.blockedUntil && settings.blockedUntil > now.toISOString() ? settings.blockedUntil : null };
   };
   app.get("/api/v1/vocabulary-speech", async () => status());
   /** the account's character credits from ElevenLabs (needs the key's "user_read" permission) plus what this app has sent itself */
@@ -54,17 +58,34 @@ export function registerVocabularySpeechRoutes(app: FastifyInstance, db: Db, dep
     if (automatic && !status().enabled) return reply.code(204).send();
     const text = word.trim().replace(/\s+/g, " ");
     if (!text || text.length > 200) throw new ApiError(400, "SPEECH_INVALID", "Word is not available for pronunciation");
-    if (!options.voiceId) throw new ApiError(503, "SPEECH_NOT_CONFIGURED", "ElevenLabs voice ID is missing.");
-    const hash = createHash("sha256").update(JSON.stringify([options.voiceId, MODEL, text.toLowerCase()])).digest("hex");
-    const file = path.join(options.cacheDir, `${hash}.mp3`);
+    if (voiceIds.length === 0) throw new ApiError(503, "SPEECH_NOT_CONFIGURED", "ElevenLabs voice ID is missing.");
+    // the file name depends on the text only: any voice's folder (or an old flat file) can answer, so a word is never paid for twice
+    const hash = createHash("sha256").update(JSON.stringify([MODEL, text.toLowerCase()])).digest("hex");
+    const legacy = (voice: string) => createHash("sha256").update(JSON.stringify([voice, MODEL, text.toLowerCase()])).digest("hex");
+    async function findCached(): Promise<Buffer | null> {
+      const candidates = voiceIds.map((v) => path.join(options.cacheDir, voiceFolder(v), `${hash}.mp3`));
+      try {
+        // every voice folder on disk counts, also those of voices that are no longer configured
+        for (const entry of await readdir(options.cacheDir, { withFileTypes: true })) if (entry.isDirectory()) candidates.push(path.join(options.cacheDir, entry.name, `${hash}.mp3`));
+      } catch { /* no cache folder yet */ }
+      // files made before there were several voices sit directly in the cache folder, named for the first voice
+      for (const v of voiceIds) candidates.push(path.join(options.cacheDir, `${legacy(v)}.mp3`));
+      for (const file of candidates) {
+        try { const data = await readFile(file); if (data.length) return data; } catch { /* next */ }
+      }
+      return null;
+    }
     async function load(): Promise<Buffer> {
-      try { const data = await readFile(file); if (data.length) return data; } catch { /* cache miss */ }
+      const cached = await findCached();
+      if (cached) return cached;
       if (!options.key) throw new ApiError(503, "SPEECH_NOT_CONFIGURED", "ElevenLabs API key is missing.");
       if (status().blockedUntil) throw new ApiError(429, "SPEECH_RATE_LIMIT", "ElevenLabs is temporarily rate limited.");
+      // a random voice for every new request, all with the same weight
+      const voice = voiceIds[Math.min(voiceIds.length - 1, Math.floor((options.random ?? Math.random)() * voiceIds.length))]!;
       db.prepare("INSERT INTO vocabulary_speech_requests(slot_id, lemma, requested_at) VALUES (?, ?, ?)").run(`eleven:req:${randomUUID()}`, text.toLowerCase(), deps.now().toISOString());
       let response: Response;
       try {
-        response = await request(`https://api.elevenlabs.io/v1/text-to-speech/${encodeURIComponent(options.voiceId!)}/stream?output_format=mp3_44100_128`, { method: "POST", headers: { "xi-api-key": options.key, "Content-Type": "application/json" }, body: JSON.stringify({ text, model_id: MODEL }), signal: AbortSignal.timeout(30000) });
+        response = await request(`https://api.elevenlabs.io/v1/text-to-speech/${encodeURIComponent(voice)}/stream?output_format=mp3_44100_128`, { method: "POST", headers: { "xi-api-key": options.key, "Content-Type": "application/json" }, body: JSON.stringify({ text, model_id: MODEL }), signal: AbortSignal.timeout(30000) });
       } catch { throw new ApiError(502, "SPEECH_UNAVAILABLE", "Could not reach ElevenLabs."); }
       if (!response.ok) {
         if (response.status === 429) {
@@ -78,7 +99,9 @@ export function registerVocabularySpeechRoutes(app: FastifyInstance, db: Db, dep
       }
       const data = Buffer.from(await response.arrayBuffer());
       if (!data.length || data.length > 10_000_000) throw new ApiError(502, "SPEECH_PROVIDER", "ElevenLabs returned invalid audio.");
-      await mkdir(options.cacheDir, { recursive: true });
+      const folder = path.join(options.cacheDir, voiceFolder(voice));
+      await mkdir(folder, { recursive: true });
+      const file = path.join(folder, `${hash}.mp3`);
       const temp = `${file}.${randomUUID()}.tmp`;
       try { await writeFile(temp, data); await rename(temp, file); } finally { await rm(temp, { force: true }); }
       return data;
@@ -97,4 +120,10 @@ export function registerVocabularySpeechRoutes(app: FastifyInstance, db: Db, dep
     return speak(word, true, reply);
   });
   app.post<{ Params: { id: string } }>("/api/v1/vocabulary-speech/word/:id", async (req, reply) => speak(getEntry(db, req.params.id).lemma, false, reply));
+  // the pronounce button of the word panel: any selected English word or short phrase, saved or not
+  app.post<{ Body: { text?: unknown } }>("/api/v1/vocabulary-speech/text", async (req, reply) => {
+    const text = typeof req.body?.text === "string" ? req.body.text.trim().replace(/\s+/g, " ") : "";
+    if (!/^[A-Za-z][A-Za-z' -]{0,60}$/.test(text.replace(/\u2019/g, "'"))) throw new ApiError(400, "SPEECH_INVALID", "Expected an English word or short phrase");
+    return speak(text, false, reply);
+  });
 }

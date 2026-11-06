@@ -13,6 +13,7 @@ import { VocabularyJobRunner } from "./domain/vocabulary/enrichment.js";
 import { LexiconHints } from "./domain/vocabulary/lexiconHint.js";
 import { TutorJobRunner } from "./domain/tutor/runner.js";
 import { GroqWorker } from "./adapters/stt/groqWorker.js";
+import { createDictationEnv } from "./domain/typing/dictation/env.js";
 import { existsSync, readFileSync } from "node:fs";
 import path from "node:path";
 import { parseEnv } from "node:util";
@@ -49,9 +50,14 @@ async function main(): Promise<void> {
   const localEnv = existsSync(envPath) ? parseEnv(readFileSync(envPath, "utf8")) : {};
   const groqKey = process.env.GROQ_API_KEY ?? process.env.groq_api_key ?? localEnv.GROQ_API_KEY ?? localEnv.groq_api_key;
   const elevenLabsKey = process.env.ELEVENLABS_API_KEY ?? process.env.elevenlabs_api_key ?? localEnv.ELEVENLABS_API_KEY ?? localEnv.elevenlabs_api_key;
-  const elevenLabsVoiceId = process.env.ELEVENLABS_VOICE_ID ?? process.env.elevenlabs_voice_id ?? localEnv.ELEVENLABS_VOICE_ID ?? localEnv.elevenlabs_voice_id;
+  // ELEVENLABS_VOICE_ID, ELEVENLABS_VOICE_ID_2, ELEVENLABS_VOICE_ID_3 ... : every voice has the same weight
+  const elevenLabsVoiceIds = ["", "_2", "_3", "_4", "_5", "_6"]
+    .map((suffix) => process.env[`ELEVENLABS_VOICE_ID${suffix}`] ?? process.env[`elevenlabs_voice_id${suffix}`] ?? localEnv[`ELEVENLABS_VOICE_ID${suffix}`] ?? localEnv[`elevenlabs_voice_id${suffix}`])
+    .filter((v): v is string => typeof v === "string" && v.trim().length > 0)
+    .map((v) => v.trim());
   const translateEmail = process.env.MYMEMORY_EMAIL ?? localEnv.MYMEMORY_EMAIL;
   const cloudSpeech = Boolean(groqKey);
+  const dictation = createDictationEnv(config, groqKey);
   const instanceId = randomUUID();
   const startedAt = new Date().toISOString();
   const lock: LockInfo = {
@@ -101,6 +107,7 @@ async function main(): Promise<void> {
     installedDigest: (tag) => analysisOpts.installedDigest(tag),
     runtimeVersion: () => analysisOpts.runtimeVersion(),
     deps: { now: () => new Date(), newId: randomUUID },
+    dictation,
   });
   const vocabulary = new VocabularyJobRunner({ db, hints: new LexiconHints(config.lexiconCsv), chat: new OllamaChatClient(ollama), installedDigest: (tag) => analysisOpts.installedDigest(tag), runtimeVersion: () => analysisOpts.runtimeVersion(), deps: { now: () => new Date(), newId: randomUUID } });
   const tutor = new TutorJobRunner({ db, chat: new OllamaChatClient(ollama), installedDigest: (tag) => analysisOpts.installedDigest(tag), runtimeVersion: () => analysisOpts.runtimeVersion(), deps: { now: () => new Date(), newId: randomUUID } });
@@ -151,6 +158,7 @@ async function main(): Promise<void> {
     app?.log.info({ reason }, "shutdown: stop admission");
     try {
       await stt.shutdown(); // the voice child first: it holds the card
+      await Promise.all([dictation.tts.stop(), dictation.asr.stop()]); // Audio Dictation helpers (our own child processes only)
       residency.halt(); // no new warm-up from here on
       await scheduler.stop(); // stop admission, abort + discard the running unit, prove the release, give the lease back
       await residency.shutdown(); // unload our model (bounded); if the process dies abruptly keep_alive expiry frees the card
@@ -169,9 +177,10 @@ async function main(): Promise<void> {
     config,
     db,
     elevenLabsKey,
-    elevenLabsVoiceId,
+    elevenLabsVoiceIds,
     ...(translateEmail ? { translateEmail } : {}),
     ...(groqKey ? { groqKey } : {}),
+    dictation,
     instanceId,
     startedAt,
     shutdownToken: lock.shutdownToken,

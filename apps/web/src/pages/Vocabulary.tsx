@@ -3,6 +3,7 @@ import { createPortal } from "react-dom";
 import { ApiRequestError, addVocabulary, createVocabSession, fetchVocabPractice, fetchVocabulary, patchVocabulary, removeVocabulary, vocabularyWordSpeech, type VocabEntry, type VocabPracticeStatus } from "../api";
 import { WordImage } from "../components/WordImage";
 import { Practice } from "./Practice";
+import { VocabularyExpressions } from "./VocabularyExpressions";
 import { Kbd, isTextField, useKeys } from "../components/hotkeys";
 
 const POS = ["noun", "verb", "adjective", "adverb", "preposition", "conjunction", "pronoun", "determiner", "phrase", "phrasal verb", "idiom", "other"];
@@ -259,6 +260,8 @@ export function Vocabulary({ onNavigate }: { onNavigate?: (page: "vocabulary" | 
   const [newWord, setNewWord] = useState("");
   const [error, setError] = useState<string | null>(null);
   const [notLearned, setNotLearned] = useState(loadPref);
+  // the dictionary has two parts: words (the practice mode and everything below) and expressions (phrases of several words)
+  const [part, setPart] = useState<"words" | "expressions">("words");
 
   const loadPractice = useCallback(async () => {
     try {
@@ -346,6 +349,11 @@ export function Vocabulary({ onNavigate }: { onNavigate?: (page: "vocabulary" | 
   return (
     <section className="card" aria-labelledby="vo-h">
       <h2 id="vo-h"><i className="pi pi-bookmark" aria-hidden="true" /> Vocabulary</h2>
+      <div className="segmented" role="radiogroup" aria-label="Dictionary part">
+        <label className={part === "words" ? "on" : ""}><input type="radio" name="vocab-part" checked={part === "words"} onChange={() => setPart("words")} data-testid="vocab-part-words" /> Words</label>
+        <label className={part === "expressions" ? "on" : ""}><input type="radio" name="vocab-part" checked={part === "expressions"} onChange={() => setPart("expressions")} data-testid="vocab-part-expressions" /> Expressions</label>
+      </div>
+      {part === "expressions" ? <VocabularyExpressions /> : <>
       <p className="lede">Words you saved while practising. Saving is instant; the local AI adds a translation in the background (shown in <span className="ai-text">blue</span>), and anything you write yourself is never replaced. The dotted line under a word shows its level, from green (A1) to red (C2) — hover to see it.</p>
       {error && <p className="notice notice-error" role="alert">{error}</p>}
       <PracticeBlock status={practice} onStart={(c) => void start(c)} onStudio={() => onNavigate?.("studio")} error={startError} />
@@ -396,6 +404,7 @@ export function Vocabulary({ onNavigate }: { onNavigate?: (page: "vocabulary" | 
         </div>
       )}
       <p className="muted small">Newest shown first. Marking a word learned does not change any score.</p>
+      </>}
     </section>
   );
 }

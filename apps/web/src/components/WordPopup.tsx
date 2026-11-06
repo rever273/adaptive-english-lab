@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import { firstTranslation } from "../format";
-import { ApiRequestError, addVocabulary, lookupVocabulary, type VocabEntry } from "../api";
+import { ApiRequestError, addExpression, addVocabulary, lookupVocabulary, vocabularyTextSpeech, type VocabEntry } from "../api";
 
 const LETTER = /[\p{L}'’-]/u;
 /** a word or a short phrase of up to three English words; a sentence (punctuation inside, more words) or Russian text never matches */
@@ -47,6 +47,31 @@ export function WordCatcher() {
   const [saved, setSaved] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
   const timer = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const audio = useRef<HTMLAudioElement | null>(null);
+  const [speaking, setSpeaking] = useState(false);
+
+  // the pronounce button: the stored file when there is one, otherwise one request to ElevenLabs; it plays at once and a second press restarts it
+  const pronounce = async () => {
+    const text = word.trim();
+    if (!text || speaking) return;
+    setSpeaking(true);
+    setError(null);
+    try {
+      const blob = await vocabularyTextSpeech(text);
+      if (!blob) return;
+      audio.current?.pause();
+      const url = URL.createObjectURL(blob);
+      const a = new Audio(url);
+      audio.current = a;
+      a.onended = () => URL.revokeObjectURL(url);
+      await a.play();
+    } catch (e) {
+      setError(e instanceof ApiRequestError ? e.message : "Could not play the pronunciation.");
+    } finally {
+      setSpeaking(false);
+    }
+  };
+  useEffect(() => () => { audio.current?.pause(); }, []);
 
   const read = useCallback(() => {
     if (document.activeElement?.closest(".word-panel")) return;
@@ -85,9 +110,16 @@ export function WordCatcher() {
     };
   }, [text]);
 
+  // two or more words are an expression: they go to the Expressions part of the dictionary
+  const isExpression = word.trim().includes(" ");
   const add = async () => {
     if (!pick) return;
     try {
+      if (isExpression) {
+        const x = await addExpression(word.trim());
+        setSaved(`Saved the expression “${x.phrase}”. Its translation and description are written later if the local AI is free.`);
+        return;
+      }
       const e = await addVocabulary(word.trim().toLowerCase(), pick.text, pick.slotId);
       setKnown(e);
       setSaved(`Saved “${e.lemma}”. The translation is filled in later if the local AI is free.`);
@@ -111,9 +143,12 @@ export function WordCatcher() {
           {known.translation.text ? <span className={known.translation.source === "ai_draft" ? "ai-text" : undefined}>{firstTranslation(known.translation.text)}</span> : <span className="muted">No translation yet.</span>}
         </p>
       )}
+      <button type="button" className="btn btn-small" disabled={!word.trim() || speaking} onClick={() => void pronounce()} title="Hear the pronunciation" data-testid="pronounce-word">
+        <i className="pi pi-volume-up" aria-hidden="true" /> {speaking ? "Loading…" : "Pronounce"}
+      </button>
       {!saved && (
         <button type="button" className="btn btn-ok btn-small" disabled={!word.trim()} onClick={() => void add()} data-testid="add-word">
-          <i className="pi pi-plus" aria-hidden="true" /> Add to vocabulary
+          <i className="pi pi-plus" aria-hidden="true" /> {isExpression ? "Add to expressions" : "Add to vocabulary"}
         </button>
       )}
       {saved && <p className="small" role="status" data-testid="word-saved">{saved}</p>}

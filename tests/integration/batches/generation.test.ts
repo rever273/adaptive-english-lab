@@ -16,12 +16,20 @@ const run = async (r: Rig, batchId: string) => drive(r, () => batchJobsSettled(r
 const statesOf = (r: Rig, revisionId: string) => rows<{ to_status: string; actor_type: string }>(r.env.db, "SELECT to_status, actor_type FROM content_state_events WHERE revision_id = ? ORDER BY sequence", revisionId).map((e) => `${e.to_status}:${e.actor_type}`);
 
 describe("planning and queuing", () => {
+  it("accepts both new taxonomy skills for a reviewable grammar batch", async () => {
+    const r = await makeRig();
+    const skills = ["subjunctive.present_wishes", "verb_forms.resultant_states"];
+    const created = createBatch(r.env.db, r.deps, { count: 4, mode: "manual", skills, types: ["choose_form"], category: "grammar" });
+    const batch = getBatch(r.env.db, created.batchId);
+    expect(new Set(batch.items!.map((item) => item.plan.target_skill))).toEqual(new Set(skills));
+    expect(batch.counts.released + batch.counts.approved).toBe(0);
+  });
   it("creates a new-version batch while the prior prompt is already registered", async () => {
     const r = await makeRig();
     ensurePromptVersion(r.env.db, "generation-v8", draftFormatsText("generation-v8"));
     const created = createBatch(r.env.db, r.deps, { count: 10, mode: "adaptive", category: "grammar" });
     expect(created.items).toBe(10);
-    expect(one<{ v: string }>(r.env.db, "SELECT prompt_version_id AS v FROM batches WHERE id = ?", created.batchId).v).toBe("generation-v9");
+    expect(one<{ v: string }>(r.env.db, "SELECT prompt_version_id AS v FROM batches WHERE id = ?", created.batchId).v).toBe("generation-v10");
     expect(() => ensurePromptVersion(r.env.db, "generation-v8", draftFormatsText("generation-v8"))).not.toThrow();
   });
   it("a trial is exactly 24 drafts, 4 per format, in fourteen short same-format units (2 per call, 1 for reading), all queued; no model is called to create it", async () => {
@@ -37,7 +45,7 @@ describe("planning and queuing", () => {
     expect(jobs.every((j) => j.kind === "generation" && j.state === "queued" && j.priority === 3 && j.batch_id === c.batchId)).toBe(true);
     expect(jobs.every((j) => (JSON.parse(j.payload_json) as { ordinals: number[] }).ordinals.length <= 2)).toBe(true);
     expect(r.model.calls).toBe(0);
-    expect(one<{ prompt_version_id: string }>(r.env.db, "SELECT prompt_version_id FROM batches").prompt_version_id).toBe("generation-v9");
+    expect(one<{ prompt_version_id: string }>(r.env.db, "SELECT prompt_version_id FROM batches").prompt_version_id).toBe("generation-v10");
   });
 
   it("is deterministic, covers the thinnest skills first in adaptive mode and refuses unknown skills", async () => {
@@ -68,7 +76,7 @@ describe("generation through the dispatcher produces DRAFTS only", () => {
     expect(one<{ n: number }>(r.env.db, "SELECT COUNT(*) AS n FROM content_reviews").n).toBe(0);
     // provenance is written by the server from the pinned model, and the exercise belongs to the batch
     const content = JSON.parse(one<{ c: string }>(r.env.db, "SELECT content_json AS c FROM exercise_revisions WHERE id = ?", rev).c) as { provenance: { origin: string; model_tag: string; model_digest: string; prompt_version: string }; status: string; bank_role: string };
-    expect(content).toMatchObject({ status: "draft", bank_role: "practice", provenance: { origin: "qwen", model_tag: "gemma4:12b", prompt_version: "generation-v9" } });
+    expect(content).toMatchObject({ status: "draft", bank_role: "practice", provenance: { origin: "qwen", model_tag: "gemma4:12b", prompt_version: "generation-v10" } });
     expect(content.provenance.model_digest).toMatch(/^[0-9a-f]{64}$/);
     expect(one<{ n: number }>(r.env.db, "SELECT COUNT(*) AS n FROM exercises WHERE source_batch_id = ?", batchId).n).toBe(24);
     expect(r.model.calls).toBe(14);

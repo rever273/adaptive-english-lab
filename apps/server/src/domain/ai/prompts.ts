@@ -1,4 +1,6 @@
 import { THOUGHT_SYSTEM_V1 } from "../thoughts/interpret.js";
+import { DICTATION_SYSTEM_V1, DICTATION_SYSTEM_V2, DICTATION_SYSTEM_V3 } from "../typing/dictation/prompt.js";
+import { EXPRESSION_SYSTEM_V1 } from "../vocabulary/expressions.js";
 import { createHash } from "node:crypto";
 import type { Db } from "../../db/open.js";
 
@@ -108,7 +110,7 @@ export const NIMBLE_TRIAGE_V2 = {
 } as const;
 
 import { GENERATION_SYSTEM_V2, GENERATION_SYSTEM_V3, GENERATION_SYSTEM_V4, GENERATION_SYSTEM_V5, GENERATION_SYSTEM_V6, GENERATION_SYSTEM_V7, GENERATION_SYSTEM_V8, GENERATION_SYSTEM_V9 } from "../content/batches/draftFormats.js";
-import { VOCABULARY_SYSTEM, VOCABULARY_SYSTEM_V2 as VOCABULARY_GENERATION_SYSTEM_V2, VOCABULARY_SYSTEM_V3 as VOCABULARY_GENERATION_SYSTEM_V3, VOCABULARY_SYSTEM_V4 as VOCABULARY_GENERATION_SYSTEM_V4 } from "../content/batches/vocabularyDrafts.js";
+import { VOCABULARY_SYSTEM, VOCABULARY_SYSTEM_V2 as VOCABULARY_GENERATION_SYSTEM_V2, VOCABULARY_SYSTEM_V3 as VOCABULARY_GENERATION_SYSTEM_V3, VOCABULARY_SYSTEM_V4 as VOCABULARY_GENERATION_SYSTEM_V4, VOCABULARY_SYSTEM_V5 as VOCABULARY_GENERATION_SYSTEM_V5 } from "../content/batches/vocabularyDrafts.js";
 
 export interface PromptDef {
   id: string;
@@ -157,7 +159,12 @@ export const PROMPTS: Record<string, PromptDef> = {
   "vocabulary-generation-v2": { id: "vocabulary-generation-v2", purpose: "generation", template: VOCABULARY_GENERATION_SYSTEM_V2 },
   "vocabulary-generation-v3": { id: "vocabulary-generation-v3", purpose: "generation", template: VOCABULARY_GENERATION_SYSTEM_V3 },
   "vocabulary-generation-v4": { id: "vocabulary-generation-v4", purpose: "generation", template: VOCABULARY_GENERATION_SYSTEM_V4 },
+  "vocabulary-generation-v5": { id: "vocabulary-generation-v5", purpose: "generation", template: VOCABULARY_GENERATION_SYSTEM_V5 },
   "thought-interpret-v1": { id: "thought-interpret-v1", purpose: "generation", template: THOUGHT_SYSTEM_V1 },
+  "expression-v1": { id: "expression-v1", purpose: "generation", template: EXPRESSION_SYSTEM_V1 },
+  "dictation-v1": { id: "dictation-v1", purpose: "generation", template: DICTATION_SYSTEM_V1 },
+  "dictation-v2": { id: "dictation-v2", purpose: "generation", template: DICTATION_SYSTEM_V2 },
+  "dictation-v3": { id: "dictation-v3", purpose: "generation", template: DICTATION_SYSTEM_V3 },
   "tutor-v1": { id: "tutor-v1", purpose: "tutor", template: TUTOR_SYSTEM_V1 },
   "tutor-v2": { id: "tutor-v2", purpose: "tutor", template: TUTOR_SYSTEM_V2 },
   "vocabulary-v2": { id: "vocabulary-v2", purpose: "vocabulary", template: VOCABULARY_SYSTEM_V2 },
@@ -170,6 +177,7 @@ export const PROMPTS: Record<string, PromptDef> = {
   "generation-v7": { id: "generation-v7", purpose: "generation", template: GENERATION_SYSTEM_V7 },
   "generation-v8": { id: "generation-v8", purpose: "generation", template: GENERATION_SYSTEM_V8 },
   "generation-v9": { id: "generation-v9", purpose: "generation", template: GENERATION_SYSTEM_V9 },
+  "generation-v10": { id: "generation-v10", purpose: "generation", template: GENERATION_SYSTEM_V9 },
   "draft-screen-v1": { id: "draft-screen-v1", purpose: "triage", template: JSON.stringify(DRAFT_SCREEN_V1) },
   "generation-v3": { id: "generation-v3", purpose: "generation", template: GENERATION_SYSTEM_V3 },
   "generation-v2": { id: "generation-v2", purpose: "generation", template: GENERATION_SYSTEM_V2 },

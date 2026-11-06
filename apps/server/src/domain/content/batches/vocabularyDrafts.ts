@@ -20,6 +20,13 @@ export const VOCABULARY_SYSTEM_V4 = `${VOCABULARY_SYSTEM_V3}
 Each item has a topic and avoid_sentences. Set the sentence in an everyday situation of that topic ("technology" means software, computing or digital work; every other topic is ordinary adult life and must not be about IT). avoid_sentences are existing sentences with this word: write a clearly different one (new subject, situation and sentence frame); never copy or lightly rephrase them.
 Self-check every draft before returning it: put each option and each accepted answer into the sentence and read the whole result (no doubled or leftover word next to the gap, a/an agrees with the next word and with EVERY option, Australian spelling); only the keyed option may fit; the Russian translation of the sentence and of the word is natural and matches this sense; the cue never also fits a common synonym; vary subject, situation and sentence frame between items.`;
 
+/**
+ * v5: v4 plus an optional saved EXPRESSION. When an item has `expression` (a phrase the learner is also studying that contains the word), the
+ * sentence may be built around that exact phrase; it is never forced, and every other rule still holds.
+ */
+export const VOCABULARY_SYSTEM_V5 = `${VOCABULARY_SYSTEM_V4}
+An item may also have expression: a phrase the learner is studying that contains the target word. When it fits the topic naturally, write the sentence around that exact phrase (the same words in the same order) so the word is learned in its usual company. Never force it, never change the target word's role in the task, and ignore it when it would make the sentence unnatural or the distractors ambiguous.`;
+
 const words = (s: string): string[] => s.toLowerCase().match(/[a-z]+(?:['’-][a-z]+)*/g) ?? [];
 /** the answer must not repeat the words that already stand next to the gap */
 function repeatsNeighbours(answer: string, before: string[], after: string[]): boolean {

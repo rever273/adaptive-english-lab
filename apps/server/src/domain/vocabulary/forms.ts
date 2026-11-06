@@ -51,6 +51,19 @@ export function matchForms(lemma: string, surfaceForms: readonly string[]): stri
   return [...set].sort((a, b) => b.length - a.length);
 }
 
+/** the text with every whole-word occurrence of any form replaced by "____" (null when the word does not occur, so there is nothing to show) */
+export function blankOut(text: string, forms: readonly string[]): string | null {
+  if (forms.length === 0) return null;
+  const escaped = forms.map((f) => f.replace(/[.*+?^${}()|[\]\\]/g, "\\$&").replace(/ /g, "\\s+"));
+  const re = new RegExp(`(?<![\\p{L}\\p{N}'-])(?:${escaped.join("|")})(?![\\p{L}\\p{N}'-])`, "giu");
+  let found = false;
+  const out = text.normalize("NFKC").replace(/[\u2018\u2019]/g, "'").replace(re, () => {
+    found = true;
+    return "____";
+  });
+  return found ? out : null;
+}
+
 /** number of whole-word occurrences of any form in the text (longest form first, no double counting of the same span) */
 export function countOccurrences(text: string, forms: readonly string[]): number {
   if (forms.length === 0) return 0;

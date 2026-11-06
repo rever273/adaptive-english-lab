@@ -40,6 +40,23 @@ function buildRow3() {
 }
 
 describe("replaying spec/04 on real stored attempts", () => {
+  it("keeps unchanged skill evidence across additive taxonomy versions without changing historical replay", () => {
+    buildRow3();
+    const previous = env.taxonomyId;
+    const current = one<{ id: string }>(env.db, "SELECT id FROM taxonomy_versions WHERE version = 'taxonomy-v2'").id;
+    const oldRun = runMastery(env.db, { asOf: asOf(), cohort: COHORT, taxonomyId: previous, now: env.deps.now });
+    const newRun = runMastery(env.db, { asOf: asOf(), cohort: COHORT, taxonomyId: current, now: env.deps.now });
+    expect(snapshotBytes(newRun.id)).toBe(snapshotBytes(oldRun.id));
+    expect(skill(newRun.id).n).toBe(12);
+    expect(runMastery(env.db, { asOf: oldRun.asOf, watermark: oldRun.eventWatermark, cohort: COHORT, taxonomyId: previous, now: env.deps.now })).toMatchObject({ id: oldRun.id, inputHash: oldRun.inputHash, created: false });
+    expect(one<{ n: number }>(env.db, "SELECT COUNT(*) AS n FROM mastery_snapshots WHERE run_id = ? AND skill_id IN ('subjunctive.present_wishes','verb_forms.resultant_states')", newRun.id).n).toBe(0);
+    env.taxonomyId = current;
+    answer(true);
+    const oldAfter = runMastery(env.db, { asOf: asOf(), cohort: COHORT, taxonomyId: previous, now: env.deps.now });
+    const newAfter = runMastery(env.db, { asOf: asOf(), cohort: COHORT, taxonomyId: current, now: env.deps.now });
+    expect(skill(oldAfter.id).n).toBe(12);
+    expect(skill(newAfter.id).n).toBe(13);
+  });
   it("row 3 gives A = 9/14, H = 4/6, S = 6.5 from raw events", () => {
     buildRow3();
     const run = runMastery(env.db, { asOf: asOf(), cohort: COHORT, now: env.deps.now });

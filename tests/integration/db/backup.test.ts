@@ -27,6 +27,7 @@ describe("SQLite backup API", () => {
     // Insert after open without checkpointing: rows live in the -wal file, which a plain file copy would miss.
     db!.prepare("INSERT INTO settings_revisions(id,revision,values_json,created_at) VALUES ('wal-row',3,'{}',?)").run(new Date().toISOString());
     expect(existsSync(path.join(scratch.root, "db", "t.sqlite-wal"))).toBe(true);
+    const skills = db!.prepare("SELECT id FROM skills ORDER BY id").all();
 
     const m = await createBackup(db!, { backupsDir: backupsDir(), kind: "manual", schemaVersion: 1, appVersion: "test" });
     expect(m).toMatchObject({ kind: "manual", schemaVersion: 1, status: "ready" });
@@ -38,7 +39,7 @@ describe("SQLite backup API", () => {
     try {
       expect((copy.prepare("SELECT COUNT(*) AS n FROM settings_revisions").get() as { n: number }).n).toBe(3);
       expect(copy.prepare("SELECT id FROM settings_revisions WHERE id = 'wal-row'").get()).toEqual({ id: "wal-row" });
-      expect((copy.prepare("SELECT COUNT(*) AS n FROM skills").get() as { n: number }).n).toBe(80);
+      expect(copy.prepare("SELECT id FROM skills ORDER BY id").all()).toEqual(skills);
     } finally {
       copy.close();
     }
@@ -92,7 +93,7 @@ describe("startup preparation", () => {
     const cfg = testConfig(path.join(scratch.root, "app"), 4999);
     const first = await prepareDatabase(cfg);
     expect(first.createdNewDatabase).toBe(true);
-    expect(first.migration.applied).toEqual([1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16, 17, 18, 19, 20, 21, 22, 23, 24, 25, 26]);
+    expect(first.migration.applied).toEqual([1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16, 17, 18, 19, 20, 21, 22, 23, 24, 25, 26, 27, 28, 29, 30, 31, 32, 33, 34, 35, 36, 37]);
     expect(first.dailyBackup).toBeNull();
     first.db.close();
 

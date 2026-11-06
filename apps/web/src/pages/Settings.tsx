@@ -2,9 +2,10 @@ import { useEffect, useState } from "react";
 import type { AiModelStatus } from "@english-lab/contracts";
 import * as api from "../api";
 import { modelErrorText } from "../components/AiModelNotice";
+import { VoicesSettings } from "../components/VoicesSettings";
 
-type Values = { preloadModelOnStart?: boolean; practiceSoundsEnabled?: boolean; typingSoundsEnabled?: boolean; taskCount: number; weakRatio: number; voiceTarget: 0 | 1 | 2; voiceShare?: number; vocabularyTaskCount?: number; vocabularyNewWordsPerSession?: number; reviewNoticeThreshold?: number; difficultyMin?: api.Level; difficultyMax?: api.Level; typingWordsPerLevel?: number; typingVocabularyShare?: number; typingSpeedMultiplier?: number; typingBookMinutes?: number };
-type Draft = { taskCount: number; weakRatio: number; voiceShare: number; practiceSoundsEnabled: boolean; typingSoundsEnabled: boolean; vocabularyTaskCount: number; vocabularyNewWordsPerSession: number; reviewNoticeThreshold: number; difficultyMin: api.Level; difficultyMax: api.Level; typingWordsPerLevel: number; typingVocabularyShare: number; typingSpeedMultiplier: number; typingBookMinutes: number };
+type Values = { preloadModelOnStart?: boolean; practiceSoundsEnabled?: boolean; typingSoundsEnabled?: boolean; taskCount: number; weakRatio: number; voiceTarget: 0 | 1 | 2; voiceShare?: number; vocabularyTaskCount?: number; vocabularyNewWordsPerSession?: number; reviewNoticeThreshold?: number; difficultyMin?: api.Level; difficultyMax?: api.Level; typingWordsPerLevel?: number; typingVocabularyShare?: number; typingSpeedMultiplier?: number; typingBookMinutes?: number; typingDictationExercisesPerLesson?: number; typingRecallWords?: number };
+type Draft = { taskCount: number; weakRatio: number; voiceShare: number; practiceSoundsEnabled: boolean; typingSoundsEnabled: boolean; vocabularyTaskCount: number; vocabularyNewWordsPerSession: number; reviewNoticeThreshold: number; difficultyMin: api.Level; difficultyMax: api.Level; typingWordsPerLevel: number; typingVocabularyShare: number; typingSpeedMultiplier: number; typingBookMinutes: number; typingDictationExercisesPerLesson: number; typingRecallWords: number };
 const LEVELS: api.Level[] = ["A2", "B1", "B2", "C1", "C2"];
 
 /** docs/04 §7: only the settings the allocator reads today. A change is a new settings revision and applies to the next session. */
@@ -24,23 +25,20 @@ export function Settings() {
       .catch((e) => setMsg(e instanceof Error ? e.message : String(e)));
   }, []);
 
-  if (!draft || !saved) return <section className="card">{msg ?? "Loading settings…"}</section>;
-  const changed = JSON.stringify(draft) !== JSON.stringify(pick(saved.values));
+  // every change is saved at once (a short pause lets a typed number settle first); there is no Save button
+  useEffect(() => {
+    if (!draft || !saved || JSON.stringify(draft) === JSON.stringify(pick(saved.values))) return;
+    const timer = window.setTimeout(() => {
+      setBusy(true);
+      api.saveSettings(draft)
+        .then((s) => { setSaved(s); setDraft(pick(s.values)); setMsg("Saved. Practice sounds apply immediately; session settings apply when you start the next session."); })
+        .catch((e) => setMsg(e instanceof Error ? e.message : String(e)))
+        .finally(() => setBusy(false));
+    }, 500);
+    return () => window.clearTimeout(timer);
+  }, [draft, saved]);
 
-  const save = async () => {
-    setBusy(true);
-    setMsg(null);
-    try {
-      const s = await api.saveSettings(draft);
-      setSaved(s);
-      setDraft(pick(s.values));
-      setMsg("Saved. Practice sounds apply immediately; session settings apply when you start the next session.");
-    } catch (e) {
-      setMsg(e instanceof Error ? e.message : String(e));
-    } finally {
-      setBusy(false);
-    }
-  };
+  if (!draft || !saved) return <section className="card">{msg ?? "Loading settings…"}</section>;
 
   return (
     <section aria-labelledby="settings-h" className="settings-page">
@@ -95,6 +93,16 @@ export function Settings() {
               <input type="number" min={1} max={30} value={draft.typingBookMinutes} onChange={(e) => setDraft({ ...draft, typingBookMinutes: clamp(Math.round(Number(e.target.value) || 5), 1, 30) })} data-testid="set-typing-book-minutes" />
               <span className="muted small">1–30, default 5. Target duration of one Books level; the actual length rounds to a paragraph boundary.</span>
             </label>
+            <label>
+              Memory check words after a Words level
+              <input type="number" min={0} max={3} value={draft.typingRecallWords} onChange={(e) => setDraft({ ...draft, typingRecallWords: clamp(Math.round(Number(e.target.value) || 0), 0, 3) })} data-testid="set-typing-recall-words" />
+              <span className="muted small">0–3, default 2. After a won level, this many of your saved words appear as stars with their translation and a sentence to guess them from. 0 turns the check off.</span>
+            </label>
+            <label>
+              Dictation exercises per lesson
+              <input type="number" min={5} max={20} value={draft.typingDictationExercisesPerLesson} onChange={(e) => setDraft({ ...draft, typingDictationExercisesPerLesson: clamp(Math.round(Number(e.target.value) || 10), 5, 20) })} data-testid="set-typing-dictation-count" />
+              <span className="muted small">5–20, default 10. Sentences in one Audio Dictation lesson; a lesson already generated keeps its size. Voices: Piper en_AU-librivox-medium (CC BY 4.0, DataCraftsmanAustralia, LibriVox readers).</span>
+            </label>
           </div>
         </div>
 
@@ -113,39 +121,43 @@ export function Settings() {
             </label>
           </div>
         </div>
-
-        <div className="card settings-card">
-          <h3>Difficulty and review</h3>
-          <label>
-            Sentence difficulty (CEFR)
-            <span className="level-range">
-              <select value={draft.difficultyMin} aria-label="Lowest level" data-testid="set-level-min" onChange={(e) => { const min = e.target.value as api.Level; setDraft({ ...draft, difficultyMin: min, difficultyMax: LEVELS.indexOf(draft.difficultyMax) < LEVELS.indexOf(min) ? min : draft.difficultyMax }); }}>
-                {LEVELS.map((l) => <option key={l} value={l}>{l}</option>)}
-              </select>
-              {" to "}
-              <select value={draft.difficultyMax} aria-label="Highest level" data-testid="set-level-max" onChange={(e) => { const max = e.target.value as api.Level; setDraft({ ...draft, difficultyMax: max, difficultyMin: LEVELS.indexOf(draft.difficultyMin) > LEVELS.indexOf(max) ? max : draft.difficultyMin }); }}>
-                {LEVELS.map((l) => <option key={l} value={l}>{l}</option>)}
-              </select>
-            </span>
-            <span className="muted small">Default B1 to C1. Practice only draws approved exercises of these levels (if there are not enough, the lesson shows the usual shortage message instead of easier ones), and new AI-written exercises are requested at these levels. Applies to the next session or batch.</span>
-          </label>
-          <label>
-            Answers to collect before the review notice
-            <input type="number" min={1} max={50} value={draft.reviewNoticeThreshold} onChange={(e) => setDraft({ ...draft, reviewNoticeThreshold: clamp(Math.round(Number(e.target.value) || 1), 1, 50) })} data-testid="set-review-threshold" />
-            <span className="muted small">1–50, default 5. Answers the local AI could not check wait in a queue; once this many have collected, Practice shows one notice with a task for your coding agent.</span>
-          </label>
-        </div>
       </div>
+
+      <div className="card settings-card">
+        <h3>Difficulty and review</h3>
+        <label>
+          Sentence difficulty (CEFR)
+          <span className="level-range">
+            <select value={draft.difficultyMin} aria-label="Lowest level" data-testid="set-level-min" onChange={(e) => { const min = e.target.value as api.Level; setDraft({ ...draft, difficultyMin: min, difficultyMax: LEVELS.indexOf(draft.difficultyMax) < LEVELS.indexOf(min) ? min : draft.difficultyMax }); }}>
+              {LEVELS.map((l) => <option key={l} value={l}>{l}</option>)}
+            </select>
+            {" to "}
+            <select value={draft.difficultyMax} aria-label="Highest level" data-testid="set-level-max" onChange={(e) => { const max = e.target.value as api.Level; setDraft({ ...draft, difficultyMax: max, difficultyMin: LEVELS.indexOf(draft.difficultyMin) > LEVELS.indexOf(max) ? max : draft.difficultyMin }); }}>
+              {LEVELS.map((l) => <option key={l} value={l}>{l}</option>)}
+            </select>
+          </span>
+          <span className="muted small">Default B1 to C1. Practice only draws approved exercises of these levels (if there are not enough, the lesson shows the usual shortage message instead of easier ones), and new AI-written exercises are requested at these levels. Applies to the next session or batch.</span>
+        </label>
+        <label>
+          Answers to collect before the review notice
+          <input type="number" min={1} max={50} value={draft.reviewNoticeThreshold} onChange={(e) => setDraft({ ...draft, reviewNoticeThreshold: clamp(Math.round(Number(e.target.value) || 1), 1, 50) })} data-testid="set-review-threshold" />
+          <span className="muted small">1–50, default 5. Answers the local AI could not check wait in a queue; once this many have collected, Practice shows one notice with a task for your coding agent.</span>
+        </label>
+      </div>
+
+      <div className="settings-grid">
+        <VocabularySpeechSettings />
+        <ModelSection preload={saved.values.preloadModelOnStart ?? true} />
+        <StatusSection />
+      </div>
+      <VoicesSettings />
 
       <div className="card settings-bar">
         <div className="actions">
-          <button className="btn btn-primary" disabled={!changed || busy} onClick={() => void save()} data-testid="save-settings">
-            Save
-          </button>
           <button className="btn" disabled={busy} onClick={() => setDraft(pick(saved.defaults))}>
             Restore defaults
           </button>
-          <span className="muted small">Settings revision {saved.revision}. Changing a setting never changes past answers or statistics. The cards below apply at once.</span>
+          <span className="muted small">Settings revision {saved.revision}. Changes are saved automatically and never change past answers or statistics. The cards below apply at once.</span>
         </div>
         {msg && (
           <p className="notice notice-info small" role="status">
@@ -154,11 +166,6 @@ export function Settings() {
         )}
       </div>
 
-      <div className="settings-grid">
-        <VocabularySpeechSettings />
-        <ModelSection preload={saved.values.preloadModelOnStart ?? true} />
-        <StatusSection />
-      </div>
     </section>
   );
 }
@@ -184,7 +191,9 @@ function StatusSection() {
     {configured === false && <p className="muted small">Not configured: add an ElevenLabs API key and voice ID.</p>}
     {credits?.available && credits.limit !== undefined && credits.used !== undefined
       ? <>
-        <p className="small" data-testid="eleven-credits">Credits: <strong>{credits.used.toLocaleString()} / {credits.limit.toLocaleString()}</strong> characters used ({credits.remaining?.toLocaleString()} left){credits.resetsAt ? `, resets ${new Date(credits.resetsAt).toLocaleDateString()}` : ""}{credits.tier ? ` · plan: ${credits.tier}` : ""}.</p>
+        <p className="small" data-testid="eleven-credits">Credits: <strong>{credits.used.toLocaleString()} / {credits.limit.toLocaleString()}</strong> characters used ({credits.remaining?.toLocaleString()} left - {credits.limit > 0 ? Math.round((credits.used / credits.limit) * 100) : 0}%)</p>
+        <p className="small" data-testid="eleven-credits">Credits: {credits.resetsAt ? `Resets ${new Date(credits.resetsAt).toLocaleDateString()}` : ""}{credits.tier ? ` · plan: ${credits.tier}` : ""}.</p>
+
         <progress max={credits.limit} value={credits.used} aria-label="ElevenLabs credits used" />
       </>
       : credits && <p className="muted small">Credits unavailable: {credits.reason}</p>}
@@ -224,7 +233,7 @@ function VocabularySpeechSettings() {
 }
 
 /** older settings revisions hold a fixed voice count; it is shown as the share of the task count it was */
-const pick = (v: Values): Draft => ({ taskCount: v.taskCount, weakRatio: v.weakRatio, voiceShare: v.voiceShare ?? Math.round((v.voiceTarget / v.taskCount) * 20) / 20, practiceSoundsEnabled: v.practiceSoundsEnabled ?? true, typingSoundsEnabled: v.typingSoundsEnabled ?? true, vocabularyTaskCount: v.vocabularyTaskCount ?? 8, vocabularyNewWordsPerSession: v.vocabularyNewWordsPerSession ?? 4, reviewNoticeThreshold: v.reviewNoticeThreshold ?? 5, difficultyMin: v.difficultyMin ?? (v.difficultyMax ? "A2" : "B1"), difficultyMax: v.difficultyMax ?? "C1", typingWordsPerLevel: v.typingWordsPerLevel ?? 30, typingVocabularyShare: v.typingVocabularyShare ?? 0.3, typingSpeedMultiplier: v.typingSpeedMultiplier ?? 1.05, typingBookMinutes: v.typingBookMinutes ?? 5 });
+const pick = (v: Values): Draft => ({ taskCount: v.taskCount, weakRatio: v.weakRatio, voiceShare: v.voiceShare ?? Math.round((v.voiceTarget / v.taskCount) * 20) / 20, practiceSoundsEnabled: v.practiceSoundsEnabled ?? true, typingSoundsEnabled: v.typingSoundsEnabled ?? true, vocabularyTaskCount: v.vocabularyTaskCount ?? 8, vocabularyNewWordsPerSession: v.vocabularyNewWordsPerSession ?? 4, reviewNoticeThreshold: v.reviewNoticeThreshold ?? 5, difficultyMin: v.difficultyMin ?? (v.difficultyMax ? "A2" : "B1"), difficultyMax: v.difficultyMax ?? "C1", typingWordsPerLevel: v.typingWordsPerLevel ?? 30, typingVocabularyShare: v.typingVocabularyShare ?? 0.3, typingSpeedMultiplier: v.typingSpeedMultiplier ?? 1.05, typingBookMinutes: v.typingBookMinutes ?? 5, typingDictationExercisesPerLesson: v.typingDictationExercisesPerLesson ?? 10, typingRecallWords: v.typingRecallWords ?? 2 });
 const voiceCount = (d: Draft): number => Math.round(d.voiceShare * d.taskCount);
 const clamp = (n: number, lo: number, hi: number) => Math.min(hi, Math.max(lo, n));
 

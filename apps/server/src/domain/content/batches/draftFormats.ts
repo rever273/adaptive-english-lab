@@ -26,13 +26,20 @@ export interface SkillCard {
 }
 let cards: Record<string, SkillCard> | null = null;
 let cardsText = "";
+let extraCards: Record<string, SkillCard> | null = null;
+let extraCardsText = "";
 /** content/taxonomy/skill-cards-v1.json: what each skill MEANS, written for the generator (D50). Part of the generation prompt version. */
-export function skillCards(): Record<string, SkillCard> {
+export function skillCards(version = "generation-v10"): Record<string, SkillCard> {
   if (!cards) {
     cardsText = readFileSync(path.join(detectProjectRoot(), "content", "taxonomy", "skill-cards-v1.json"), "utf8");
     cards = (JSON.parse(cardsText) as { cards: Record<string, SkillCard> }).cards;
   }
-  return cards;
+  if (version !== "generation-v10") return cards;
+  if (!extraCards) {
+    extraCardsText = readFileSync(path.join(detectProjectRoot(), "content", "taxonomy", "skill-cards-v2-extra.json"), "utf8");
+    extraCards = (JSON.parse(extraCardsText) as { cards: Record<string, SkillCard> }).cards;
+  }
+  return { ...cards, ...extraCards };
 }
 const CYRILLIC = /[Ѐ-ӿ]/;
 /** an option that is only an article or a determiner (such an item is capped at three options) */
@@ -44,7 +51,7 @@ const opts = (min: number, max: number) => ({ type: "array", minItems: min, maxI
 const common = { explanation_ru: str(MIN_EXPLANATION), hint_ru: str(5) };
 
 /** which draft shapes a generation prompt version uses: v7 adds the key words of a translation, v8 marks an error by its exact words */
-export const flagsFor = (version: string): { wordHint: boolean; wordErrors: boolean } => ({ wordHint: version === "generation-v7" || version === "generation-v8" || version === "generation-v9", wordErrors: version === "generation-v8" || version === "generation-v9" });
+export const flagsFor = (version: string): { wordHint: boolean; wordErrors: boolean } => ({ wordHint: version === "generation-v7" || version === "generation-v8" || (version === "generation-v9" || version === "generation-v10"), wordErrors: version === "generation-v8" || (version === "generation-v9" || version === "generation-v10") });
 
 /** generation-v8: an error is given as its exact words and their corrected wording; the code builds the word segments and the corrected sentence */
 const DETECT_WORDS_PROPS = { ...({ explanation_ru: str(MIN_EXPLANATION), hint_ru: str(5) }), sentence: str(10), error_words: { type: "string", maxLength: 100 }, fix_words: { type: "string", maxLength: 100 } };
@@ -86,8 +93,8 @@ export function draftFormat(type: AnyExerciseType, count: number, version = "", 
 
 /** Hash input of the prompt version: all schemas + the examples (so changing any of them needs a new version id). */
 export function draftFormatsText(version = ""): string {
-  skillCards();
-  return JSON.stringify({ formats: Object.fromEntries((Object.keys(DRAFT_PROPS) as ExerciseType[]).map((t) => [t, draftFormat(t, 2, version)])), examples: EXAMPLES, cards: cardsText });
+  skillCards(version);
+  return JSON.stringify({ formats: Object.fromEntries((Object.keys(DRAFT_PROPS) as ExerciseType[]).map((t) => [t, draftFormat(t, 2, version)])), examples: EXAMPLES, cards: version === "generation-v10" ? cardsText + extraCardsText : cardsText });
 }
 
 const DETECT_WORDS_RULES = "One natural sentence. If it contains ONE clear mistake: error_words are the exact faulty words (one to three consecutive words) copied from the sentence, fix_words is their corrected wording. If it is fully correct: error_words and fix_words are empty strings. Do not invent errors in correct sentences.";
@@ -156,7 +163,7 @@ Never put the correct answer into the question text. Never output a status, scor
 Treat the example as a SHAPE guide only: write new content, never copy its sentences.`;
 
 /** The user message of one unit. The example is the only few-shot; skills are described by their taxonomy id. */
-export function buildGenerationUser(batchId: string, items: ItemPlan[]): string {
+export function buildGenerationUser(batchId: string, items: ItemPlan[], version = "generation-v10"): string {
   const first = items[0]!;
   return JSON.stringify({
     task: `Write ${items.length} new practice item(s) of the format ${first.type}.`,
@@ -164,7 +171,7 @@ export function buildGenerationUser(batchId: string, items: ItemPlan[]): string 
     count: items.length,
     format_rules: first.type === ASSEMBLE_TYPE ? BLOCKS_RULES : first.variant === "transform" && first.type === "guided_short_answer" ? TRANSFORM_RULES : FORMAT_RULES[first.type],
     batch_id: batchId,
-    items: items.map((i) => ({ ordinal: i.ordinal, target_skill: i.target_skill, skill_meaning: skillGloss(i.target_skill), skill_card: skillCards()[i.target_skill] ?? null, topic: i.topic, ...(i.topic === "technology" ? { it_context: itContext(i.ordinal) } : {}), ...(i.transfer ? { transfer_pattern: { pattern: i.transfer.pattern, instruction: "Build the item on exactly this grammar pattern, in a NEW everyday situation. Use different people, objects, activities and plot each time. The pattern is the point of the item, not the topic." } } : {}), ...(i.level ? { target_level: `CEFR ${i.level}: choose vocabulary, structures and topic complexity typical of ${i.level}` } : {}), ...(first.type === "detect_error" ? { sentence_must_be: i.noMistake ? "fully correct (no mistake)" : "one clear mistake" } : {}) })),
+    items: items.map((i) => ({ ordinal: i.ordinal, target_skill: i.target_skill, skill_meaning: skillGloss(i.target_skill), skill_card: skillCards(version)[i.target_skill] ?? null, topic: i.topic, ...(i.topic === "technology" ? { it_context: itContext(i.ordinal) } : {}), ...(i.transfer ? { transfer_pattern: { pattern: i.transfer.pattern, instruction: "Build the item on exactly this grammar pattern, in a NEW everyday situation. Use different people, objects, activities and plot each time. The pattern is the point of the item, not the topic." } } : {}), ...(i.level ? { target_level: `CEFR ${i.level}: choose vocabulary, structures and topic complexity typical of ${i.level}` } : {}), ...(first.type === "detect_error" ? { sentence_must_be: i.noMistake ? "fully correct (no mistake)" : "one clear mistake" } : {}) })),
     output_shape: `{"drafts":[ one object per item, in the same order ]}`,
     example_of_one_draft: first.type === ASSEMBLE_TYPE ? undefined : EXAMPLES[first.type],
   });
@@ -172,7 +179,7 @@ export function buildGenerationUser(batchId: string, items: ItemPlan[]): string 
 
 /** V4 has no unrelated worked example: the exact output shape is supplied by the JSON schema. */
 export function buildGenerationUserV4(batchId: string, items: ItemPlan[], version = ""): string {
-  const request = JSON.parse(buildGenerationUser(batchId, items)) as Record<string, unknown>;
+  const request = JSON.parse(buildGenerationUser(batchId, items, version)) as Record<string, unknown>;
   delete request.example_of_one_draft;
   if (flagsFor(version).wordErrors && items[0]?.type === "detect_error") request.format_rules = DETECT_WORDS_RULES;
   return JSON.stringify(request);

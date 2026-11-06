@@ -1,6 +1,6 @@
 import { firstTranslation } from "../format";
 import { drawBackground, drawMeteor, drawShip, makeBackground, makeMeteorVisual, rgba, type MeteorVisual } from "./art";
-import { handleWordKey, tickWords, type WordsEngineState, type WordsEngineConfig, type WordsEvent, type WordsWord } from "./wordsEngine";
+import { comboMultiplier, handleWordKey, tickWords, type WordsEngineState, type WordsEngineConfig, type WordsEvent, type WordsWord } from "./wordsEngine";
 
 /**
  * Canvas 2D renderer for the Words game. Owns the requestAnimationFrame loop, drives the pure engine, assigns lanes to newly
@@ -11,6 +11,13 @@ import { handleWordKey, tickWords, type WordsEngineState, type WordsEngineConfig
 const clampDt = (dt: number): number => Math.min(dt, 100);
 
 const BOLT_MS = 150;
+/** laser colours by combo multiplier: the ship also glows once a combo is running */
+const LASER: Record<number, { glow: string; core: string }> = {
+  1: { glow: "rgba(90,200,255,0.55)", core: "#ffffff" },
+  1.1: { glow: "rgba(90,255,160,0.6)", core: "#eafff3" },
+  1.2: { glow: "rgba(255,210,70,0.65)", core: "#fff7d6" },
+  1.5: { glow: "rgba(255,90,230,0.7)", core: "#ffe9fb" },
+};
 const SHAKE_MS = 380;
 const LABEL_FONT = "700 21px system-ui, sans-serif";
 const TRANSLATION_FONT = "600 15px system-ui, sans-serif";
@@ -131,7 +138,7 @@ export class WordsScene {
 
   key(k: string): WordsEvent[] {
     if (this.paused()) return [];
-    const events = handleWordKey(this.engine, this.config, k);
+    const events = handleWordKey(this.engine, this.config, k, performance.now());
     for (const e of events) {
       if (e.type === "hit") this.fire(e.word, events.some((x) => x.type === "destroyed"));
     }
@@ -303,7 +310,7 @@ export class WordsScene {
     ctx.fillText(rest, x0 + wTyped + wNext, baseline);
 
     const translation = firstTranslation(planWord?.translationRu);
-    if (planWord?.source === "vocabulary" && translation) {
+    if ((planWord?.source === "vocabulary" || word.revealed) && translation) {
       ctx.font = TRANSLATION_FONT;
       const tw = ctx.measureText(translation).width;
       const tx = cx - tw / 2 + this.shakeOffset(word) * 0.4;
@@ -311,10 +318,10 @@ export class WordsScene {
       ctx.beginPath();
       ctx.roundRect(tx - 8, top + 36, tw + 16, 23, 7);
       ctx.fill();
-      ctx.strokeStyle = "rgba(255,200,61,0.6)";
+      ctx.strokeStyle = planWord?.source === "vocabulary" ? "rgba(255,200,61,0.6)" : "rgba(120,190,255,0.6)";
       ctx.lineWidth = 1;
       ctx.stroke();
-      ctx.fillStyle = "#ffd9a0";
+      ctx.fillStyle = planWord?.source === "vocabulary" ? "#ffd9a0" : "#cfe6ff";
       ctx.fillText(translation, tx, top + 52);
     }
   }
@@ -363,6 +370,28 @@ export class WordsScene {
 
     this.drawFx();
     const ship = this.shipPos();
+    const mult = comboMultiplier(this.engine.streak);
+    if (mult > 1) {
+      const glow = (LASER[mult] ?? LASER[1]!).glow;
+      ctx.save();
+      ctx.globalCompositeOperation = "lighter";
+      const g = ctx.createRadialGradient(ship.x, ship.y, 4, ship.x, ship.y, 64);
+      g.addColorStop(0, glow);
+      g.addColorStop(1, "rgba(0,0,0,0)");
+      ctx.fillStyle = g;
+      ctx.beginPath();
+      ctx.arc(ship.x, ship.y, 64, 0, Math.PI * 2);
+      ctx.fill();
+      ctx.restore();
+      ctx.save();
+      ctx.font = "bold 15px system-ui, sans-serif";
+      ctx.textAlign = "center";
+      ctx.fillStyle = "#ffffff";
+      ctx.shadowColor = glow;
+      ctx.shadowBlur = 10;
+      ctx.fillText(`COMBO ×${mult} · ${this.engine.streak}`, ship.x, ship.y - 54);
+      ctx.restore();
+    }
     drawShip(ctx, ship.x, ship.y, this.shipAngle, t, this.muzzle);
   }
 
@@ -395,13 +424,14 @@ export class WordsScene {
       ctx.save();
       ctx.globalCompositeOperation = "lighter";
       ctx.lineCap = "round";
-      ctx.strokeStyle = "rgba(90,200,255,0.55)";
+      const laser = LASER[comboMultiplier(this.engine.streak)] ?? LASER[1]!;
+      ctx.strokeStyle = laser.glow;
       ctx.lineWidth = 7;
       ctx.beginPath();
       ctx.moveTo(tail.x, tail.y);
       ctx.lineTo(head.x, head.y);
       ctx.stroke();
-      ctx.strokeStyle = "#ffffff";
+      ctx.strokeStyle = laser.core;
       ctx.lineWidth = 2.5;
       ctx.stroke();
       ctx.restore();

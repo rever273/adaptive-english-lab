@@ -320,6 +320,14 @@ export function bookEncounters(db: Db, passage: string, base: number): Array<{ e
   return out;
 }
 
+/** Saved words (learned or not) that can be the target word of a dictation sentence: one plain word of 3-14 letters, with its known forms. */
+export function dictationVocabulary(db: Db): Array<{ entryId: string; lemma: string; forms: string[] }> {
+  const rows = (db.prepare("SELECT id, lemma, pos, learned, user_revision, surface_forms_json, created_at FROM vocabulary_entries ORDER BY lemma").all() as EntryRow[]).filter((r) => !isRemoved(db, r.id));
+  return rows
+    .filter((r) => /^[a-z]{3,14}$/.test(r.lemma))
+    .map((r) => ({ entryId: r.id, lemma: r.lemma, forms: [...new Set([r.lemma, ...formsOf(r)].map((f) => f.toLowerCase()).filter((f) => /^[a-z]{2,20}$/.test(f)))] }));
+}
+
 export function matchWords(db: Db, words: readonly string[]): Array<{ word: string; lemma: string; translationRu: string }> {
   const byForm = savedFormIndex(db);
   const found: Array<{ word: string; entry: EntryRow }> = [];
@@ -410,6 +418,21 @@ export interface VocabularyTotals {
 /** entries whose latest event is not a removal (D63). References the table by its real name so it works with an `e` alias. */
 export const VISIBLE = "(SELECT kind FROM vocabulary_entry_events ev WHERE ev.entry_id = vocabulary_entries.id ORDER BY ev.created_at DESC, ev.rowid DESC LIMIT 1) IS NOT 'removed'";
 const VISIBLE_ENC = "entry_id IN (SELECT id FROM vocabulary_entries WHERE " + VISIBLE + ")";
+
+/** current example sentence of each entry (the learner's own text first, then the model's draft); entries without one are absent */
+export function currentExamples(db: Db, entryIds: readonly string[]): Map<string, string> {
+  const out = new Map<string, string>();
+  if (entryIds.length === 0) return out;
+  const rows = db.prepare(`SELECT r.entry_id AS id, r.example_en AS x, r.source AS s FROM vocabulary_revisions r WHERE r.entry_id IN (${entryIds.map(() => "?").join(",")}) ORDER BY r.revision DESC`).all(...entryIds) as Array<{ id: string; x: string; s: string }>;
+  for (const pass of ["user", "any"] as const) {
+    for (const row of rows) {
+      if (out.has(row.id) || row.x.trim() === "") continue;
+      if (pass === "user" && row.s !== "user") continue;
+      out.set(row.id, row.x.trim());
+    }
+  }
+  return out;
+}
 
 /** current Russian translation for a set of entry ids, with the same priority as `view`: a non-empty user text wins, then a model draft. */
 export function currentTranslations(db: Db, entryIds: readonly string[]): Map<string, string> {

@@ -1,6 +1,8 @@
 import type { Db } from "../../db/open.js";
 import type { TypingAnalytics, TypingMode } from "@english-lab/contracts";
 import { localDateIn } from "../attempts/canonical.js";
+import { keyInsights } from "./keyStats.js";
+import { recallSummary } from "./recall.js";
 import { buildTypingResult, sessionRow, type TypingSessionRow } from "./result.js";
 
 export interface AnalyticsInput {
@@ -71,15 +73,16 @@ export function typingAnalytics(db: Db, input: AnalyticsInput): TypingAnalytics 
   // daily activity over the window
   const minDate = rows.length ? localDateIn(timezone, new Date(rows[0]!.ended_at ?? rows[0]!.started_at)) : null;
   const dates = dateList(input.days, timezone, input.now, minDate);
-  const perDate = new Map<string, { attempts: number; activeSeconds: number }>();
+  const perDate = new Map<string, { attempts: number; activeSeconds: number; chars: number }>();
   for (const r of finished) {
     const d = localDateIn(timezone, new Date(r.ended_at ?? r.started_at));
-    const cur = perDate.get(d) ?? { attempts: 0, activeSeconds: 0 };
+    const cur = perDate.get(d) ?? { attempts: 0, activeSeconds: 0, chars: 0 };
     cur.attempts += 1;
     cur.activeSeconds += Math.round(r.active_ms / 1000);
+    cur.chars += r.chars_typed;
     perDate.set(d, cur);
   }
-  const daily = dates.map((d) => ({ date: d, attempts: perDate.get(d)?.attempts ?? 0, activeSeconds: perDate.get(d)?.activeSeconds ?? 0 }));
+  const daily = dates.map((d) => ({ date: d, attempts: perDate.get(d)?.attempts ?? 0, activeSeconds: perDate.get(d)?.activeSeconds ?? 0, chars: perDate.get(d)?.chars ?? 0 }));
 
   const summary = {
     totalActiveMs,
@@ -91,9 +94,11 @@ export function typingAnalytics(db: Db, input: AnalyticsInput): TypingAnalytics 
     maxWpm,
     avgAccuracy,
     maxScore,
+    totalChars: finished.reduce((a, r) => a + r.chars_typed, 0),
+    bestCombo: finished.reduce<number | null>((best, r) => (r.best_combo !== null && r.best_combo !== undefined && (best === null || r.best_combo > best) ? r.best_combo : best), null),
     last: lastRow ? buildTypingResult(db, lastRow) : null,
     ...(mode === "words"
-      ? { wordsShown: countWords(db, "shown"), wordsDestroyed: countWords(db, "destroyed") }
+      ? { wordsShown: countWords(db, "shown"), wordsDestroyed: countWords(db, "destroyed"), recall: recallSummary(db) }
       : booksProgress(db, mode)),
   };
 
@@ -102,6 +107,7 @@ export function typingAnalytics(db: Db, input: AnalyticsInput): TypingAnalytics 
     window: { days: input.days, timezone },
     summary,
     series: { wpm, accuracy, score, daily, duration, personalBest },
+    keyInsights: keyInsights(db),
   };
 }
 

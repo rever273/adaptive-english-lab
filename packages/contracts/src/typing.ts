@@ -1,4 +1,5 @@
 import { z } from "zod";
+import { DictationOverviewSchema } from "./typingDictation.js";
 
 export const TypingModeSchema = z.enum(["words", "books"]);
 export type TypingMode = z.infer<typeof TypingModeSchema>;
@@ -51,6 +52,11 @@ export type TypingWordsStartResponse = z.infer<typeof TypingWordsStartResponseSc
 const Appearance = z.object({ planIndex: z.number().int().nonnegative(), order: z.number().int().nonnegative() }).strict();
 const Counters = { activeMs: z.number().int().nonnegative(), charsTyped: z.number().int().nonnegative(), errors: z.number().int().nonnegative() };
 
+/** letter-pair facts of a finished session: "th" typed correctly `count` times in `totalMs` of key intervals, `errors` wrong keys when the second letter was expected */
+export const KeyStatSchema = z.object({ pair: z.string().regex(/^[a-z-]{2}$/), count: z.number().int().min(0).max(100000), totalMs: z.number().int().min(0).max(100_000_000), errors: z.number().int().min(0).max(100000) }).strict();
+export type KeyStatPayload = z.infer<typeof KeyStatSchema>;
+const KeyStats = z.array(KeyStatSchema).max(1200).optional();
+
 export const TypingAppearancesRequestSchema = z.object({ appearances: z.array(Appearance).min(1).max(200) }).strict();
 export type TypingAppearancesRequest = z.infer<typeof TypingAppearancesRequestSchema>;
 
@@ -63,6 +69,9 @@ export const TypingWordsCompleteRequestSchema = z
     destroyedPlanIndexes: z.array(z.number().int().nonnegative()).max(200),
     /** wrong keys pressed while each word that appeared was locked (0 = clean); older clients send none */
     wordErrors: z.array(z.object({ planIndex: z.number().int().nonnegative(), errors: z.number().int().min(0).max(1000) }).strict()).max(200).optional(),
+    keyStats: KeyStats,
+    /** words in a row without a wrong key (Words) */
+    bestCombo: z.number().int().min(0).max(100000).optional(),
   })
   .strict();
 export type TypingWordsCompleteRequest = z.infer<typeof TypingWordsCompleteRequestSchema>;
@@ -98,11 +107,13 @@ export type TypingBookStartResponse = z.infer<typeof TypingBookStartResponseSche
 export const TypingBookCheckpointRequestSchema = z.object({ offset: z.number().int().nonnegative(), ...Counters }).strict();
 export type TypingBookCheckpointRequest = z.infer<typeof TypingBookCheckpointRequestSchema>;
 
-export const TypingBookCompleteRequestSchema = z.object({ offset: z.number().int().nonnegative(), ...Counters }).strict();
+/** bestCombo: the longest run of characters typed correctly (Precision Combo) */
+export const TypingBookCompleteRequestSchema = z.object({ offset: z.number().int().nonnegative(), ...Counters, keyStats: KeyStats, bestCombo: z.number().int().min(0).max(10_000_000).optional() }).strict();
 export type TypingBookCompleteRequest = z.infer<typeof TypingBookCompleteRequestSchema>;
 
 export const TypingOverviewSchema = z
   .object({
+    dictation: DictationOverviewSchema,
     words: z
       .object({ nextLevel: z.number().int(), completedLevel: z.number().int(), activeSessionId: z.string().nullable(), bankWords: z.number().int() })
       .strict(),
@@ -180,6 +191,19 @@ export const TypingAnalyticsSchema = z
         currentLevel: z.number().int().optional(),
         chapter: z.string().nullable().optional(),
         percentRead: z.number().nullable().optional(),
+        /** characters typed in all finished attempts of this mode, and the best combo (Words: words in a row; Books: characters in a row) */
+        totalChars: z.number().int().optional(),
+        bestCombo: z.number().int().nullable().optional(),
+        /** Words only: the memory check after levels (words typed from their translation) */
+        recall: z.object({ checks: z.number().int(), words: z.number().int(), withoutHelpRate: z.number().nullable(), avgPoints: z.number().nullable() }).strict().optional(),
+      })
+      .strict(),
+    /** letter pairs that are slow or often mistyped, over all finished Words and Books sessions */
+    keyInsights: z
+      .object({
+        slowPairs: z.array(z.object({ pair: z.string(), meanMs: z.number(), count: z.number().int() }).strict()),
+        errorPairs: z.array(z.object({ pair: z.string(), errorRate: z.number(), count: z.number().int() }).strict()),
+        typicalMs: z.number().nullable(),
       })
       .strict(),
     series: z
@@ -188,7 +212,7 @@ export const TypingAnalyticsSchema = z
         accuracy: z.array(Point),
         score: z.array(Point),
         /** every day of the window, zero when nothing happened */
-        daily: z.array(z.object({ date: z.string(), attempts: z.number().int(), activeSeconds: z.number().int() }).strict()),
+        daily: z.array(z.object({ date: z.string(), attempts: z.number().int(), activeSeconds: z.number().int(), chars: z.number().int().optional() }).strict()),
         duration: z.array(Point),
         personalBest: z.array(z.object({ at: z.string(), wpm: z.number(), score: z.number() }).strict()),
       })
@@ -196,3 +220,18 @@ export const TypingAnalyticsSchema = z
   })
   .strict();
 export type TypingAnalytics = z.infer<typeof TypingAnalyticsSchema>;
+
+/** `sentence`: an example of the word from the dictionary with the word blanked out ("____"), or null when there is none */
+export const TypingRecallWordSchema = z.object({ entryId: z.string(), lemma: z.string(), translationRu: z.string(), sentence: z.string().nullable() }).strict();
+export const TypingRecallStartResponseSchema = z.object({ words: z.array(TypingRecallWordSchema), done: z.boolean(), points: z.number().int() }).strict();
+export type TypingRecallWord = z.infer<typeof TypingRecallWordSchema>;
+export type TypingRecallStartResponse = z.infer<typeof TypingRecallStartResponseSchema>;
+export const TypingRecallSaveRequestSchema = z
+  .object({
+    results: z
+      .array(z.object({ entryId: z.string().min(1).max(64), correctKeys: z.number().int().min(0).max(64), wrongKeys: z.number().int().min(0).max(1000), hints: z.number().int().min(0).max(64), revealed: z.boolean() }).strict())
+      .min(1)
+      .max(3),
+  })
+  .strict();
+export type TypingRecallSaveRequest = z.infer<typeof TypingRecallSaveRequestSchema>;

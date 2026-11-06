@@ -186,7 +186,7 @@ textarea { width: 100%; font: inherit; padding: 0.6rem; border: 1px solid var(--
 .table-wrap { overflow-x: auto; }
 .summary-table.wide { max-width: none; }
 .summary-table.wide td { font-weight: 400; vertical-align: top; }
-.btn-small { padding: 0.2rem 0.6rem; font-size: 0.875rem; }
+.btn-small { padding: 0.2rem 0.6rem; font-size: 0.875rem; margin: 0 0.4em;}
 .row-actions { white-space: nowrap; display: flex; gap: 0.35rem; }
 .inline { display: inline-flex; align-items: center; gap: 0.4rem; }
 .inline input { width: 5rem; }
@@ -235,7 +235,7 @@ select { font: inherit; background: var(--surface); color: var(--text); border: 
 
 .settings-page { max-width: 80rem; }
 .settings-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(min(100%, 22rem), 1fr)); gap: 1rem; align-items: start; margin-bottom: 1rem; }
-.settings-card { margin: 0; display: flex; flex-direction: column; gap: 0.9rem; }
+.settings-card { display: flex; flex-direction: column; gap: 0.9rem; }
 .settings-card h3 { margin: 0; font-size: 1.05rem; }
 .settings-card h4 { margin: 0.4rem 0 0; font-size: 0.9rem; color: var(--muted); }
 .settings-card p { margin: 0; }
@@ -305,6 +305,10 @@ textarea { background: var(--surface-2); }
 }
 
 /* session summary: one tile per outcome */
+/* two rows of tiles, as many columns as needed, never a horizontal scroll (Typing analytics) */
+.stat-grid-2 { display: grid; grid-template-rows: repeat(2, auto); grid-auto-flow: column; grid-auto-columns: minmax(0, 1fr); gap: 0.6rem; margin: 0.75rem 0 1rem; }
+.stat-grid-2 .stat { padding: 0.55rem 0.5rem; }
+.stat-grid-2 .stat-num { font-size: 1.3rem; }
 .stat-grid { display: grid; grid-auto-flow: column; grid-auto-columns: minmax(7.5rem, 1fr); gap: 0.6rem; margin: 0.75rem 0 1rem; overflow-x: auto; padding-bottom: 0.2rem; }
 .stat { --c: var(--accent); display: grid; grid-template-columns: auto auto; grid-template-rows: auto auto; justify-content: center; justify-items: center; column-gap: 0.6rem; row-gap: 0.3rem; align-items: center; text-align: center; padding: 0.7rem 0.8rem; border-radius: 0.6rem; background: var(--surface); border: 1px solid var(--border); border-left: 4px solid var(--c); }
 .stat .pi { grid-row: 1; font-size: 1.5rem; color: var(--c); }
@@ -556,7 +560,7 @@ td.row-actions .btn + .btn { margin-left: 0.35rem; }
 .tab .kbd { top: -0.15rem; right: -0.1rem; opacity: 0.8; }
 
 /* ---- Typing Practice (TASK_027) ---- */
-.typing-cards { display: grid; grid-template-columns: repeat(auto-fit, minmax(min(100%, 20rem), 1fr)); gap: 1rem; }
+.typing-cards { display: grid; grid-template-columns: repeat(auto-fit, minmax(min(100%, 20rem), 1fr)); gap: 1rem; align-items: end; }
 .typing-mode-card.disabled { opacity: 0.65; }
 .typing-level { font-weight: 600; }
 .typing-game { position: relative; }
@@ -616,7 +620,7 @@ kbd { font: 600 0.78rem ui-monospace, "Cascadia Mono", Consolas, monospace; padd
 .result-bad { background: var(--err-bg); color: var(--err-fg); }
 
 /* global word panel (bottom left, mirrors the AI panel on the right) */
-.word-panel { position: fixed; left: 1rem; bottom: 1rem; z-index: 40; width: min(19rem, calc(100vw - 2rem)); background: var(--surface); border: 1px solid var(--border); border-top: 3px solid #3fbf6f; border-radius: 0.7rem; box-shadow: 0 10px 30px rgb(0 0 0 / 45%); padding: 0.45rem 0.75rem 0.65rem; }
+.word-panel { position: fixed; left: 1rem; bottom: 1rem; z-index: 40; width: min(21rem, calc(100vw - 2rem)); background: var(--surface); border: 1px solid var(--border); border-top: 3px solid #3fbf6f; border-radius: 0.7rem; box-shadow: 0 10px 30px rgb(0 0 0 / 45%); padding: 0.45rem 0.75rem 0.65rem; }
 .word-panel-head { display: flex; align-items: center; justify-content: space-between; font-weight: 600; font-size: 0.85rem; }
 .word-panel-head .pi { color: #3fbf6f; }
 .word-panel-head .icon-btn { width: 1.6rem; height: 1.6rem; }
@@ -680,6 +684,8 @@ body:has(.model-notice) .ai-panel, body:has(.model-notice) .ai-pill { bottom: 4.
 .vocab-task { display: grid; grid-template-columns: minmax(0, 1fr) minmax(120px, 190px); gap: 20px; }
 .vocab-task-content { min-width: 0; }
 .vocab-task-image { align-self: start; margin-top: 22px; }
+.vocab-task-image:empty { display: none; }
+.vocab-task:has(> .vocab-task-image:empty) { grid-template-columns: minmax(0, 1fr); }
 .vocab-task-image .word-image-button, .vocab-task-image .word-image-placeholder { width: 100%; height: auto; aspect-ratio: 1; }
 .vocab-word-meaning { color: #78b9ff; margin: 6px 0 12px; }
 .vocab-translation { color: #78b9ff; font-style: italic; margin: 6px 0 12px; }
@@ -725,7 +731,7 @@ button.letter-hint-tile:hover { background: #365575; }
 .chart2 { position: relative; }
 .chart2-svg { display: block; width: 100%; height: auto; overflow: visible; }
 .chart2-grid { stroke: var(--border); stroke-width: 1; stroke-dasharray: 3 4; opacity: 0.8; }
-.chart2-label { fill: var(--muted); font-size: 10px; font-variant-numeric: tabular-nums; }
+.chart2-label { fill: var(--muted); font-size: 12px; font-variant-numeric: tabular-nums; }
 .chart2-hover { fill: var(--text); opacity: 0.07; }
 .chart2-hit { fill: transparent; outline: none; cursor: crosshair; }
 .chart2-tip { position: absolute; top: 0; transform: translateX(-50%); display: grid; gap: 0.1rem; padding: 0.45rem 0.65rem; font-size: 0.8rem; line-height: 1.35; white-space: nowrap; color: var(--text); background: var(--surface); border: 1px solid var(--border); border-radius: 0.5rem; box-shadow: 0 6px 24px rgba(0,0,0,0.4); pointer-events: none; z-index: 3; }
@@ -768,5 +774,89 @@ button.letter-hint-tile:hover { background: #365575; }
 @keyframes books-gloss-in { from { opacity: 0; } }
 .typing-trouble { display: flex; flex-wrap: wrap; gap: 0.4rem; align-items: center; margin: 0.4rem 0 0.8rem; }
 
-.books-translation { position: absolute; left: 0; right: 0; bottom: 0; z-index: 2; padding: 0.4rem 0.9rem; background: rgba(0,0,0,0.62); color: #fff; font-size: 1rem; line-height: 1.35; text-align: center; border-radius: 0 0 0.6rem 0.6rem; display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; overflow: hidden; pointer-events: none; }
+.books-translation { position: absolute; left: 0; right: 0; bottom: 0; z-index: 2; padding: 0.4rem 0.9rem; background: rgba(0,0,0,0.62); color: #fff; font-size: 1rem; line-height: 1.35; text-align: center; border-radius: 0 0 0.6rem 0.6rem; display: -webkit-box; -webkit-line-clamp: 2; line-clamp: 2; -webkit-box-orient: vertical; overflow: hidden; pointer-events: none; }
 .books-translation.error { color: #ffb4a8; }
+
+/* Audio Dictation (TASK_028) */
+.dictation-game { display: flex; flex-direction: column; gap: 0.6rem; }
+.dictation-stage { position: relative; }
+.dictation-canvas { height: min(46vh, 420px); min-height: 220px; }
+.dictation-words { display: flex; flex-wrap: wrap; gap: 0.35rem 0.6rem; min-height: 1.8rem; margin: 0; font-size: 1.15rem; }
+.dictation-masked { color: var(--muted, #8a93a6); letter-spacing: 0.1em; }
+.dictation-shown { font-weight: 600; }
+.dictation-translation { margin: 0; padding: 0.4rem 0.7rem; border-radius: 0.5rem; background: rgba(106, 183, 255, 0.12); }
+.dictation-input { width: 100%; font: inherit; font-size: 1.1rem; padding: 0.55rem 0.7rem; resize: none; }
+.dictation-message { min-height: 1.3rem; margin: 0; }
+.dictation-list ol { padding-left: 1.2rem; }
+.dictation-diff-wrong { color: #ffb4a8; }
+.dictation-diff-missing { color: #f3c94d; }
+.dictation-diff-extra { color: #ffb4a8; text-decoration: line-through; }
+@media (prefers-reduced-motion: reduce) { .dictation-game * { animation: none !important; transition: none !important; } }
+
+.dictation-game .typing-hud { display: flex; flex-wrap: wrap; align-items: center; gap: 0.5rem 1.2rem; }
+.dictation-field { position: relative; }
+.dictation-mirror, .dictation-input { font: inherit; font-size: 1.1rem; line-height: 1.45; padding: 0.55rem 0.7rem; border: 1px solid transparent; border-radius: 0.5rem; white-space: pre-wrap; overflow-wrap: anywhere; box-sizing: border-box; letter-spacing: normal; }
+.dictation-mirror { position: absolute; inset: 0; pointer-events: none; overflow: hidden; color: var(--text); background: var(--surface-2, rgba(255,255,255,0.04)); border-color: var(--border); }
+.dictation-input { position: relative; display: block; width: 100%; resize: none; color: transparent; caret-color: var(--text); background: transparent; border-color: var(--border); }
+.dictation-input::placeholder { color: var(--muted, #8a93a6); }
+.dictation-wrong { color: #ff7b72; text-decoration: underline wavy #ff7b72; text-underline-offset: 3px; }
+.dictation-focus { color: #6ab7ff; }
+.dictation-repeat { margin: 0; }
+.dictation-prepare { margin-top: 0.8rem; display: flex; flex-wrap: wrap; align-items: center; gap: 0.4rem 0.6rem; }
+.dictation-prepare input { width: 4.2rem; }
+.dictation-prepare p { flex-basis: 100%; margin: 0; }
+
+/* Words: memory check (stars) and combo */
+.recall { display: flex; flex-direction: column; gap: 0.6rem; }
+.recall-stage { position: relative; height: min(62vh, 560px); min-height: 380px; border: 1px solid var(--border); border-radius: 0.6rem; background: radial-gradient(ellipse at 50% 40%, #1a1f3d 0%, #0b0e1a 70%); overflow: hidden; }
+.recall-slot { position: absolute; width: min(34%, 300px); text-align: center; display: flex; flex-direction: column; align-items: center; gap: 0.2rem; }
+.recall-top-left { left: 9%; top: 6%; }
+.recall-top-right { right: 9%; top: 6%; }
+.recall-bottom { left: 50%; bottom: 6%; transform: translateX(-50%); }
+.recall-star { width: 92px; height: 92px; filter: drop-shadow(0 0 12px rgba(255, 210, 90, 0.85)); animation: recall-twinkle 2.4s ease-in-out infinite; }
+.recall-star.active { filter: drop-shadow(0 0 20px rgba(106, 183, 255, 0.95)); }
+.recall-star.done { filter: drop-shadow(0 0 14px rgba(70, 230, 150, 0.9)); animation-duration: 4s; }
+.recall-spark { fill: #fff; animation: recall-spark 1.6s ease-in-out infinite; }
+.recall-spark.s2 { animation-delay: 0.5s; }
+.recall-spark.s3 { animation-delay: 1s; }
+.recall-translation { margin: 0; font-size: 1.2rem; font-weight: 600; color: #ffe9b0; }
+.recall-letters { margin: 0.2rem 0 0; font-size: 1.9rem; letter-spacing: 0.35em; font-family: ui-monospace, Consolas, monospace; }
+.recall-letters .blank { color: #6f7aa0; }
+.recall-letters .typed { color: #4be3a0; }
+.recall-letters .hinted { color: #ffc83d; }
+.recall-slot.active .recall-translation { color: #fff; }
+.recall-slot.done .recall-translation { color: #8dffc4; }
+.recall-points { margin: 0; }
+.recall-done { display: flex; align-items: center; gap: 1rem; }
+@keyframes recall-twinkle { 0%, 100% { transform: scale(1) rotate(0deg); } 50% { transform: scale(1.1) rotate(6deg); } }
+@keyframes recall-spark { 0%, 100% { opacity: 0.2; } 50% { opacity: 1; } }
+@media (prefers-reduced-motion: reduce) { .recall-star, .recall-spark { animation: none; } }
+.typing-live { font-variant-numeric: tabular-nums; }
+.typing-combo { font-weight: 700; padding: 0.05rem 0.5rem; border-radius: 999px; background: rgba(255, 210, 70, 0.18); color: #ffd966; }
+.key-insights-cols { display: grid; grid-template-columns: repeat(auto-fit, minmax(14rem, 1fr)); gap: 1rem; }
+.key-insights ul { margin: 0.2rem 0; padding-left: 1.1rem; }
+
+/* Books: saved words in the text, title block */
+.bk-vocab-rest { color: #a9b8d2; }
+.bk-vocab-ok { color: #8fd3ff; }
+.books-title { display: flex; flex-direction: column; gap: 0.1rem; }
+.recall-centre { left: 50%; top: 50%; transform: translate(-50%, -50%); }
+.recall-left { left: 12%; top: 50%; transform: translateY(-50%); }
+.recall-right { right: 12%; top: 50%; transform: translateY(-50%); }
+.recall-sentence { margin: 0.1rem 0 0; font-size: 0.95rem; line-height: 1.35; color: #c9d6f2; font-style: italic; }
+
+.typing-mode-card { display: flex; flex-direction: column; }
+.typing-card-image { width: 100%; aspect-ratio: 16 / 9; object-fit: cover; border-radius: 6px; margin-bottom: 0.8rem; }
+.typing-mode-card .typing-card-action { margin-top: auto; }
+
+
+/* Sentence playback is separate from choosing an answer. */
+.speech-control { display: inline-flex; align-items: center; gap: .4rem; }
+.speech-button { border: 1px solid var(--border); border-radius: .45rem; background: var(--surface); color: var(--text); padding: .35rem .45rem; cursor: pointer; }
+.speech-button:hover { border-color: var(--accent); }
+.speech-button:disabled { opacity: .6; cursor: wait; }
+.feedback-answer, .feedback-sentence { background: color-mix(in srgb, var(--surface) 85%, transparent); border: 1px solid var(--border); border-radius: .5rem; padding: .5rem .7rem; margin: .6rem 0; }
+.feedback-answer p { margin: .25rem 0; }
+.feedback-sentence { display: flex; align-items: center; gap: .6rem; }
+
+.option > label { flex: 1; cursor: pointer; }

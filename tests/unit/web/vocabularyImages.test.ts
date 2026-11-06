@@ -18,6 +18,9 @@ describe("local vocabulary images", () => {
       expect((await app.inject({ url: "/api/v1/vocabulary-image/walking" })).body).toBe("walk image");
       expect((await app.inject({ url: "/api/v1/vocabulary-image/hoping" })).statusCode).toBe(404);
       expect((await app.inject({ url: "/api/v1/vocabulary-image/missing" })).statusCode).toBe(404);
+      // the page asks first, so a missing picture is never a failed image request
+      expect((await app.inject({ url: "/api/v1/vocabulary-image-exists/walking" })).json()).toEqual({ exists: true });
+      expect((await app.inject({ url: "/api/v1/vocabulary-image-exists/compelling" })).json()).toEqual({ exists: false });
     } finally { await app.close(); rmSync(dir, { recursive: true, force: true }); }
   });
 });

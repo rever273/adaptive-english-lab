@@ -7,6 +7,7 @@ import { ApiError } from "../../errors.js";
 import { loadSettings } from "../sessions/policy.js";
 import { computeMetrics, METRICS_VERSION } from "./metrics.js";
 import { buildTypingResult, sessionRow, type TypingSessionRow } from "./result.js";
+import { saveKeyStats, type KeyStat } from "./keyStats.js";
 import { bookEncounters } from "../vocabulary/repository.js";
 import { awardTypingXp, typingXpForBooks } from "./xp.js";
 
@@ -184,6 +185,10 @@ export interface BookCheckpoint {
   activeMs: number;
   charsTyped: number;
   errors: number;
+  /** letter-pair timing and wrong keys (only sent with the completion) */
+  keyStats?: KeyStat[] | undefined;
+  /** longest run of correct characters (Precision Combo) */
+  bestCombo?: number | undefined;
 }
 
 export function checkpointBook(db: Db, sessionId: string, req: BookCheckpoint): { ok: true; applied: boolean } {
@@ -221,9 +226,10 @@ export function completeBook(db: Db, deps: BooksDeps, booksDir: string, sessionI
 
   db.transaction(() => {
     db.prepare(
-      "UPDATE typing_sessions SET status = 'completed', ended_at = ?, current_offset = ?, active_ms = ?, chars_typed = ?, errors = ?, chars_correct = ?, wpm = ?, cpm = ?, accuracy = ?, score = ?, metrics_version = ? WHERE id = ?",
-    ).run(now, end, req.activeMs, req.charsTyped, req.errors, charsCorrect, metrics.wpm, metrics.cpm, metrics.accuracy, metrics.score, METRICS_VERSION, sessionId);
+      "UPDATE typing_sessions SET status = 'completed', ended_at = ?, current_offset = ?, active_ms = ?, chars_typed = ?, errors = ?, chars_correct = ?, wpm = ?, cpm = ?, accuracy = ?, score = ?, metrics_version = ?, best_combo = ? WHERE id = ?",
+    ).run(now, end, req.activeMs, req.charsTyped, req.errors, charsCorrect, metrics.wpm, metrics.cpm, metrics.accuracy, metrics.score, METRICS_VERSION, req.bestCombo ?? null, sessionId);
     awardTypingXp(db, { id: deps.newId(), sessionId, amount: xp, at: now });
+    saveKeyStats(db, deps.newId, sessionId, req.keyStats ?? [], now);
     // the saved words that were in the passage just typed: one encounter per occurrence (re-completing adds nothing)
     const start = row.start_offset ?? 0;
     const putEncounter = db.prepare("INSERT OR IGNORE INTO typing_book_encounters(id, session_id, entry_id, text_offset, created_at) VALUES (?,?,?,?,?)");

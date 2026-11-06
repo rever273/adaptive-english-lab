@@ -1,4 +1,4 @@
-import { useId, useState } from "react";
+import { useEffect, useId, useRef, useState } from "react";
 
 /**
  * The one chart used across the app (Typing, Vocabulary and Analytics pages): optional bars and/or a line over the same x slots,
@@ -26,8 +26,9 @@ export interface ChartSeries {
   max?: number;
 }
 
-const W = 640;
-const H = 210;
+/** the chart is drawn at the width it is shown at, so the text is the same size in every chart whatever its width */
+const DEFAULT_W = 640;
+const H = 230;
 const PAD_T = 14;
 const PAD_B = 26;
 
@@ -50,12 +51,23 @@ function axisOf(values: Array<number | null | undefined>, s: ChartSeries): { top
 export function Chart({ points, bars, line, ariaLabel, legend, secondary }: { points: ChartPoint[]; bars?: ChartSeries; line?: ChartSeries; ariaLabel: string; legend?: string; secondary?: { factor: number; color: string; format: (v: number) => string } }) {
   const id = useId().replace(/:/g, "");
   const [hover, setHover] = useState<number | null>(null);
+  const box = useRef<HTMLDivElement>(null);
+  const [W, setW] = useState(DEFAULT_W);
+  useEffect(() => {
+    const el = box.current;
+    if (!el) return;
+    const measure = () => setW((prev) => { const w = Math.max(300, Math.round(el.clientWidth)); return Math.abs(prev - w) < 2 ? prev : w; });
+    measure();
+    const ro = new ResizeObserver(measure);
+    ro.observe(el);
+    return () => ro.disconnect();
+  }, []);
   const n = points.length;
   if (n === 0) return null;
 
   const both = Boolean(bars && line);
-  const padL = 46;
-  const padR = both || secondary ? 50 : 14;
+  const padL = 52;
+  const padR = both || secondary ? 56 : 14;
   const plotW = W - padL - padR;
   const plotH = H - PAD_T - PAD_B;
   const slot = plotW / n;
@@ -83,13 +95,13 @@ export function Chart({ points, bars, line, ariaLabel, legend, secondary }: { po
   const path = (run: Array<{ x: number; y: number }>) => run.map((p, i) => `${i === 0 ? "M" : "L"}${p.x.toFixed(1)},${p.y.toFixed(1)}`).join(" ");
   const base = PAD_T + plotH;
 
-  const every = Math.max(1, Math.ceil(n / 8));
+  const every = Math.max(1, Math.ceil(n / Math.max(3, Math.floor(W / 72))));
   const hovered = hover !== null ? points[hover] : null;
   const tipLeft = hover !== null ? Math.min(82, Math.max(18, (x(hover) / W) * 100)) : 0;
 
   return (
     <figure className="chart-wrap">
-      <div className="chart2" onMouseLeave={() => setHover(null)}>
+      <div className="chart2" ref={box} onMouseLeave={() => setHover(null)}>
         <svg viewBox={`0 0 ${W} ${H}`} role="img" aria-label={ariaLabel} className="chart2-svg">
           <defs>
             {bars && (

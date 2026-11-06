@@ -129,6 +129,10 @@ export const SettingsV1Schema = z
     typingVocabularyShare: z.number().min(0).max(1).optional(),
     typingSpeedMultiplier: z.number().min(0.5).max(2).optional(),
     typingBookMinutes: z.number().int().min(1).max(30).optional(),
+    /** TASK_028: sentences in one Audio Dictation lesson; fixed in the lesson when it is created. Missing means 10. */
+    typingDictationExercisesPerLesson: z.number().int().min(5).max(20).optional(),
+    /** how many saved words the memory check after a Words level offers (0 = no check); missing means 2 */
+    typingRecallWords: z.number().int().min(0).max(3).optional(),
   })
   .strict();
 export type SettingsV1 = z.infer<typeof SettingsV1Schema>;
@@ -149,6 +153,10 @@ export const typingVocabularyShare = (v: Pick<SettingsV1, "typingVocabularyShare
 export const typingSpeedMultiplier = (v: Pick<SettingsV1, "typingSpeedMultiplier">): number => v.typingSpeedMultiplier ?? 1.05;
 
 export const typingBookMinutes = (v: Pick<SettingsV1, "typingBookMinutes">): number => v.typingBookMinutes ?? 5;
+
+export const typingRecallWords = (v: Pick<SettingsV1, "typingRecallWords">): number => v.typingRecallWords ?? 2;
+
+export const typingDictationExercisesPerLesson = (v: Pick<SettingsV1, "typingDictationExercisesPerLesson">): number => v.typingDictationExercisesPerLesson ?? 10;
 
 /**
  * The levels for grammar practice and new content, or null for the full A2-C2 range.
@@ -186,3 +194,6 @@ export * from "./sessions.js";
 export * from "./batches.js";
 export * from "./typing.js";
 export * from "./typingText.js";
+export * from "./typingDictation.js";
+export * from "./dictationCheck.js";
+export * from "./voices.js";

@@ -1,3 +1,4 @@
+import { SpeakButton, isSpeakableSentence } from "../components/SpeakButton";
 import { MyThoughts } from "../components/MyThoughts.js";
 import type { Dashboard, FeedbackResponse, RevealResponse, SessionSnapshot, SessionSummary } from "@english-lab/contracts";
 import { MAX_LESSON_PLAYS } from "@english-lab/contracts";
@@ -445,7 +446,7 @@ export function Practice({ category = "grammar", onExit, onNavigate }: { categor
             </div>
           )}
           </div>
-          {category === "vocabulary" && <aside className="vocab-task-image"><WordImage slotId={slotUi.reveal.slotId} /></aside>}
+          {category === "vocabulary" && <aside className="vocab-task-image"><WordImage slotId={slotUi.reveal.slotId} hideIfMissing /></aside>}
         </div>
       ) : slotUi.error ? (
         <div className="notice notice-error" role="alert">
@@ -489,10 +490,11 @@ function VocabSentence({ v }: { v: NonNullable<FeedbackResponse["vocabulary"]> }
         <i className="pi pi-bookmark-fill" aria-hidden="true" /> <strong>{v.lemma}</strong> <span className="muted small">{v.partOfSpeech}</span> — {v.translationRu ? <span lang="ru" className={`vt${v.translationSource === "ai_draft" ? " ai-text" : ""}`} title={v.translationSource === "ai_draft" ? "Written by the local AI" : undefined}>{firstTranslation(v.translationRu)}</span> : <span className="muted">no translation yet</span>}
       </p>
       {v.sentence && (
-        <p className="vocab-line">
-          <Marked text={v.sentence.before} needle={v.sentence.form} cls="hl hl-soft" />
+        <p className="vocab-line feedback-sentence">
+          {isSpeakableSentence(v.sentence.before + v.sentence.filled + v.sentence.after) && <SpeakButton text={v.sentence.before + v.sentence.filled + v.sentence.after} />}
+          <span><Marked text={v.sentence.before} needle={v.sentence.form} cls="hl hl-soft" />
           <mark className="hl">{v.sentence.filled}</mark>
-          <Marked text={v.sentence.after} needle={v.sentence.form} cls="hl hl-soft" />
+          <Marked text={v.sentence.after} needle={v.sentence.form} cls="hl hl-soft" /></span>
         </p>
       )}
       {v.sentenceRu && (
@@ -595,7 +597,7 @@ function FeedbackPanel({ feedback, skill = null, busy, onTryAgain, onContinue, a
       </p>
       {feedback.detail ? <DetailDiff d={feedback.detail} /> : feedback.aiChecked && feedback.aiReview ? <p lang="ru" className="ru" data-testid="ai-reason">{feedback.aiReview.explanation_ru}</p> : (() => { const m = feedback.message.replace(/^(Correct|Not this time)\.\s*/, ""); return m ? <p>{m}</p> : null; })()}
       {feedback.correct && (
-        <div data-testid="correct-answer">
+        <div className="feedback-answer" data-testid="correct-answer">
           {feedback.correct.noMistake && <p>This sentence is correct: <strong>No mistake</strong>.</p>}
           {feedback.correct.options && <p>Correct: <strong>{feedback.correct.options.join(" / ")}</strong></p>}
           {feedback.correct.segments && <p>The mistake: <strong>{feedback.correct.segments.join(" / ")}</strong></p>}

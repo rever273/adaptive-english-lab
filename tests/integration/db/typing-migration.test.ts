@@ -21,11 +21,11 @@ async function setup(): Promise<Db> {
 }
 
 describe("typing migration 026 (triggers and indexes)", () => {
-  it("reaches schema version 28 and applies the typing tables", async () => {
+  it("reaches schema version 37 and applies the typing tables", async () => {
     const d = await setup();
-    expect((d.prepare("SELECT MAX(version) AS n FROM schema_migrations").get() as { n: number }).n).toBe(28);
+    expect((d.prepare("SELECT MAX(version) AS n FROM schema_migrations").get() as { n: number }).n).toBe(37);
     const tables = d.prepare("SELECT name FROM sqlite_master WHERE type='table' AND name LIKE 'typing_%'").all() as Array<{ name: string }>;
-    expect(tables.map((t) => t.name).sort()).toEqual(["typing_book_encounters", "typing_books", "typing_sessions", "typing_word_bank", "typing_word_results", "typing_words", "typing_xp_events"]);
+    expect(tables.map((t) => t.name).sort()).toEqual(["typing_book_encounters", "typing_books", "typing_dictation_attempts", "typing_dictation_events", "typing_dictation_exercises", "typing_dictation_lessons", "typing_dictation_pool", "typing_dictation_pool_use", "typing_dictation_voice_checks", "typing_dictation_xp_events", "typing_key_stats", "typing_recall_results", "typing_sessions", "typing_word_bank", "typing_word_results", "typing_words", "typing_xp_events"]);
   });
 
   it("freezes a finished session: no update is allowed", async () => {

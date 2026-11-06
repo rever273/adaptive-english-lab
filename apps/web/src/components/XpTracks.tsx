@@ -14,7 +14,7 @@ const tierOf = (level: number) => [...TIERS].reverse().find((t) => level >= t.fr
 const TRACK = {
   grammar: { label: "Grammar", icon: "pi-pencil", xpHint: "10 XP for every finished task (also a wrong one or “I don’t know”); nothing for skips. Activity, not a grade." },
   vocabulary: { label: "Vocabulary", icon: "pi-bookmark-fill", xpHint: "10 XP for every finished task (also a wrong one or “I don’t know”); nothing for skips. Activity, not a grade." },
-  typing: { label: "Typing", icon: "pi-bullseye", xpHint: "XP for every completed typing level (Words and Books); nothing for losses or interrupted attempts. Activity, not a grade." },
+  typing: { label: "Typing", icon: "pi-bullseye", xpHint: "XP for every completed Words or Books level, and for every Audio Dictation sentence you type correctly (less with hints or the translation); nothing for losses or interrupted attempts. Activity, not a grade." },
 } as const;
 type TrackKey = keyof typeof TRACK;
 

@@ -4,6 +4,8 @@ import { ApiRequestError, fetchGpu, fetchJobs, jobAction, type GpuInfo, type Pub
 export const KIND_LABEL: Record<string, string> = {
   free_text_analysis: "Check a written answer",
   generation: "Write draft exercises",
+  dictation: "Audio Dictation",
+  expression: "Write an expression draft",
   triage: "Quick screen of a draft",
   benchmark: "Model benchmark",
   vocabulary_enrichment: "Translate a saved word",

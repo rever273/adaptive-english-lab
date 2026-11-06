@@ -20,6 +20,7 @@ import { registerAnalyticsRoutes } from "./routes/analytics.js";
 import { registerReportRoutes } from "./routes/reports.js";
 import { registerBackupRoutes } from "./routes/backups.js";
 import { registerVocabularyRoutes } from "./routes/vocabulary.js";
+import { registerVocabularyExpressionRoutes } from "./routes/vocabularyExpressions.js";
 import { registerVocabularySpeechRoutes } from "./routes/vocabularySpeech.js";
 import { registerGroqStatusRoute } from "./routes/groqStatus.js";
 import { registerVocabularyImageRoutes } from "./routes/vocabularyImages.js";
@@ -34,6 +35,11 @@ import type { SttService } from "./domain/stt/sttService.js";
 import { registerSessionRoutes } from "./routes/sessions.js";
 import { registerSettingsRoutes } from "./routes/settings.js";
 import { registerTypingRoutes } from "./routes/typing.js";
+import { registerTypingDictationRoutes } from "./routes/typingDictation.js";
+import { registerTypingBookSpeechRoutes } from "./routes/typingBookSpeech.js";
+import { createDictationEnv } from "./domain/typing/dictation/env.js";
+import type { DictationEnv } from "./domain/typing/dictation/lessons.js";
+import { registerVoiceRoutes } from "./routes/voices.js";
 import { registerTranslateRoutes } from "./routes/translate.js";
 import { registerAiModelRoutes } from "./routes/aiModel.js";
 import { LOCAL_MODEL_TAG } from "./domain/ai/config.js";
@@ -63,9 +69,12 @@ export interface AppDeps {
   /** live AI component status; absent = nothing wired (tests, TASK_003 behaviour) */
   elevenLabsKey?: string;
   elevenLabsVoiceId?: string;
+  elevenLabsVoiceIds?: string[];
   /** optional e-mail for the public translation service (raises its daily quota); from `.env` */
   translateEmail?: string;
   groqKey?: string;
+  /** Audio Dictation: Piper, the speech check and the content files; built from the config when omitted */
+  dictation?: DictationEnv;
   aiStatus?: () => Capabilities["ai"] | Promise<Capabilities["ai"]>;
   /** HMAC key for the session cookie / CSRF token; random per start when omitted. */
   csrfSecret?: Buffer;
@@ -110,16 +119,21 @@ export async function buildApp(deps: AppDeps): Promise<FastifyInstance> {
   });
   registerAnalyticsRoutes(app, db, deps.attempts?.now ?? (() => new Date()));
   registerVocabularyRoutes(app, db, { now: deps.attempts?.now ?? (() => new Date()), newId: deps.attempts?.newId });
+  registerVocabularyExpressionRoutes(app, db, { now: deps.attempts?.now ?? (() => new Date()), newId: deps.attempts?.newId }, { onQueued: () => deps.scheduler?.kick() });
   registerBackupRoutes(app, db, config);
   registerSettingsRoutes(app, db, { now: deps.attempts?.now ?? (() => new Date()), newId: deps.attempts?.newId });
   registerReportRoutes(app, db, { now: deps.attempts?.now ?? (() => new Date()), exportsRoot: path.join(config.dataRoot, "exports") });
   const base = { now: deps.attempts?.now ?? (() => new Date()), newId: deps.attempts?.newId ?? randomUUID };
   registerSessionRoutes(app, db, base, { ...(deps.sessions ?? {}), onLease: () => deps.scheduler?.kick(), onSessionEnd: (id) => void deps.stt?.stopForSession(id), onVoiceDone: async (id) => { deps.scheduler?.releaseVoiceHold(id); await deps.stt?.stopForSession(id); deps.scheduler?.kick(); } });
   registerVocabularyPracticeRoutes(app, db, base);
-  registerTypingRoutes(app, db, base, { booksDir: path.join(config.dataRoot, "typing-books") });
+  const dictation = deps.dictation ?? createDictationEnv(config, deps.groqKey);
+  registerTypingRoutes(app, db, base, { booksDir: path.join(config.dataRoot, "typing-books"), dictation });
+  registerTypingBookSpeechRoutes(app, db, dictation);
+  registerVoiceRoutes(app, db, { env: dictation, sampleDir: path.join(config.dataRoot, "voice-samples") });
+  registerTypingDictationRoutes(app, db, base, { env: dictation, onQueued: () => deps.scheduler?.kick() });
   registerTranslateRoutes(app, { ...(deps.translateEmail ? { email: deps.translateEmail } : {}) });
   registerVocabularyImageRoutes(app, config.vocabularyImagesDir, db);
-  registerVocabularySpeechRoutes(app, db, base, { key: deps.elevenLabsKey, voiceId: deps.elevenLabsVoiceId, cacheDir: path.join(config.dataRoot, "vocabulary-speech") });
+  registerVocabularySpeechRoutes(app, db, base, { key: deps.elevenLabsKey, voiceId: deps.elevenLabsVoiceId, voiceIds: deps.elevenLabsVoiceIds, cacheDir: path.join(config.dataRoot, "vocabulary-speech") });
   registerGroqStatusRoute(app, { key: deps.groqKey });
   registerUiRoutes(app);
   registerQueueRoutes(app, db, base, deps.scheduler ?? null);

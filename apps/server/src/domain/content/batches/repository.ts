@@ -19,7 +19,7 @@ import { isItOrdinal } from "./itContext.js";
 /** Setting of a vocabulary sentence: 20% IT/technology (4 of every 20 steps, spread evenly), the rest general adult life, varied per ordinal and per repeat of the same word. */
 const GENERAL_TOPICS = ["workplace", "travel", "health", "shopping", "family", "education", "community", "household", "sport", "food", "finance", "weather"] as const;
 export const vocabularyTopic = (ordinal: number, round: number): string => isItOrdinal(ordinal) ? "technology" : GENERAL_TOPICS[(ordinal * 5 + round * 3) % GENERAL_TOPICS.length]!;
-export const GENERATION_PROMPT = "generation-v9";
+export const GENERATION_PROMPT = "generation-v10";
 /** a skill is "covered" when it has this many released (selectable) exercises; below it the coverage view reports a deficit (D46) */
 export const TARGET_SELECTABLE_PER_SKILL = 12;
 
@@ -259,7 +259,7 @@ export function createBatch(db: Db, deps: BatchDeps, input: z.input<typeof Creat
         const levels = difficultyLevels(loadSettings(db).values);
         if (levels) plans = plans.map((p) => ({ ...p, level: levels[p.ordinal % levels.length]! }));
       }
-      const promptVersionId = ensurePromptVersion(db, request.category === "vocabulary" ? "vocabulary-generation-v4" : GENERATION_PROMPT, request.category === "vocabulary" ? JSON.stringify(vocabularyFormat(2)) : draftFormatsText(GENERATION_PROMPT));
+      const promptVersionId = ensurePromptVersion(db, request.category === "vocabulary" ? "vocabulary-generation-v5" : GENERATION_PROMPT, request.category === "vocabulary" ? JSON.stringify(vocabularyFormat(2)) : draftFormatsText(GENERATION_PROMPT));
       const now = deps.now().toISOString();
       const count = purpose === "trial" ? TRIAL_SIZE : request.count;
       db.prepare("INSERT INTO batches(id, requested_count, mode, purpose, prompt_version_id, spec_json, created_at) VALUES (?,?,?,?,?,?,?)").run(batchId, count, request.mode, purpose, promptVersionId, JSON.stringify({ category: request.category, skills: request.skills ?? null, types: purpose === "trial" ? [...EXERCISE_TYPES] : (request.types ?? null), perTypeTrial: TRIAL_PER_TYPE }), now);

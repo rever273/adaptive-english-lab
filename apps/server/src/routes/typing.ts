@@ -6,12 +6,16 @@ import {
   TypingAppearancesRequestSchema,
   TypingBookCheckpointRequestSchema,
   TypingBookCompleteRequestSchema,
+  TypingRecallSaveRequestSchema,
   TypingWordsCompleteRequestSchema,
 } from "@english-lab/contracts";
 import type { Db } from "../db/open.js";
 import { ApiError } from "../errors.js";
 import type { SessionDeps } from "../domain/sessions/policy.js";
 import { typingAnalytics } from "../domain/typing/analytics.js";
+import { dictationOverview } from "../domain/typing/dictation/lessons.js";
+import type { DictationEnv } from "../domain/typing/dictation/lessons.js";
+import { recallSave, recallStart } from "../domain/typing/recall.js";
 import { abortBook, booksOverview, checkpointBook, completeBook, startBook } from "../domain/typing/books.js";
 import { buildTypingResult, sessionRow } from "../domain/typing/result.js";
 import { abortWords, completeWords, recordAppearances, startWords, wordsOverview } from "../domain/typing/words.js";
@@ -30,10 +34,11 @@ const AnalyticsQuery = z.object({ mode: z.enum(["words", "books"]), days: z.enum
 
 export interface TypingRouteOptions {
   booksDir: string;
+  dictation: DictationEnv;
 }
 
 export function registerTypingRoutes(app: FastifyInstance, db: Db, deps: SessionDeps, opts: TypingRouteOptions): void {
-  app.get("/api/v1/typing/overview", async () => ({ words: wordsOverview(db), books: booksOverview(db, opts.booksDir) }));
+  app.get("/api/v1/typing/overview", async () => ({ words: wordsOverview(db), books: booksOverview(db, opts.booksDir), dictation: dictationOverview(db, opts.dictation) }));
 
   app.post("/api/v1/typing/words/start", async (req, reply) => {
     reply.code(201);
@@ -73,6 +78,13 @@ export function registerTypingRoutes(app: FastifyInstance, db: Db, deps: Session
   app.post<{ Params: { id: string } }>("/api/v1/typing/books/:id/abort", { schema: { params: idParams } }, async (req) => {
     const b = parse(TypingAbortRequestSchema, req.body);
     return abortBook(db, deps, req.params.id, b);
+  });
+
+  // the memory check after a completed Words level (up to three saved words typed from their translation)
+  app.get<{ Params: { id: string } }>("/api/v1/typing/sessions/:id/recall", { schema: { params: idParams } }, async (req) => recallStart(db, deps, req.params.id));
+  app.post<{ Params: { id: string } }>("/api/v1/typing/sessions/:id/recall", { schema: { params: idParams } }, async (req) => {
+    const b = parse(TypingRecallSaveRequestSchema, req.body);
+    return recallSave(db, deps, req.params.id, b.results);
   });
 
   app.get<{ Params: { id: string } }>("/api/v1/typing/sessions/:id/result", { schema: { params: idParams } }, async (req) => buildTypingResult(db, sessionRow(db, req.params.id)));

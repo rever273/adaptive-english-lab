@@ -53,6 +53,7 @@ Legend: **Working** = implemented and covered by automated tests · **Partial** 
 | Vocabulary Practice | Working | Optional short sessions (5–10 tasks, default 8) with your saved words in new sentences: word in context, recall from a clue, collocations. Graded by code; kept apart from grammar Mastery. |
 | Typing Practice | Working | A third practice kind: **Words** (arcade: type words to destroy falling meteors) and **Books** (calm typing of a classic novel, no way to lose), with its own Typing XP, speed/accuracy analytics and local settings. |
 | Keyboard | Working | Enter answers and continues, 1–9 pick an option, I / H / A / S act, hold M to speak (release to transcribe), Alt+1…8 switch tabs. The key is shown on a small badge on each button. |
+| Audio Dictation | Working (needs setup) | A third Typing mode: listen to an Australian English sentence (local Piper voices) and type it. Hints follow where you stopped; every sentence was heard back by Whisper before it reached a lesson. |
 | Levels and XP | Working | Three independent tracks in the header — Grammar, Vocabulary and Typing. Grammar and Vocabulary: 10 XP per finished task; Typing: XP per completed typing level. A level every 100 XP, tier badges. Activity, not a grade. |
 | Tutor | Working | Explains an answered task (approved rule first, AI drafts labelled as drafts); "Copy Agent Task" for an external coding agent. |
 | Content Studio | Working, reviewed | Grammar and dictionary-based vocabulary batches (default 50), stock warnings, and one copied agent task to review, repair and publish. Every final revision needs an individual review; corrections need an independent reviewer. |
@@ -108,6 +109,15 @@ npm start
 ```
 
 `npm run first10:seed` loads the first ten lessons, the diagnostic and the delayed checks into your profile (run it once, while the app is stopped; running it again adds nothing twice). `npm start` starts the server in the background and opens <http://127.0.0.1:4318/>; `npm stop` stops it. If you prefer to keep the server in a terminal window, use `npm run lab` instead and stop it with Ctrl+C. Closing the browser does not stop anything.
+
+Audio Dictation needs a local text-to-speech engine, installed once into its own virtual environment (the shared Python is not touched):
+
+```
+npm run dictation:setup            # Piper (GPL-3.0-or-later, separate process), voice model en_AU-librivox-medium
+npm run voices:evaluate            # optional: measures the voices (needs the app stopped), writes var/voice-eval/<run>/index.html
+```
+
+The voice model is CC BY 4.0 by DataCraftsmanAustralia (speakers from LibriVox recordings), https://huggingface.co/DataCraftsmanAustralia/piper-en_AU-librivox-medium. The speech check uses Groq `whisper-large-v3` when a key is set in `.env`, otherwise the local faster-whisper large-v3. Audio stays in the git-ignored data folder.
 
 Typing Practice needs two local, git-ignored data files that are never published: the word bank and the book. Run once (with the app stopped):
 

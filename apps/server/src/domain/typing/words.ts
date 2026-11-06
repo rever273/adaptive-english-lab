@@ -3,6 +3,9 @@ import type { SettingsV1, TypingPlanWord, TypingSpeed, TypingWordsStartResponse 
 import { ApiError } from "../../errors.js";
 import { loadSettings } from "../sessions/policy.js";
 import { currentTranslations, VISIBLE } from "../vocabulary/repository.js";
+import { learningFactors } from "../vocabulary/difficulty.js";
+import { hasPair, saveKeyStats, weakPairs, type KeyStat } from "./keyStats.js";
+import { recallTrouble } from "./recall.js";
 import { computeMetrics, METRICS_VERSION } from "./metrics.js";
 import { buildTypingResult, sessionRow, type TypingSessionRow } from "./result.js";
 import { computeSpeed, fallMs, type SpeedHistoryPoint } from "./speed.js";
@@ -115,7 +118,10 @@ function personalCandidates(db: Db, level: number, deps: WordsDeps): PersonalCan
   const maxLen = level <= 3 ? 12 : Number.POSITIVE_INFINITY;
   const candidates = rows.filter((r) => /^[a-z]+(-[a-z]+)?$/.test(r.lemma) && r.lemma.length <= maxLen && r.lemma.length <= 32);
   // problem words first, then not-yet-learned ones, then the ones not shown for longest; every entry stays a candidate
-  const ordered = byRating(candidates, (c) => c.lemma, lemmaRatings(db), previousLemmas(db), rand(deps), (c) => (c.learned ? 0.7 : 1));
+  // how the word goes in vocabulary practice (misses make it come up more, a clean streak less) and in the recall check
+  const learning = learningFactors(db, new Map(candidates.map((c) => [c.lemma, c.learned === 1])));
+  const trouble = recallTrouble(db);
+  const ordered = byRating(candidates, (c) => c.lemma, lemmaRatings(db), previousLemmas(db), rand(deps), (c) => (c.learned ? 0.7 : 1) * (learning.get(c.lemma) ?? (c.learned ? 1 : 1.2)) * (1 + (trouble.get(c.lemma) ?? 0)));
   candidates.splice(0, candidates.length, ...ordered);
   // a word without a translation is dropped: it cannot be a target with a translation (D77)
   const ids = candidates.map((c) => c.id);
@@ -134,6 +140,9 @@ function bankWords(db: Db, level: number): BankWord[] {
   const noTriple = (w: string) => !/([a-z])\1\1/.test(w);
   return rows.filter((r) => hasAtMostOneRare(r.lemma) && noTriple(r.lemma));
 }
+
+/** share of the general words chosen for weak letter pairs */
+export const WEAK_PAIR_SHARE = 0.1;
 
 export interface WordsPlan {
   level: number;
@@ -213,8 +222,16 @@ export function buildWordsPlan(db: Db, level: number, settings: SettingsV1, deps
     pool[bucketOf(b.char_count)].push(b);
   }
 
+  // about one word in ten is chosen for the letter pairs the learner types slowly or wrongly (never a whole level of one pair)
+  const weak = weakPairs(db, 3);
   const generalWords: Array<{ lemma: string; source: "general"; vocabularyEntryId: null }> = [];
   for (const bucket of order) {
+    if (weak.length > 0 && need[bucket] > 0) {
+      const wanted = Math.max(1, Math.round(need[bucket] * WEAK_PAIR_SHARE));
+      const withPair = pool[bucket].filter((b) => hasPair(b.lemma, weak)).slice(0, wanted);
+      const chosen = new Set(withPair);
+      pool[bucket] = [...withPair, ...pool[bucket].filter((b) => !chosen.has(b))];
+    }
     const take = pool[bucket].slice(0, need[bucket]);
     if (take.length < need[bucket]) {
       // fall back to neighbouring buckets when a bucket runs dry (spec 5.1)
@@ -339,6 +356,10 @@ export interface WordsCompleteRequest {
   destroyedPlanIndexes: number[];
   /** wrong keys per word; one entry per appeared word; absent from older clients (then every destroyed word counts as clean for XP, with no rating data) */
   wordErrors?: Array<{ planIndex: number; errors: number }>;
+  /** letter-pair timing and wrong keys of the session (optional: older pages send none) */
+  keyStats?: KeyStat[] | undefined;
+  /** best run of words without a wrong key */
+  bestCombo?: number | undefined;
 }
 
 export function completeWords(db: Db, deps: WordsDeps, sessionId: string, req: WordsCompleteRequest): ReturnType<typeof buildTypingResult> {
@@ -382,9 +403,10 @@ export function completeWords(db: Db, deps: WordsDeps, sessionId: string, req: W
     const putErrors = db.prepare("INSERT OR IGNORE INTO typing_word_results(session_id, plan_index, errors) SELECT session_id, plan_index, ? FROM typing_words WHERE session_id = ? AND plan_index = ?");
     for (const [i, n] of errorsByIndex) putErrors.run(n, sessionId, i);
     db.prepare(
-      "UPDATE typing_sessions SET status = ?, ended_at = ?, active_ms = ?, chars_typed = ?, errors = ?, chars_correct = ?, wpm = ?, cpm = ?, accuracy = ?, score = ?, metrics_version = ? WHERE id = ?",
-    ).run(req.status, now, req.activeMs, req.charsTyped, req.errors, charsCorrect, metrics.wpm, metrics.cpm, metrics.accuracy, metrics.score, METRICS_VERSION, sessionId);
+      "UPDATE typing_sessions SET status = ?, ended_at = ?, active_ms = ?, chars_typed = ?, errors = ?, chars_correct = ?, wpm = ?, cpm = ?, accuracy = ?, score = ?, metrics_version = ?, best_combo = ? WHERE id = ?",
+    ).run(req.status, now, req.activeMs, req.charsTyped, req.errors, charsCorrect, metrics.wpm, metrics.cpm, metrics.accuracy, metrics.score, METRICS_VERSION, req.bestCombo ?? null, sessionId);
     if (xp > 0) awardTypingXp(db, { id: deps.newId(), sessionId, amount: xp, at: now });
+    saveKeyStats(db, deps.newId, sessionId, req.keyStats ?? [], now);
   }).immediate();
 
   return buildTypingResult(db, sessionRow(db, sessionId));

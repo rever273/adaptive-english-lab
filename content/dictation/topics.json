@@ -1,0 +1,646 @@
+{
+ "version": 2,
+ "note": "Topics are directions, not words: the sentence is set in a specific situation related to the topic and must not repeat the topic name. `group` is used to keep the voices suitable (see the voice settings: avoidGroups).",
+ "topics": [
+  {
+   "name": "Space exploration",
+   "group": "space"
+  },
+  {
+   "name": "Moon missions",
+   "group": "space"
+  },
+  {
+   "name": "Mars rovers",
+   "group": "space"
+  },
+  {
+   "name": "Satellite technology",
+   "group": "space"
+  },
+  {
+   "name": "Life beyond Earth",
+   "group": "space"
+  },
+  {
+   "name": "Underwater exploration",
+   "group": "nature"
+  },
+  {
+   "name": "Coral reefs",
+   "group": "nature"
+  },
+  {
+   "name": "Australian wildlife",
+   "group": "nature"
+  },
+  {
+   "name": "Animal intelligence",
+   "group": "nature"
+  },
+  {
+   "name": "Nocturnal animals",
+   "group": "nature"
+  },
+  {
+   "name": "Rainforest ecosystems",
+   "group": "nature"
+  },
+  {
+   "name": "Deserts",
+   "group": "nature"
+  },
+  {
+   "name": "Earthquakes",
+   "group": "nature"
+  },
+  {
+   "name": "Extreme weather",
+   "group": "nature"
+  },
+  {
+   "name": "Natural landscapes",
+   "group": "nature"
+  },
+  {
+   "name": "National parks",
+   "group": "nature"
+  },
+  {
+   "name": "Environmental technology",
+   "group": "energy"
+  },
+  {
+   "name": "Renewable energy",
+   "group": "energy"
+  },
+  {
+   "name": "Solar panels",
+   "group": "energy"
+  },
+  {
+   "name": "Battery technology",
+   "group": "energy"
+  },
+  {
+   "name": "Electric transport",
+   "group": "energy"
+  },
+  {
+   "name": "Futuristic cities",
+   "group": "buildings"
+  },
+  {
+   "name": "Urban architecture",
+   "group": "buildings"
+  },
+  {
+   "name": "Famous buildings",
+   "group": "buildings"
+  },
+  {
+   "name": "Bridges and tunnels",
+   "group": "buildings"
+  },
+  {
+   "name": "Construction projects",
+   "group": "buildings"
+  },
+  {
+   "name": "Building materials",
+   "group": "buildings"
+  },
+  {
+   "name": "3D printing",
+   "group": "tech"
+  },
+  {
+   "name": "BIM and digital twins",
+   "group": "tech"
+  },
+  {
+   "name": "Geospatial mapping",
+   "group": "tech"
+  },
+  {
+   "name": "Drone surveying",
+   "group": "tech"
+  },
+  {
+   "name": "Data visualisation",
+   "group": "tech"
+  },
+  {
+   "name": "User interface design",
+   "group": "tech"
+  },
+  {
+   "name": "Web development",
+   "group": "tech"
+  },
+  {
+   "name": "Software debugging",
+   "group": "tech"
+  },
+  {
+   "name": "Software testing",
+   "group": "tech"
+  },
+  {
+   "name": "Code reviews",
+   "group": "tech"
+  },
+  {
+   "name": "Refactoring",
+   "group": "tech"
+  },
+  {
+   "name": "REST APIs",
+   "group": "tech"
+  },
+  {
+   "name": "Databases",
+   "group": "tech"
+  },
+  {
+   "name": "Cybersecurity",
+   "group": "tech"
+  },
+  {
+   "name": "Online privacy",
+   "group": "tech"
+  },
+  {
+   "name": "Artificial intelligence",
+   "group": "tech"
+  },
+  {
+   "name": "AI agents",
+   "group": "tech"
+  },
+  {
+   "name": "Language models",
+   "group": "tech"
+  },
+  {
+   "name": "Computer vision",
+   "group": "tech"
+  },
+  {
+   "name": "Robotics",
+   "group": "tech"
+  },
+  {
+   "name": "Automation",
+   "group": "tech"
+  },
+  {
+   "name": "Cloud computing",
+   "group": "tech"
+  },
+  {
+   "name": "Open-source software",
+   "group": "tech"
+  },
+  {
+   "name": "Version control",
+   "group": "tech"
+  },
+  {
+   "name": "Smart home devices",
+   "group": "tech"
+  },
+  {
+   "name": "Computer hardware",
+   "group": "tech"
+  },
+  {
+   "name": "Vintage computers",
+   "group": "tech"
+  },
+  {
+   "name": "Technology predictions",
+   "group": "tech"
+  },
+  {
+   "name": "Explaining technical problems",
+   "group": "tech"
+  },
+  {
+   "name": "Video game development",
+   "group": "gaming"
+  },
+  {
+   "name": "Indie games",
+   "group": "gaming"
+  },
+  {
+   "name": "Game balancing",
+   "group": "gaming"
+  },
+  {
+   "name": "Strategy games",
+   "group": "gaming"
+  },
+  {
+   "name": "Science fiction games",
+   "group": "gaming"
+  },
+  {
+   "name": "Film special effects",
+   "group": "film"
+  },
+  {
+   "name": "Thriller films",
+   "group": "film"
+  },
+  {
+   "name": "Classic horror cinema",
+   "group": "film"
+  },
+  {
+   "name": "Plot twists",
+   "group": "film"
+  },
+  {
+   "name": "Film editing",
+   "group": "film"
+  },
+  {
+   "name": "Film reviews",
+   "group": "film"
+  },
+  {
+   "name": "Cinema experiences",
+   "group": "film"
+  },
+  {
+   "name": "Television series",
+   "group": "film"
+  },
+  {
+   "name": "Film scores",
+   "group": "film"
+  },
+  {
+   "name": "Book adaptations",
+   "group": "books"
+  },
+  {
+   "name": "Dystopian fiction",
+   "group": "books"
+  },
+  {
+   "name": "Classic novels",
+   "group": "books"
+  },
+  {
+   "name": "Detective stories",
+   "group": "books"
+  },
+  {
+   "name": "Historical fiction",
+   "group": "books"
+  },
+  {
+   "name": "Literary characters",
+   "group": "books"
+  },
+  {
+   "name": "Live concerts",
+   "group": "music"
+  },
+  {
+   "name": "Guitar riffs",
+   "group": "music"
+  },
+  {
+   "name": "Musical instruments",
+   "group": "music"
+  },
+  {
+   "name": "Recording studios",
+   "group": "music"
+  },
+  {
+   "name": "Electronic music",
+   "group": "music"
+  },
+  {
+   "name": "Orchestral performances",
+   "group": "music"
+  },
+  {
+   "name": "Piano practice",
+   "group": "music"
+  },
+  {
+   "name": "Classical composers",
+   "group": "music"
+  },
+  {
+   "name": "Music production",
+   "group": "music"
+  },
+  {
+   "name": "Creativity",
+   "group": "creative"
+  },
+  {
+   "name": "Photography",
+   "group": "creative"
+  },
+  {
+   "name": "Street art",
+   "group": "creative"
+  },
+  {
+   "name": "Graphic design",
+   "group": "creative"
+  },
+  {
+   "name": "Animation",
+   "group": "creative"
+  },
+  {
+   "name": "Storytelling",
+   "group": "creative"
+  },
+  {
+   "name": "Interesting inventions",
+   "group": "science"
+  },
+  {
+   "name": "Scientific discoveries",
+   "group": "science"
+  },
+  {
+   "name": "Optical illusions",
+   "group": "science"
+  },
+  {
+   "name": "Logic puzzles",
+   "group": "science"
+  },
+  {
+   "name": "Memory techniques",
+   "group": "science"
+  },
+  {
+   "name": "Scientific myths",
+   "group": "science"
+  },
+  {
+   "name": "Thought experiments",
+   "group": "science"
+  },
+  {
+   "name": "Language learning",
+   "group": "language"
+  },
+  {
+   "name": "Australian English expressions",
+   "group": "language"
+  },
+  {
+   "name": "Different accents",
+   "group": "language"
+  },
+  {
+   "name": "Cafe conversations",
+   "group": "daily"
+  },
+  {
+   "name": "Supermarket shopping",
+   "group": "daily"
+  },
+  {
+   "name": "Workplace routines",
+   "group": "daily"
+  },
+  {
+   "name": "Team meetings",
+   "group": "daily"
+  },
+  {
+   "name": "Project deadlines",
+   "group": "daily"
+  },
+  {
+   "name": "Job interviews",
+   "group": "daily"
+  },
+  {
+   "name": "Workplace misunderstandings",
+   "group": "daily"
+  },
+  {
+   "name": "Planning a weekend",
+   "group": "daily"
+  },
+  {
+   "name": "Daily habits",
+   "group": "daily"
+  },
+  {
+   "name": "Time management",
+   "group": "daily"
+  },
+  {
+   "name": "Life in Brisbane",
+   "group": "daily"
+  },
+  {
+   "name": "Weather forecasts",
+   "group": "daily"
+  },
+  {
+   "name": "Unexpected situations",
+   "group": "daily"
+  },
+  {
+   "name": "Everyday decisions",
+   "group": "daily"
+  },
+  {
+   "name": "Practical problem solving",
+   "group": "daily"
+  },
+  {
+   "name": "Hobbies",
+   "group": "daily"
+  },
+  {
+   "name": "Personal productivity",
+   "group": "daily"
+  },
+  {
+   "name": "Unusual professions",
+   "group": "daily"
+  },
+  {
+   "name": "Public transport",
+   "group": "travel"
+  },
+  {
+   "name": "Train stations",
+   "group": "travel"
+  },
+  {
+   "name": "Airports",
+   "group": "travel"
+  },
+  {
+   "name": "Road trips",
+   "group": "travel"
+  },
+  {
+   "name": "Travel delays",
+   "group": "travel"
+  },
+  {
+   "name": "Hotels",
+   "group": "travel"
+  },
+  {
+   "name": "Hiking trails",
+   "group": "travel"
+  },
+  {
+   "name": "Beach walks",
+   "group": "travel"
+  },
+  {
+   "name": "Camping trips",
+   "group": "travel"
+  },
+  {
+   "name": "World cuisines",
+   "group": "food"
+  },
+  {
+   "name": "Coffee culture",
+   "group": "food"
+  },
+  {
+   "name": "Australian barbecues",
+   "group": "food"
+  },
+  {
+   "name": "Fitness training",
+   "group": "fitness"
+  },
+  {
+   "name": "Gym routines",
+   "group": "fitness"
+  },
+  {
+   "name": "Personal finance",
+   "group": "finance"
+  },
+  {
+   "name": "Investment strategies",
+   "group": "finance"
+  },
+  {
+   "name": "Stock market history",
+   "group": "finance"
+  },
+  {
+   "name": "Cryptocurrency technology",
+   "group": "crypto"
+  },
+  {
+   "name": "Digital ownership",
+   "group": "crypto"
+  },
+  {
+   "name": "Online communities",
+   "group": "crypto"
+  },
+  {
+   "name": "Famous explorers",
+   "group": "history"
+  },
+  {
+   "name": "Historical mysteries",
+   "group": "history"
+  },
+  {
+   "name": "Ancient civilisations",
+   "group": "history"
+  },
+  {
+   "name": "Archaeological discoveries",
+   "group": "history"
+  },
+  {
+   "name": "Medieval castles",
+   "group": "history"
+  },
+  {
+   "name": "Folklore",
+   "group": "history"
+  },
+  {
+   "name": "Cultural traditions",
+   "group": "history"
+  },
+  {
+   "name": "Alternative history",
+   "group": "history"
+  },
+  {
+   "name": "Everyday humour",
+   "group": "humour"
+  },
+  {
+   "name": "Funny misunderstandings",
+   "group": "humour"
+  },
+  {
+   "name": "Surprising coincidences",
+   "group": "humour"
+  },
+  {
+   "name": "Interesting facts",
+   "group": "humour"
+  },
+  {
+   "name": "Future predictions",
+   "group": "communication"
+  },
+  {
+   "name": "Making plans",
+   "group": "communication"
+  },
+  {
+   "name": "Explaining mistakes",
+   "group": "communication"
+  },
+  {
+   "name": "Solving disagreements",
+   "group": "communication"
+  },
+  {
+   "name": "Giving advice",
+   "group": "communication"
+  },
+  {
+   "name": "Expressing uncertainty",
+   "group": "communication"
+  },
+  {
+   "name": "Comparing alternatives",
+   "group": "communication"
+  },
+  {
+   "name": "Describing past experiences",
+   "group": "communication"
+  },
+  {
+   "name": "Discussing possibilities",
+   "group": "communication"
+  }
+ ]
+}

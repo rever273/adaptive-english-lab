@@ -59,7 +59,7 @@ export function loadEvidence(db: Db, p: { watermark: number; asOf: string; taxon
           AND o.target = 1 AND o.independent = 1
           AND o.opportunity_type = 'explicit' AND o.result IN ('success','failure','idk')
           AND t.first_attempt = 1 AND t.hints_before = 0 AND t.answer_seen_before = 0
-          AND t.submitted_at <= @asOf AND t.criterion_version = @crit AND er.difficulty = @diff AND sr.taxonomy_id = @tax
+          AND t.submitted_at <= @asOf AND t.criterion_version = @crit AND er.difficulty = @diff AND EXISTS (SELECT 1 FROM taxonomy_skill_compatibility tc WHERE tc.target_taxonomy_id = @tax AND tc.source_skill_revision_id = sr.id)
           AND (CASE WHEN @proto = 'diagnostic-v1' THEN s.purpose = 'diagnostic' ELSE s.purpose <> 'diagnostic' END)
         ORDER BY t.submitted_at, o.id`,
     )
@@ -87,7 +87,7 @@ export function loadActivity(db: Db, p: { watermark: number; asOf: string; taxon
          JOIN attempts t ON t.id = a.attempt_id
          JOIN session_slots ss ON ss.id = t.slot_id
          JOIN skill_revisions sr ON sr.id = o.skill_revision_id
-        WHERE o.target = 1 AND t.submitted_at <= @asOf AND sr.taxonomy_id = @tax
+        WHERE o.target = 1 AND t.submitted_at <= @asOf AND EXISTS (SELECT 1 FROM taxonomy_skill_compatibility tc WHERE tc.target_taxonomy_id = @tax AND tc.source_skill_revision_id = sr.id)
           AND COALESCE(json_extract(ss.cohort_json, '$.repeat'), 0) <> 1 -- D68: repeats are not practice moments for delayed probes
         ORDER BY t.submitted_at`,
     )
@@ -124,7 +124,7 @@ export function loadDiagnosticOutcomes(db: Db, p: { watermark: number; asOf: str
           AND o.reliability = 'confirmed' AND o.target = 1 AND o.independent = 1
           AND o.opportunity_type = 'explicit' AND o.result IN ('success','failure','idk')
           AND t.first_attempt = 1 AND t.hints_before = 0 AND t.answer_seen_before = 0
-          AND t.submitted_at <= @asOf AND sr.taxonomy_id = @tax AND s.purpose = 'diagnostic'
+          AND t.submitted_at <= @asOf AND EXISTS (SELECT 1 FROM taxonomy_skill_compatibility tc WHERE tc.target_taxonomy_id = @tax AND tc.source_skill_revision_id = sr.id) AND s.purpose = 'diagnostic'
         GROUP BY sr.skill_id ORDER BY sr.skill_id`,
     )
     .all({ w: p.watermark, asOf: p.asOf, tax: p.taxonomyId }) as Array<{ skillId: string; attempts: number; failures: number }>;

@@ -1,15 +1,17 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import * as api from "../api";
-import type { TypingBookStartResponse, TypingOverview, TypingResult, TypingWordsStartResponse } from "../api";
+import type { DictationResult, DictationState, TypingRecallWord, TypingBookStartResponse, TypingOverview, TypingResult, TypingWordsStartResponse } from "../api";
 import { TypingKeyboard } from "../components/TypingKeyboard";
 import { WordsScene } from "../game/scene";
 import { firstTranslation } from "../format";
 import { playPracticeSound } from "../practiceSounds";
 import { BooksGame } from "./TypingBooks";
+import { DictationGame, DictationResultView } from "./TypingDictation";
+import { TypingRecall } from "./TypingRecall";
 import { LAYOUT_HINT, Toast, useToast } from "./typingShared";
-import { createWordsEngine, type WordsEngineState, type WordsEvent } from "../game/wordsEngine";
+import { comboMultiplier, createWordsEngine, exportKeyStats, revealTranslation, type WordsEngineState, type WordsEvent } from "../game/wordsEngine";
 
-type Screen = { kind: "overview" } | { kind: "words"; sessionId: string; level: number; plan: TypingWordsStartResponse; paused: boolean } | { kind: "books"; sessionId: string; data: TypingBookStartResponse; paused: boolean } | { kind: "result"; result: TypingResult; struggled?: string[] };
+type Screen = { kind: "overview" } | { kind: "words"; sessionId: string; level: number; plan: TypingWordsStartResponse; paused: boolean } | { kind: "books"; sessionId: string; data: TypingBookStartResponse; paused: boolean } | { kind: "result"; result: TypingResult; struggled?: string[]; bonus?: { points: number } } | { kind: "recall"; result: TypingResult; struggled?: string[]; words: TypingRecallWord[] } | { kind: "dictation"; state: DictationState } | { kind: "dictationResult"; result: DictationResult };
 
 const clamp = (n: number, lo: number, hi: number) => Math.min(hi, Math.max(lo, n));
 const fallMs = (len: number, msPerChar: number) => Math.round(clamp(3 * len * msPerChar + 2500, 5000, 22000));
@@ -25,9 +27,27 @@ export function Typing({ onNavigate }: { onNavigate?: (page: "analytics") => voi
     api.fetchTypingOverview().then(setOverview).catch((e) => setError(e instanceof Error ? e.message : String(e)));
   }, []);
   useEffect(load, [load]);
+  const [dictNote, setDictNote] = useState<string | null>(null);
+  // while dictation tracks are being made (a lesson or prepared ones) the card follows the progress
+  const generating = overview?.dictation.lesson?.status === "generating" || (overview?.dictation.pool.generating ?? 0) > 0;
+  useEffect(() => {
+    if (!generating || screen.kind !== "overview") return;
+    const id = window.setInterval(load, 2500);
+    return () => window.clearInterval(id);
+  }, [generating, screen.kind, load]);
 
   if (error && screen.kind === "overview") return <p role="alert">{error}</p>;
   if (!overview) return <p className="muted">Loading typing practice…</p>;
+
+  if (screen.kind === "dictation") return <section className="typing-page" aria-label="Audio Dictation"><DictationGame state={screen.state} onResult={(result) => setScreen({ kind: "dictationResult", result })} onExit={() => { load(); setScreen({ kind: "overview" }); }} /></section>;
+  if (screen.kind === "dictationResult") {
+    const toOverview = () => { load(); setScreen({ kind: "overview" }); };
+    return <DictationResultView result={screen.result} onDone={toOverview} onNext={() => { void api.createDictationLesson().catch((e) => setDictNote(e instanceof Error ? e.message : String(e))).finally(toOverview); }} />;
+  }
+
+  if (screen.kind === "recall") {
+    return <section className="typing-page" aria-label="Memory check"><TypingRecall sessionId={screen.result.sessionId} words={screen.words} onDone={(bonus) => setScreen({ kind: "result", result: screen.result, ...(screen.struggled ? { struggled: screen.struggled } : {}), ...(bonus ? { bonus } : {}) })} /></section>;
+  }
 
   if (screen.kind === "result") {
     const mode = screen.result.mode;
@@ -37,7 +57,7 @@ export function Typing({ onNavigate }: { onNavigate?: (page: "analytics") => voi
       const started = mode === "words" ? await startWords(setScreen, setError) : await startBook(setScreen, setError);
       if (!started) toOverview();
     };
-    return <WordsResult result={screen.result} struggled={screen.struggled} onContinue={() => void next()} onDone={toOverview} />;
+    return <WordsResult result={screen.result} struggled={screen.struggled} bonus={screen.bonus} onContinue={() => void next()} onDone={toOverview} />;
   }
 
   return (
@@ -47,6 +67,7 @@ export function Typing({ onNavigate }: { onNavigate?: (page: "analytics") => voi
           <h2 id="typing-h"><i className="pi pi-bullseye" aria-hidden="true" /> Typing practice</h2>
           <div className="typing-cards">
             <ModeCard
+              image="/typing/words.jpg"
               icon="pi-bolt"
               title="Words"
               desc="Arcade training: type words to destroy falling meteors with your ship."
@@ -57,6 +78,7 @@ export function Typing({ onNavigate }: { onNavigate?: (page: "analytics") => voi
               onStart={() => void startWords(setScreen, setError)}
             />
             <ModeCard
+              image="/typing/books.jpg"
               icon="pi-book"
               title="Books"
               desc="Calm practice: type a classic book one sentence at a time. No way to lose."
@@ -66,6 +88,17 @@ export function Typing({ onNavigate }: { onNavigate?: (page: "analytics") => voi
               disabled={!overview.books.available || overview.books.finished}
               disabledNote={!overview.books.available ? bookReason(overview.books.reason) : overview.books.finished ? "You have finished the book." : null}
               onStart={() => void startBook(setScreen, setError)}
+            />
+            <ModeCard
+              image="/typing/dictation.jpg"
+              icon="pi-volume-up"
+              title="Audio Dictation"
+              desc="Listen to an Australian English sentence and type it. Nothing is shown until you ask for a hint."
+              action={dictationAction(overview.dictation)}
+              level={overview.dictation.nextLevel}
+              disabled={!overview.dictation.available && !overview.dictation.lesson || overview.dictation.lesson?.status === "generating"}
+              disabledNote={dictNote ?? dictationNote(overview.dictation)}
+              onStart={() => void runDictation(overview.dictation, setScreen, setDictNote, load)}
             />
           </div>
           {/* {onNavigate && (
@@ -81,21 +114,51 @@ export function Typing({ onNavigate }: { onNavigate?: (page: "analytics") => voi
   );
 }
 
+function dictationAction(d: TypingOverview["dictation"]): string {
+  const l = d.lesson;
+  if (!l) return "Generate Next Lesson";
+  if (l.status === "generating") return `Generating… ${l.ready} / ${l.total} ready`;
+  if (l.status === "failed") return "Retry";
+  return l.started ? "Continue" : "Start";
+}
+
+function dictationNote(d: TypingOverview["dictation"]): string | null {
+  if (d.lesson?.status === "failed") return "Generating this lesson failed. Retry makes only the missing sentences.";
+  if (d.available) return null;
+  if (d.reason === "asr_unavailable") return "No speech check is available: set a Groq key in .env or install the local Whisper large-v3 model.";
+  return "Piper is not installed. Run `npm run dictation:setup`.";
+}
+
+async function runDictation(d: TypingOverview["dictation"], setScreen: (s: Screen) => void, setNote: (n: string | null) => void, reload: () => void): Promise<void> {
+  setNote(null);
+  try {
+    const l = d.lesson;
+    if (!l) await api.createDictationLesson();
+    else if (l.status === "failed") await api.retryDictationLesson(l.id);
+    else if (l.status === "ready") { setScreen({ kind: "dictation", state: await api.startDictationLesson(l.id) }); return; }
+  } catch (e) {
+    setNote(e instanceof Error ? e.message : String(e));
+  }
+  reload();
+}
+
 function bookReason(reason: string | null): string {
   if (reason === "file_missing" || reason === "file_changed") return "The book file is missing or changed. Run `npm run typing:prepare-book`.";
   if (reason === "no_book") return "No book is prepared yet. Run `npm run typing:prepare-book`.";
   return "The book is not available.";
 }
 
-function ModeCard({ icon, title, desc, action, level, subtitle, disabled, disabledNote, onStart }: { icon: string; title: string; desc: string; action: string; level: number; subtitle?: string; disabled: boolean; disabledNote: string | null; onStart: () => void }) {
+function ModeCard({ image, icon, title, desc, action, level, subtitle, disabled, disabledNote, onStart, children }: { image: string; icon: string; title: string; desc: string; action: string; level: number; subtitle?: string; disabled: boolean; disabledNote: string | null; onStart: () => void; children?: React.ReactNode }) {
   return (
     <div className={`card typing-mode-card${disabled ? " disabled" : ""}`}>
+      <img className="typing-card-image" src={image} alt="" loading="lazy" />
       <h3><i className={`pi ${icon}`} aria-hidden="true" /> {title}</h3>
       <p className="muted small">{desc}</p>
       {subtitle && <p className="muted small">Book: {subtitle}</p>}
       <p className="typing-level">{action} <span className="muted">(Level {String(level).padStart(2, "0")})</span></p>
       {disabledNote && <p className="notice notice-warning small" role="status">{disabledNote}</p>}
-      <button className="btn btn-primary" disabled={disabled} onClick={onStart} data-testid={`typing-${title.toLowerCase()}-start`}>{action}</button>
+      {children}
+      <button className="btn btn-primary typing-card-action" disabled={disabled} onClick={onStart} data-testid={`typing-${title.toLowerCase()}-start`}>{action}</button>
     </div>
   );
 }
@@ -180,6 +243,8 @@ function WordsGame({ screen, setScreen, onExit }: { screen: Extract<Screen, { ki
   const [paused, setPaused] = useState(screen.paused);
   const pausedRef = useRef(screen.paused);
   const [hud, setHud] = useState<{ destroyed: number; total: number }>({ destroyed: 0, total: screen.plan.targetCount });
+  // the speed on this level so far (correct letters per minute of active time) and the combo, refreshed while the game runs
+  const [live, setLive] = useState<{ wpm: number | null; score: number; streak: number }>({ wpm: null, score: 0, streak: 0 });
   const [layoutNotice, showLayoutNotice] = useToast();
   const finishing = useRef(false);
   const pronunciation = useWordPronunciation(screen.plan.words);
@@ -213,8 +278,15 @@ function WordsGame({ screen, setScreen, onExit }: { screen: Extract<Screen, { ki
       appearances: engine.appearances,
       destroyedPlanIndexes: engine.destroyedPlanIndexes,
       wordErrors: engine.words.map((w) => ({ planIndex: w.planIndex, errors: w.mistakes })),
-    }).then((result) => {
+      keyStats: exportKeyStats(engine),
+      bestCombo: engine.bestStreak,
+    }).then(async (result) => {
       api.announceXp();
+      // a won level may be followed by the optional memory check of up to three saved words
+      if (status === "completed") {
+        const recall = await api.fetchTypingRecall(result.sessionId).catch(() => null);
+        if (recall && !recall.done && recall.words.length > 0) { setScreen({ kind: "recall", result, words: recall.words }); return; }
+      }
       setScreen({ kind: "result", result });
     }).catch(() => setScreen({ kind: "overview" }));
   }, [screen.sessionId, setScreen]);
@@ -267,6 +339,8 @@ function WordsGame({ screen, setScreen, onExit }: { screen: Extract<Screen, { ki
     const onKey = (e: KeyboardEvent) => {
       if (e.ctrlKey || e.metaKey || e.altKey || e.getModifierState("AltGraph") || e.isComposing) return;
       if (e.key === "Escape" || e.key === "F2") { e.preventDefault(); if (!e.repeat) togglePause(); return; }
+      // F3: the Russian translation of the word being typed (or the most urgent one), also for general words
+      if (e.key === "F3") { e.preventDefault(); if (!e.repeat && !pausedRef.current) { const eng = engineRef.current; if (eng) revealTranslation(eng); } return; }
       if (e.key === "Backspace") { e.preventDefault(); e.stopPropagation(); return; } // wrong letters are never shown, nothing to delete
       if (e.key.length !== 1) return;
       e.preventDefault();
@@ -310,12 +384,26 @@ function WordsGame({ screen, setScreen, onExit }: { screen: Extract<Screen, { ki
     }, 80);
     return () => window.clearInterval(id);
   }, []);
+  useEffect(() => {
+    const id = window.setInterval(() => {
+      const e = engineRef.current;
+      if (!e) return;
+      const correct = e.charsTyped - e.errors;
+      const wpm = e.activeMs >= 4000 ? Math.round((correct / 5 / (e.activeMs / 60000)) * 10) / 10 : null;
+      setLive((prev) => (prev.wpm === wpm && prev.score === e.score && prev.streak === e.streak ? prev : { wpm, score: e.score, streak: e.streak }));
+    }, 500);
+    return () => window.clearInterval(id);
+  }, []);
   const percent = hud.total > 0 ? (hud.destroyed / hud.total) * 100 : 0;
+  const mult = comboMultiplier(live.streak);
   return (
     <div className="typing-game" data-no-word style={{ userSelect: "none" }}>
       <div className="typing-game-bar">
         <span>Words · Level {String(screen.level).padStart(2, "0")}</span>
         <span className="muted small" title="Meteors arrive at this typing speed: your estimated speed × the speed setting, eased after lost levels. Change the multiplier in Settings.">Pace ≈ {Math.round(screen.plan.speed.effectiveWpm)} WPM{screen.plan.speed.pressure < 1 ? ` (eased ${Math.round((1 - screen.plan.speed.pressure) * 100)}%)` : ""}</span>
+        <span className="muted small typing-live" title="Your actual speed on this level so far: correct letters / 5 per minute of play. Updates all the time.">Speed: {live.wpm === null ? "—" : Math.round(live.wpm)} WPM</span>
+        <span className="muted small typing-live" title="Game score: 10 per letter of a destroyed word, times the combo. It does not affect your speed, accuracy or word statistics.">Score {live.score}</span>
+        {mult > 1 && <span className="typing-combo" title="Words in a row without a wrong key: 3 → ×1.1, 5 → ×1.2, 10 → ×1.5. A wrong key resets it.">Combo ×{mult} · {live.streak}</span>}
         <span className="actions">
           <button className="btn" onClick={togglePause} title="F2">{paused ? "Resume" : "Pause"} (F2)</button>
           <button className="btn" onClick={abort}>Exit</button>
@@ -330,7 +418,7 @@ function WordsGame({ screen, setScreen, onExit }: { screen: Extract<Screen, { ki
         {paused && <div className="typing-paused" role="status">Paused — press Resume, F2 or Esc to continue.</div>}
         {layoutNotice && <Toast text={LAYOUT_HINT} />}
       </div>
-      <p className="muted small">Type the first letter of a word to lock it, then type the rest. A wrong key only shakes the word — just type the right letter.</p>
+      <p className="muted small">Type the first letter of a word to lock it, then type the rest. A wrong key only shakes the word — just type the right letter. F3 shows the translation of the word you are typing.</p>
       <TypingKeyboard next={paused ? null : nextChar} />
     </div>
   );
@@ -372,7 +460,7 @@ function TroubleWords({ words }: { words: string[] }) {
   );
 }
 
-function WordsResult({ result, struggled, onContinue, onDone }: { result: TypingResult; struggled?: string[]; onContinue: () => void; onDone: () => void }) {
+function WordsResult({ result, struggled, bonus, onContinue, onDone }: { result: TypingResult; struggled?: string[]; bonus?: { points: number } | undefined; onContinue: () => void; onDone: () => void }) {
   const m = result.metrics;
   const stats: Array<{ label: string; value: string; tip: string }> = [
     { label: "Score", value: String(m.score), tip: STAT_TIPS.score },
@@ -402,7 +490,7 @@ function WordsResult({ result, struggled, onContinue, onDone }: { result: Typing
           Words by mistakes: <span className="typing-compare faster">{result.wordErrorBands.clean} clean</span> · {result.wordErrorBands.one} with 1 error · <span className={result.wordErrorBands.many > 0 ? "typing-compare slower" : undefined}>{result.wordErrorBands.many} with 2+ errors</span>
         </p>
       )}
-      <p className="small">Skill: <strong>{result.skill}</strong> · {result.xpAwarded} XP</p>
+      <p className="small">Skill: <strong>{result.skill}</strong> · {result.xpAwarded} XP{bonus ? ` · memory check +${bonus.points} points` : ""}</p>
       {result.words && result.words.length > 0 && (
         <details>
           <summary>Words in this session ({result.words.length})</summary>

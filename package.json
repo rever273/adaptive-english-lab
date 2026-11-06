@@ -28,6 +28,8 @@
     "lab:thoughts": "node scripts/lab-thoughts.mjs",
     "vocab:backfill": "node scripts/vocab-backfill.mjs",
     "typing:seed": "node scripts/typing-seed.mjs",
+    "dictation:setup": "node scripts/dictation-setup.mjs",
+    "voices:evaluate": "node scripts/voices-evaluate.mjs",
     "typing:prepare-book": "node scripts/typing-prepare-book.mjs",
     "content:agent": "node scripts/content-agent.mjs",
     "content:validate": "node scripts/content-validate.mjs",

@@ -1,5 +1,6 @@
 import { drawBackground, drawMeteor, drawShip, makeBackground, makeMeteorVisual, type MeteorVisual } from "./art";
 import { tickBooks, type BookKeyKind, type BooksEngineState } from "./booksEngine";
+import { comboTier, nextMilestone } from "./booksEngine";
 import { Effects } from "./fx";
 
 /**
@@ -12,6 +13,15 @@ import { Effects } from "./fx";
 const SIMPLE_R = 11;
 const BOLT_MS = 130;
 const ACCENT = "#6ab7ff";
+/** shot and glow colours by combo tier (0: none yet ... 5: 200+ characters) */
+const SHOT = [
+  { glow: "rgba(90,200,255,0.55)", core: "#ffffff", css: "#6ab7ff", width: 6 },
+  { glow: "rgba(90,255,160,0.6)", core: "#eafff3", css: "#5af0a0", width: 6.5 },
+  { glow: "rgba(255,215,80,0.65)", core: "#fff7d6", css: "#ffd750", width: 7 },
+  { glow: "rgba(255,150,60,0.7)", core: "#fff0dc", css: "#ff963c", width: 7.5 },
+  { glow: "rgba(255,90,230,0.72)", core: "#ffe9fb", css: "#ff5ae6", width: 8 },
+  { glow: "rgba(170,140,255,0.8)", core: "#ffffff", css: "#aa8cff", width: 9 },
+] as const;
 
 const clampDt = (dt: number): number => Math.min(dt, 100);
 
@@ -49,6 +59,8 @@ export class BooksScene {
   private visuals = new Map<number, MeteorVisual>();
   private fx = new Effects();
   private bolts: Bolt[] = [];
+  private seenMilestone = 0;
+  private milestoneAt = -10_000;
   private exploded = new Set<number>();
   private raf = 0;
   private last = 0;
@@ -270,7 +282,53 @@ export class BooksScene {
     this.drawBolts();
     this.fx.draw(ctx);
     const ship = this.shipPos();
+    this.drawCombo(ship, t);
     drawShip(ctx, ship.x, ship.y, this.shipAngle, t, this.muzzle, 0.8);
+  }
+
+  /** Precision Combo beside the ship: the run of correct characters, the next milestone, and a glow once a tier is reached */
+  private drawCombo(ship: { x: number; y: number }, t: number): void {
+    const ctx = this.ctx;
+    const e = this.engine;
+    const tier = comboTier(e.combo);
+    const shot = SHOT[tier]!;
+    if (tier > 0) {
+      ctx.save();
+      ctx.globalCompositeOperation = "lighter";
+      const g = ctx.createRadialGradient(ship.x, ship.y, 4, ship.x, ship.y, 54);
+      g.addColorStop(0, shot.glow);
+      g.addColorStop(1, "rgba(0,0,0,0)");
+      ctx.fillStyle = g;
+      ctx.beginPath();
+      ctx.arc(ship.x, ship.y, 54, 0, Math.PI * 2);
+      ctx.fill();
+      ctx.restore();
+    }
+    // a short flash when a milestone is reached
+    if (e.milestoneSeq !== this.seenMilestone) {
+      this.seenMilestone = e.milestoneSeq;
+      this.milestoneAt = this.clock;
+    }
+    const flash = Math.max(0, 1 - (this.clock - this.milestoneAt) / 900);
+    const x = ship.x + 72;
+    const next = nextMilestone(e.combo);
+    ctx.save();
+    ctx.textAlign = "left";
+    ctx.textBaseline = "alphabetic";
+    ctx.font = "bold 13px system-ui, sans-serif";
+    ctx.fillStyle = tier > 0 ? shot.css : "rgba(200,215,255,0.8)";
+    ctx.shadowColor = shot.glow;
+    ctx.shadowBlur = tier > 0 ? 6 + flash * 14 : 0;
+    ctx.fillText("Precision Combo", x, ship.y - 22);
+    ctx.shadowBlur = 0;
+    ctx.font = `bold ${20 + Math.round(flash * 6)}px system-ui, sans-serif`;
+    ctx.fillStyle = "#ffffff";
+    ctx.fillText(`${e.combo} characters`, x, ship.y + 1);
+    ctx.font = "12px system-ui, sans-serif";
+    ctx.fillStyle = "rgba(200,215,255,0.75)";
+    ctx.fillText(next === null ? "Top tier reached" : `Next milestone: ${next}`, x, ship.y + 19);
+    void t;
+    ctx.restore();
   }
 
   /** a small meteor: one gradient for the body and one faint glow, nothing else */
@@ -328,13 +386,14 @@ export class BooksScene {
       ctx.save();
       ctx.globalCompositeOperation = "lighter";
       ctx.lineCap = "round";
-      ctx.strokeStyle = "rgba(90,200,255,0.55)";
-      ctx.lineWidth = 6;
+      const shot = SHOT[comboTier(this.engine.combo)]!;
+      ctx.strokeStyle = shot.glow;
+      ctx.lineWidth = shot.width;
       ctx.beginPath();
       ctx.moveTo(tail.x, tail.y);
       ctx.lineTo(head.x, head.y);
       ctx.stroke();
-      ctx.strokeStyle = "#ffffff";
+      ctx.strokeStyle = shot.core;
       ctx.lineWidth = 2;
       ctx.stroke();
       ctx.restore();

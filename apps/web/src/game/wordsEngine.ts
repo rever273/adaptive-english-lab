@@ -20,7 +20,26 @@ export interface WordsWord {
   mistakes: number;
   /** whether the meteor is currently animating a destruction */
   destroying: boolean;
+  /** the learner asked for the translation (F3): shown under the word even for general words */
+  revealed: boolean;
+  /** time of the last correct key on this word (for letter-pair intervals), null before the first */
+  lastHitAt: number | null;
 }
+
+/** letter-pair facts of the session, sent with the completion (the server keeps them as raw rows) */
+export interface PairFacts {
+  count: number;
+  totalMs: number;
+  errors: number;
+}
+
+/** error-free words in a row -> score multiplier (a game bonus only: it never changes speed, accuracy or word statistics) */
+export function comboMultiplier(streak: number): number {
+  return streak >= 10 ? 1.5 : streak >= 5 ? 1.2 : streak >= 3 ? 1.1 : 1;
+}
+
+/** intervals longer than this are pauses, not typing */
+const MAX_PAIR_INTERVAL_MS = 2000;
 
 export type WordsEvent =
   | { type: "appeared"; word: WordsWord }
@@ -59,6 +78,12 @@ export interface WordsEngineState {
   errorSeq: number;
   /** planIndex of the word that was locked at the last wrong key (null: no lock, shake every label) */
   errorPlanIndex: number | null;
+  /** destroyed words in a row without a wrong key (any wrong key resets it) */
+  streak: number;
+  bestStreak: number;
+  /** game score: 10 per letter of a destroyed word, times the combo multiplier. Display only. */
+  score: number;
+  keyStats: Map<string, PairFacts>;
 }
 
 export interface WordsEngineConfig {
@@ -88,6 +113,10 @@ export function createWordsEngine(config: WordsEngineConfig): WordsEngineState {
     nextAppearanceOrder: 0,
     errorSeq: 0,
     errorPlanIndex: null,
+    streak: 0,
+    bestStreak: 0,
+    score: 0,
+    keyStats: new Map(),
   };
 }
 
@@ -118,6 +147,8 @@ function trySpawn(s: WordsEngineState, config: WordsEngineConfig): WordsWord | n
     progress: 0,
     mistakes: 0,
     destroying: false,
+    revealed: false,
+    lastHitAt: null,
   };
   s.words.push(word);
   s.appearances.push({ planIndex, order: s.nextAppearanceOrder++ });
@@ -164,14 +195,23 @@ export function tickWords(s: WordsEngineState, config: WordsEngineConfig, dtMs: 
  * A wrong key never changes the word (nothing is shown or to be deleted): it is counted, reported as a `miss` and the host
  * shakes the text. A correct letter is one shot; the word is destroyed on its last letter. Backspace does nothing here.
  */
-export function handleWordKey(s: WordsEngineState, config: WordsEngineConfig, key: string): WordsEvent[] {
+export function handleWordKey(s: WordsEngineState, config: WordsEngineConfig, key: string, nowMs?: number): WordsEvent[] {
   const events: WordsEvent[] = [];
   if (s.paused || s.failed || s.won) return events;
 
   const k = key.toLowerCase();
   if (!/^[a-z-]$/.test(k)) return events;
 
+  const pairFacts = (pair: string): PairFacts => s.keyStats.get(pair) ?? s.keyStats.set(pair, { count: 0, totalMs: 0, errors: 0 }).get(pair)!;
+  const validPair = (pair: string): boolean => /^[a-z-]{2}$/.test(pair);
+
   const miss = (word: WordsWord | null) => {
+    s.streak = 0;
+    // a wrong key while the second letter of a pair was expected counts against that pair
+    if (word && word.progress >= 1) {
+      const pair = word.lemma.slice(word.progress - 1, word.progress + 1).toLowerCase();
+      if (validPair(pair)) pairFacts(pair).errors++;
+    }
     s.errors += 1;
     s.charsTyped += 1;
     s.errorSeq += 1;
@@ -197,6 +237,19 @@ export function handleWordKey(s: WordsEngineState, config: WordsEngineConfig, ke
     miss(w);
     return events;
   }
+  // the interval since the previous correct key on this word belongs to the pair of the two letters (pauses are not counted)
+  if (nowMs !== undefined) {
+    if (w.progress >= 1 && w.lastHitAt !== null) {
+      const dt = nowMs - w.lastHitAt;
+      const pair = w.lemma.slice(w.progress - 1, w.progress + 1).toLowerCase();
+      if (dt > 0 && dt <= MAX_PAIR_INTERVAL_MS && validPair(pair)) {
+        const f = pairFacts(pair);
+        f.count++;
+        f.totalMs += Math.round(dt);
+      }
+    }
+    w.lastHitAt = nowMs;
+  }
   w.progress++;
   s.charsTyped += 1;
   events.push({ type: "hit", word: w });
@@ -206,6 +259,10 @@ export function handleWordKey(s: WordsEngineState, config: WordsEngineConfig, ke
 
 function destroyWord(s: WordsEngineState, w: WordsWord, events: WordsEvent[]): void {
   w.destroying = true;
+  if (w.mistakes === 0) s.streak++;
+  else s.streak = 0;
+  s.bestStreak = Math.max(s.bestStreak, s.streak);
+  s.score += Math.round(w.lemma.length * 10 * comboMultiplier(s.streak));
   s.destroyedCount++;
   s.destroyedPlanIndexes.push(w.planIndex);
   events.push({ type: "destroyed", word: w });
@@ -213,6 +270,21 @@ function destroyWord(s: WordsEngineState, w: WordsWord, events: WordsEvent[]): v
     s.won = true;
     events.push({ type: "won" });
   }
+}
+
+/** F3: show the Russian translation under the locked word, or under the most urgent one when none is locked; true when a word got it */
+export function revealTranslation(s: WordsEngineState): boolean {
+  if (s.paused || s.failed || s.won) return false;
+  const locked = s.target !== null ? s.words[s.target] : undefined;
+  const word = locked && !locked.destroying ? locked : s.words.filter((w) => !w.destroying).sort((a, b) => b.y - a.y)[0];
+  if (!word) return false;
+  word.revealed = true;
+  return true;
+}
+
+/** the letter-pair facts as the completion request wants them */
+export function exportKeyStats(s: WordsEngineState): Array<{ pair: string; count: number; totalMs: number; errors: number }> {
+  return [...s.keyStats].map(([pair, f]) => ({ pair, count: f.count, totalMs: f.totalMs, errors: f.errors })).filter((f) => f.count > 0 || f.errors > 0);
 }
 
 export function setWordsPaused(s: WordsEngineState, paused: boolean): void {

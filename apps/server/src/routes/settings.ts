@@ -25,6 +25,8 @@ const SettingsPatchSchema = z
     typingVocabularyShare: z.number().min(0).max(1).optional(),
     typingSpeedMultiplier: z.number().min(0.5).max(2).optional(),
     typingBookMinutes: z.number().int().min(1).max(30).optional(),
+    typingDictationExercisesPerLesson: z.number().int().min(5).max(20).optional(),
+    typingRecallWords: z.number().int().min(0).max(3).optional(),
   })
   .strict();
 

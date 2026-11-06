@@ -1,0 +1,6 @@
+{
+  "cards": {
+    "verb_forms.resultant_states": { "rule": "Be + an established participial adjective can describe a present state: be gone (absent), be finished (done). Do not generalise be to all motion verbs. Contrast has gone (present perfect, departure with present relevance); she has gone for her break is natural. Do not treat both forms as interchangeable in every context.", "good": ["The guests are gone.", "Are you finished with the report?"], "wrong": "He is left for work. (use has left)" },
+    "subjunctive.present_wishes": { "rule": "Wish + past form expresses a present situation one wants to be different. After I/he/she/it both was and were are grammatical; were is more formal. Accept both when context permits. Distinguish wishes about the past (past perfect).", "good": ["I wish I knew the answer.", "I wish she was here.", "I wish she were here."], "wrong": "I wish I know the answer. (present unreal wish)" }
+  }
+}

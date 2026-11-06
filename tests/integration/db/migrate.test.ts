@@ -5,7 +5,7 @@ import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import { DEFAULT_SETTINGS_V1, SettingsV1Schema } from "../../../packages/contracts/src/index.js";
 import { createBackup, checkDatabaseFile, listBackups, verifyBackup } from "../../../apps/server/src/db/backup.js";
 import { readDbInfo } from "../../../apps/server/src/db/info.js";
-import { checksumSql, currentSchemaVersion, MigrationError, runMigrations } from "../../../apps/server/src/db/migrate.js";
+import { checksumSql, currentSchemaVersion, loadMigrations, MigrationError, runMigrations } from "../../../apps/server/src/db/migrate.js";
 import { openDatabase, type Db } from "../../../apps/server/src/db/open.js";
 import { makeScratchRoot, projectRoot } from "../helpers.js";
 
@@ -92,7 +92,7 @@ describe("migration 001 content", () => {
     const d = open();
     await runMigrations(d, { migrationsDir: realMigrations, appVersion: "test" });
     const before = d.prepare("SELECT * FROM schema_migrations").all();
-    expect(before).toHaveLength(26);
+    expect(before).toHaveLength(loadMigrations(realMigrations).length);
     const r = await runMigrations(d, { migrationsDir: realMigrations, appVersion: "other" });
     expect(r.applied).toEqual([]);
     expect(r.backupSkippedReason).toBe("nothing_pending");

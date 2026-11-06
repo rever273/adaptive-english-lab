@@ -24,7 +24,7 @@ it("shows B1-C1 by default and saves C2 on a scratch profile", async () => {
     await expect.poll(() => min.inputValue(), { timeout: 15000 }).toBe("B1");
     expect(await max.inputValue()).toBe("C1");
     await max.selectOption("C2");
-    await page.getByTestId("save-settings").click();
+    // settings are saved automatically now
     await expect.poll(async () => (await page.evaluate(async () => (await fetch("/api/v1/settings")).json())).values.difficultyMax).toBe("C2");
     const folder = path.join(projectRoot, "documentation", "spec", "evidence", "cefr-c2");
     mkdirSync(folder, { recursive: true });

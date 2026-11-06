@@ -14,9 +14,11 @@ const publicJob = (db: Db, id: string) => {
   const entryId = j.kind === "vocabulary_enrichment" ? (j.payload as { entryId?: unknown }).entryId : null;
   const word = typeof entryId === "string" ? (db.prepare("SELECT lemma FROM vocabulary_entries e WHERE id = ? AND (SELECT kind FROM vocabulary_entry_events ev WHERE ev.entry_id = e.id ORDER BY ev.created_at DESC, ev.rowid DESC LIMIT 1) IS NOT 'removed'").get(entryId) as { lemma: string } | undefined)?.lemma ?? null : null;
   const diagnostic = j.errorCode ? (db.prepare("SELECT reason FROM job_events WHERE job_id = ? AND (reason LIKE 'failed:%|%' OR reason LIKE 'retry:%|%') ORDER BY sequence DESC LIMIT 1").get(id) as { reason: string } | undefined)?.reason.split("|")[1] : undefined;
+  // Audio Dictation sentences run as `generation` jobs (the payload tells them apart); the panel shows them as their own kind
+  const dictation = j.kind === "generation" && (typeof (j.payload as { dictationLessonId?: unknown }).dictationLessonId === "string" || (j.payload as { dictationPool?: unknown }).dictationPool === 1);
   return {
     id: j.id,
-    kind: j.kind,
+    kind: dictation ? "dictation" : j.kind === "generation" && typeof (j.payload as { expressionId?: unknown }).expressionId === "string" ? "expression" : j.kind,
     state: j.state,
     priority: j.priority,
     createdAt: j.createdAt,
@@ -29,6 +31,7 @@ const publicJob = (db: Db, id: string) => {
     diagnosticCodes: diagnostic ? diagnostic.split(",").filter(c => /^[A-Z][A-Z0-9_]{0,39}$/.test(c)) : [],
     cancelRequested: j.cancelRequested,
     // progress is counted items from the checkpoint, never a fabricated percentage of a single LLM call
+    phase: dictation && typeof (j.checkpoint as { phase?: unknown } | null)?.phase === "string" ? (j.checkpoint as { phase: string }).phase : null,
     progress: (j.checkpoint as { done?: number; total?: number } | null)?.total !== undefined ? { done: (j.checkpoint as { done?: number }).done ?? 0, total: (j.checkpoint as { total: number }).total } : null,
     hasResult: resultOf(db, id) !== undefined,
   };
@@ -48,19 +51,22 @@ export function registerQueueRoutes(app: FastifyInstance, db: Db, deps: QueueDep
   // D64: a compact picture for the floating AI panel. Jobs of one kind that are still open form the current "wave"; done/failed count the
   // jobs of that kind that FINISHED since the oldest open one was created (jobs queued together finish in order, so counting by created_at dropped them: "0 / 9" instead of "11 / 20"), and the time per item is the median of the last finished ones (measured, not guessed).
   app.get("/api/v1/ai/activity", async () => {
-    const open = db.prepare("SELECT kind, COUNT(*) AS n, MIN(created_at) AS since, SUM(state = 'running') AS running, SUM(state = 'waiting_for_gpu') AS waiting, SUM(state = 'paused') AS paused FROM jobs WHERE state IN ('queued','waiting_for_gpu','running','paused') AND kind <> 'test_unit' GROUP BY kind").all() as Array<{ kind: string; n: number; since: string; running: number; waiting: number; paused: number }>;
+    // Audio Dictation sentences are `generation` jobs with a lesson id in the payload: they form a wave of their own
+    const IS_DICTATION = "(json_extract(payload_json, '$.dictationLessonId') IS NOT NULL OR json_extract(payload_json, '$.dictationPool') IS NOT NULL)";
+    const open = db.prepare(`SELECT kind, ${IS_DICTATION} AS dictation, COUNT(*) AS n, MIN(created_at) AS since, SUM(state = 'running') AS running, SUM(state = 'waiting_for_gpu') AS waiting, SUM(state = 'paused') AS paused FROM jobs WHERE state IN ('queued','waiting_for_gpu','running','paused') AND kind <> 'test_unit' GROUP BY kind, ${IS_DICTATION}`).all() as Array<{ kind: string; dictation: number; n: number; since: string; running: number; waiting: number; paused: number }>;
     const waves = open.map((w) => {
-      const closed = db.prepare("SELECT SUM(state = 'completed') AS done, SUM(state IN ('failed','cancelled')) AS failed FROM jobs WHERE kind = ? AND finished_at >= ? AND state IN ('completed','failed','cancelled')").get(w.kind, w.since) as { done: number | null; failed: number | null };
-      const recent = (db.prepare("SELECT (julianday(finished_at) - julianday(started_at)) * 86400000 AS ms FROM jobs WHERE kind = ? AND state = 'completed' AND started_at IS NOT NULL AND finished_at IS NOT NULL ORDER BY finished_at DESC LIMIT 9").all(w.kind) as Array<{ ms: number }>).map((r) => r.ms).sort((a, b) => a - b);
-      const reason = w.waiting > 0 ? (db.prepare("SELECT e.reason AS r FROM job_events e JOIN jobs j ON j.id = e.job_id WHERE j.kind = ? AND j.state = 'waiting_for_gpu' ORDER BY e.rowid DESC LIMIT 1").get(w.kind) as { r: string } | undefined)?.r ?? null : null;
+      const own = `kind = ? AND ${IS_DICTATION} = ${w.dictation}`;
+      const closed = db.prepare(`SELECT SUM(state = 'completed') AS done, SUM(state IN ('failed','cancelled')) AS failed FROM jobs WHERE ${own} AND finished_at >= ? AND state IN ('completed','failed','cancelled')`).get(w.kind, w.since) as { done: number | null; failed: number | null };
+      const recent = (db.prepare(`SELECT (julianday(finished_at) - julianday(started_at)) * 86400000 AS ms FROM jobs WHERE ${own} AND state = 'completed' AND started_at IS NOT NULL AND finished_at IS NOT NULL ORDER BY finished_at DESC LIMIT 9`).all(w.kind) as Array<{ ms: number }>).map((r) => r.ms).sort((a, b) => a - b);
+      const reason = w.waiting > 0 ? (db.prepare(`SELECT e.reason AS r FROM job_events e JOIN jobs j ON j.id = e.job_id WHERE j.kind = ? AND j.state = 'waiting_for_gpu' AND (json_extract(j.payload_json, '$.dictationLessonId') IS NOT NULL OR json_extract(j.payload_json, '$.dictationPool') IS NOT NULL) = ${w.dictation} ORDER BY e.rowid DESC LIMIT 1`).get(w.kind) as { r: string } | undefined)?.r ?? null : null;
       const done = closed.done ?? 0;
       const failed = closed.failed ?? 0;
-      return { kind: w.kind, open: w.n, running: w.running, waiting: w.waiting, paused: w.paused, done, failed, total: w.n + done + failed, msPerItem: recent.length ? Math.round(recent[Math.floor(recent.length / 2)]!) : null, waitingReason: reason };
+      return { kind: w.dictation ? "dictation" : w.kind, open: w.n, running: w.running, waiting: w.waiting, paused: w.paused, done, failed, total: w.n + done + failed, msPerItem: recent.length ? Math.round(recent[Math.floor(recent.length / 2)]!) : null, waitingReason: reason };
     });
     const status = scheduler ? await scheduler.status() : null;
     return {
       waves,
-      active: status?.activeJob ? { kind: status.activeJob.kind, runningForMs: status.activeJob.runningForMs } : null,
+      active: status?.activeJob ? { kind: status.activeJob.kind === "generation" && (db.prepare("SELECT 1 FROM jobs WHERE kind = 'generation' AND state = 'running' AND (json_extract(payload_json, '$.dictationLessonId') IS NOT NULL OR json_extract(payload_json, '$.dictationPool') IS NOT NULL)").get() !== undefined) ? "dictation" : status.activeJob.kind, runningForMs: status.activeJob.runningForMs } : null,
       models: status?.residentModels ?? [],
       practiceActive: status?.practiceActive ?? false,
       telemetry: status && status.telemetry !== "unavailable" ? { usedMib: status.telemetry.usedMib, totalMib: status.telemetry.totalMib } : null,

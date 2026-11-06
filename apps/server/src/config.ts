@@ -27,6 +27,9 @@ export interface AppConfig {
   vocabularyImagesDir?: string;
   /** optional old word list (D69), a hint for the word job; never imported */
   lexiconCsv?: string;
+  /** Audio Dictation (TASK_028): Piper lives in its own venv, outside the shared Python; both paths can be set in englishlab.local.json */
+  piperPython: string;
+  piperModelDir: string;
   dbPath: string;
   backupsDir: string;
   logsDir: string;
@@ -98,12 +101,14 @@ export function resolveDataRoot(requested: string | undefined, projectRoot: stri
 }
 
 /** Git-ignored per-machine settings in the project root (D62), e.g. { "dbDir": "C:\\Databases\\EnglishLab" }. */
-export function readLocalSettings(projectRoot: string): { dbDir?: string; vocabularyImagesDir?: string; lexiconCsv?: string } {
+type LocalSettings = { dbDir?: string; vocabularyImagesDir?: string; lexiconCsv?: string; piperPython?: string; piperModelDir?: string };
+
+export function readLocalSettings(projectRoot: string): LocalSettings {
   const file = path.join(projectRoot, "englishlab.local.json");
   if (!existsSync(file)) return {};
   try {
-    const v = JSON.parse(readFileSync(file, "utf8")) as { dbDir?: unknown; vocabularyImagesDir?: unknown; lexiconCsv?: unknown };
-    return { ...(typeof v.dbDir === "string" && v.dbDir.length > 0 ? { dbDir: v.dbDir } : {}), ...(typeof v.vocabularyImagesDir === "string" && v.vocabularyImagesDir.length > 0 ? { vocabularyImagesDir: v.vocabularyImagesDir } : {}), ...(typeof v.lexiconCsv === "string" && v.lexiconCsv.length > 0 ? { lexiconCsv: v.lexiconCsv } : {}) };
+    const v = JSON.parse(readFileSync(file, "utf8")) as { dbDir?: unknown; vocabularyImagesDir?: unknown; lexiconCsv?: unknown; piperPython?: unknown; piperModelDir?: unknown };
+    return { ...(typeof v.dbDir === "string" && v.dbDir.length > 0 ? { dbDir: v.dbDir } : {}), ...(typeof v.vocabularyImagesDir === "string" && v.vocabularyImagesDir.length > 0 ? { vocabularyImagesDir: v.vocabularyImagesDir } : {}), ...(typeof v.lexiconCsv === "string" && v.lexiconCsv.length > 0 ? { lexiconCsv: v.lexiconCsv } : {}), ...(typeof v.piperPython === "string" && v.piperPython.length > 0 ? { piperPython: v.piperPython } : {}), ...(typeof v.piperModelDir === "string" && v.piperModelDir.length > 0 ? { piperModelDir: v.piperModelDir } : {}) };
   } catch {
     throw new ConfigError("CONFIG_INVALID", "englishlab.local.json is not valid JSON");
   }
@@ -117,7 +122,16 @@ export function resolveDbDir(requested: string): string {
   return realpathLenient(requested);
 }
 
-export function loadConfig(env: NodeJS.ProcessEnv = process.env, projectRoot = detectProjectRoot(), local?: { dbDir?: string; vocabularyImagesDir?: string; lexiconCsv?: string }): AppConfig {
+/**
+ * Where `npm run dictation:setup` puts Piper (venv, voice model). espeak-ng inside Piper cannot open files below a path with non-ASCII
+ * characters, so a project folder like that falls back to %LOCALAPPDATA%\EnglishLab\piper. scripts/dictation-setup.mjs has the same rule.
+ */
+export function defaultPiperPaths(root: string, localAppData = process.env.LOCALAPPDATA ?? ""): { piperPython: string; piperModelDir: string } {
+  const base = /^[ -~]*$/.test(root) || !localAppData ? path.join(root, "var") : path.join(localAppData, "EnglishLab", "piper");
+  return { piperPython: path.join(base, "venvs", "piper", "Scripts", "python.exe"), piperModelDir: path.join(base, "models", "piper") };
+}
+
+export function loadConfig(env: NodeJS.ProcessEnv = process.env, projectRoot = detectProjectRoot(), local?: LocalSettings): AppConfig {
   const parsed = EnvSchema.safeParse(env);
   if (!parsed.success) {
     throw new ConfigError("CONFIG_INVALID", parsed.error.issues.map((i) => `${i.path.join(".")}: ${i.message}`).join("; "));
@@ -138,6 +152,8 @@ export function loadConfig(env: NodeJS.ProcessEnv = process.env, projectRoot = d
     dataRoot,
     vocabularyImagesDir: (local ?? readLocalSettings(root)).vocabularyImagesDir,
     lexiconCsv: (local ?? readLocalSettings(root)).lexiconCsv,
+    piperPython: path.resolve(root, (local ?? readLocalSettings(root)).piperPython ?? defaultPiperPaths(root, env.LOCALAPPDATA).piperPython),
+    piperModelDir: path.resolve(root, (local ?? readLocalSettings(root)).piperModelDir ?? defaultPiperPaths(root, env.LOCALAPPDATA).piperModelDir),
     dbPath: path.join(dbDir, "english-lab.sqlite"),
     backupsDir: path.join(dataRoot, "backups"),
     logsDir: path.join(dataRoot, "logs"),

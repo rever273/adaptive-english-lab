@@ -73,7 +73,7 @@ export function getThought(db: Db, id: string): ThoughtView | undefined {
   return r ? view(r) : undefined;
 }
 
-const GENERATION_PROMPT_ID = "generation-v9";
+const GENERATION_PROMPT_ID = "generation-v10";
 /** skill families where "rewrite this sentence" is a natural task (articles, prepositions and agreement are not) */
 const BLOCK_FAMILIES = new Set(["word_order", "questions", "tenses", "conditionals", "reported_speech", "modals", "verb_patterns", "passive", "relatives", "linking"]);
 const TRANSFORM_FAMILIES = new Set(["tenses", "conditionals", "reported_speech", "modals", "verb_patterns", "linking", "questions", "passive", "relatives"]);

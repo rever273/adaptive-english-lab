@@ -84,12 +84,12 @@ export const loadAiModel = (): Promise<AiModelStatus> => send("POST", "/api/v1/a
 export const unloadAiModel = (): Promise<AiModelStatus> => send("POST", "/api/v1/ai/model/unload", AiModelStatusSchema, {});
 export const fetchCapabilities = (): Promise<Capabilities> => send("GET", "/api/v1/capabilities", CapabilitiesSchema);
 
-type SettingsValues = { preloadModelOnStart?: boolean; practiceSoundsEnabled?: boolean; typingSoundsEnabled?: boolean; taskCount: number; weakRatio: number; voiceTarget: 0 | 1 | 2; voiceShare?: number; vocabularyTaskCount?: number; vocabularyNewWordsPerSession?: number; reviewNoticeThreshold?: number; difficultyMin?: Level; difficultyMax?: Level; typingWordsPerLevel?: number; typingVocabularyShare?: number; typingSpeedMultiplier?: number; typingBookMinutes?: number };
+type SettingsValues = { preloadModelOnStart?: boolean; practiceSoundsEnabled?: boolean; typingSoundsEnabled?: boolean; taskCount: number; weakRatio: number; voiceTarget: 0 | 1 | 2; voiceShare?: number; vocabularyTaskCount?: number; vocabularyNewWordsPerSession?: number; reviewNoticeThreshold?: number; difficultyMin?: Level; difficultyMax?: Level; typingWordsPerLevel?: number; typingVocabularyShare?: number; typingSpeedMultiplier?: number; typingBookMinutes?: number; typingDictationExercisesPerLesson?: number; typingRecallWords?: number };
 export type Level = "A2" | "B1" | "B2" | "C1" | "C2";
 type SettingsView = { revision: number; values: SettingsValues; defaults: SettingsValues };
 export const fetchSettings = () => send("GET", "/api/v1/settings", typed<SettingsView>());
 export const savePreloadModel = (on: boolean) => send("POST", "/api/v1/settings", typed<SettingsView>(), { preloadModelOnStart: on });
-export const saveSettings = (values: { taskCount: number; weakRatio: number; voiceShare: number; practiceSoundsEnabled?: boolean; typingSoundsEnabled?: boolean; vocabularyTaskCount?: number; vocabularyNewWordsPerSession?: number; reviewNoticeThreshold?: number; difficultyMin?: Level; difficultyMax?: Level; typingWordsPerLevel?: number; typingVocabularyShare?: number; typingSpeedMultiplier?: number; typingBookMinutes?: number }) => send("POST", "/api/v1/settings", typed<SettingsView>(), values);
+export const saveSettings = (values: { taskCount: number; weakRatio: number; voiceShare: number; practiceSoundsEnabled?: boolean; typingSoundsEnabled?: boolean; vocabularyTaskCount?: number; vocabularyNewWordsPerSession?: number; reviewNoticeThreshold?: number; difficultyMin?: Level; difficultyMax?: Level; typingWordsPerLevel?: number; typingVocabularyShare?: number; typingSpeedMultiplier?: number; typingBookMinutes?: number; typingDictationExercisesPerLesson?: number; typingRecallWords?: number }) => send("POST", "/api/v1/settings", typed<SettingsView>(), values);
 export type VocabularySpeechStatus = { enabled: boolean; configured: boolean; requests: number; blockedUntil: string | null };
 export const fetchVocabularySpeech = () => send("GET", "/api/v1/vocabulary-speech", typed<VocabularySpeechStatus>());
 export type VocabularySpeechCredits = { available: boolean; reason?: string; used?: number; limit?: number; remaining?: number; resetsAt?: string | null; tier?: string | null; appCharacters30d: number };
@@ -111,6 +111,20 @@ async function speechRequest(path: string, signal?: AbortSignal): Promise<Blob |
   return res.status === 204 ? null : res.blob();
 }
 export const vocabularySpeech = (sessionId: string, slotId: string, signal: AbortSignal) => speechRequest(`/api/v1/vocabulary-speech/${encodeURIComponent(sessionId)}/${encodeURIComponent(slotId)}`, signal);
+/** the word panel's pronounce button: any English word or short phrase, saved or not (ElevenLabs only when the file is not stored yet) */
+export async function vocabularyTextSpeech(text: string): Promise<Blob | null> {
+  if (!csrfToken) {
+    const boot = await fetch("/api/v1/session");
+    csrfToken = SessionBootstrapSchema.parse(await boot.json()).csrfToken;
+  }
+  const res = await fetch("/api/v1/vocabulary-speech/text", { method: "POST", headers: { "X-CSRF-Token": csrfToken, "Content-Type": "application/json" }, body: JSON.stringify({ text }) });
+  if (!res.ok) {
+    if (res.status === 403) csrfToken = null;
+    const error = ErrorEnvelopeSchema.safeParse(await res.json().catch(() => null));
+    throw new ApiRequestError(error.success ? error.data.error.code : `HTTP_${res.status}`, error.success ? error.data.error.message : "Unable to play pronunciation.", res.status);
+  }
+  return res.status === 204 ? null : res.blob();
+}
 export const vocabularyWordSpeech = (id: string) => speechRequest(`/api/v1/vocabulary-speech/word/${encodeURIComponent(id)}`);
 export const fetchDashboard = () => send("GET", "/api/v1/dashboard", DashboardSchema);
 export type SessionCategory = "grammar" | "vocabulary";
@@ -184,6 +198,7 @@ export interface PublicJob {
   errorCode: string | null;
   word?: string | null;
   diagnosticCodes?: string[];
+  phase?: string | null;
   progress: { done: number; total: number } | null;
 }
 export type GpuInfo =
@@ -363,14 +378,60 @@ export type { TypingAnalyticsData, TypingBookStartResponse, TypingOverview, Typi
 export const fetchTypingOverview = () => send("GET", "/api/v1/typing/overview", typed<TypingOverview>());
 export const startTypingWords = () => send("POST", "/api/v1/typing/words/start", typed<TypingWordsStartResponse>(), {});
 export const typingWordAppearances = (sessionId: string, appearances: Array<{ planIndex: number; order: number }>) => send("POST", `/api/v1/typing/words/${encodeURIComponent(sessionId)}/appearances`, typed<{ ok: true }>(), { appearances });
-export const completeTypingWords = (sessionId: string, body: { status: "completed" | "failed"; activeMs: number; charsTyped: number; errors: number; appearances: Array<{ planIndex: number; order: number }>; destroyedPlanIndexes: number[]; wordErrors?: Array<{ planIndex: number; errors: number }> }) => send("POST", `/api/v1/typing/words/${encodeURIComponent(sessionId)}/complete`, typed<TypingResult>(), body);
+export const completeTypingWords = (sessionId: string, body: { status: "completed" | "failed"; activeMs: number; charsTyped: number; errors: number; appearances: Array<{ planIndex: number; order: number }>; destroyedPlanIndexes: number[]; wordErrors?: Array<{ planIndex: number; errors: number }>; bestCombo?: number; keyStats?: Array<{ pair: string; count: number; totalMs: number; errors: number }> }) => send("POST", `/api/v1/typing/words/${encodeURIComponent(sessionId)}/complete`, typed<TypingResult>(), body);
 export const abortTypingWords = (sessionId: string, body: { activeMs?: number; charsTyped?: number; errors?: number }) => send("POST", `/api/v1/typing/words/${encodeURIComponent(sessionId)}/abort`, typed<{ ok: true }>(), body);
 export const startTypingBook = () => send("POST", "/api/v1/typing/books/start", typed<TypingBookStartResponse>(), {});
 export const checkpointTypingBook = (sessionId: string, body: { offset: number; activeMs: number; charsTyped: number; errors: number }) => send("POST", `/api/v1/typing/books/${encodeURIComponent(sessionId)}/checkpoint`, typed<{ ok: true; applied: boolean }>(), body);
-export const completeTypingBook = (sessionId: string, body: { offset: number; activeMs: number; charsTyped: number; errors: number }) => send("POST", `/api/v1/typing/books/${encodeURIComponent(sessionId)}/complete`, typed<TypingResult>(), body);
+export const completeTypingBook = (sessionId: string, body: { offset: number; activeMs: number; charsTyped: number; errors: number; bestCombo?: number; keyStats?: Array<{ pair: string; count: number; totalMs: number; errors: number }> }) => send("POST", `/api/v1/typing/books/${encodeURIComponent(sessionId)}/complete`, typed<TypingResult>(), body);
 export const abortTypingBook = (sessionId: string, body: { activeMs?: number; charsTyped?: number; errors?: number }) => send("POST", `/api/v1/typing/books/${encodeURIComponent(sessionId)}/abort`, typed<{ ok: true }>(), body);
 export const fetchTypingResult = (sessionId: string) => send("GET", `/api/v1/typing/sessions/${encodeURIComponent(sessionId)}/result`, typed<TypingResult>());
+export type { TypingRecallWord, TypingRecallStartResponse } from "@english-lab/contracts";
+export const fetchTypingRecall = (sessionId: string) => send("GET", `/api/v1/typing/sessions/${encodeURIComponent(sessionId)}/recall`, typed<import("@english-lab/contracts").TypingRecallStartResponse>());
+export const saveTypingRecall = (sessionId: string, results: Array<{ entryId: string; correctKeys: number; wrongKeys: number; hints: number; revealed: boolean }>) => send("POST", `/api/v1/typing/sessions/${encodeURIComponent(sessionId)}/recall`, typed<{ points: number; results: Array<{ entryId: string; lemma: string; points: number }> }>(), { results });
+/** Books: a sentence read aloud by a Piper voice (made on the spot, kept only in a temporary cache); resolves to the WAV */
+export async function fetchBookSpeech(body: { text: string; sessionId: string; paragraph: number } | { text: string }): Promise<Blob> {
+  if (!csrfToken) csrfToken = SessionBootstrapSchema.parse(await (await fetch("/api/v1/session", { headers: { Accept: "application/json" } })).json()).csrfToken;
+  const res = await fetch("sessionId" in body ? "/api/v1/typing/books/speech" : "/api/v1/practice/speech", { method: "POST", headers: { "Content-Type": "application/json", "X-CSRF-Token": csrfToken ?? "" }, body: JSON.stringify(body) });
+  if (!res.ok) {
+    if (res.status === 403) csrfToken = null;
+    const json = (await res.json().catch(() => null)) as { error?: { message?: string }; data?: { error?: { message?: string } } } | null;
+    throw new ApiRequestError(`HTTP_${res.status}`, json?.data?.error?.message ?? json?.error?.message ?? "Could not read this sentence aloud.", res.status);
+  }
+  return res.blob();
+}
+export const warmBookSpeech = () => send("POST", "/api/v1/typing/books/speech/warm", anyOf<{ ok: boolean }>(), {}).catch(() => undefined);
+// ---- Expressions (the second part of the dictionary) ----
+export interface ExpressionView { id: string; phrase: string; translationRu: string; exampleEn: string; descriptionRu: string; source: "model" | "user" | null; state: "ready" | "generating" | "failed"; createdAt: string }
+export const fetchExpressions = () => send("GET", "/api/v1/vocabulary/expressions", typed<{ expressions: ExpressionView[] }>());
+export const addExpression = (phrase: string) => send("POST", "/api/v1/vocabulary/expressions", typed<ExpressionView & { created: boolean }>(), { phrase });
+export const editExpression = (id: string, body: { translationRu?: string; exampleEn?: string; descriptionRu?: string }) => send("POST", `/api/v1/vocabulary/expressions/${encodeURIComponent(id)}/edit`, typed<ExpressionView>(), body);
+export const retryExpression = (id: string) => send("POST", `/api/v1/vocabulary/expressions/${encodeURIComponent(id)}/retry`, typed<ExpressionView>(), {});
+export const removeExpression = (id: string) => send("POST", `/api/v1/vocabulary/expressions/${encodeURIComponent(id)}/remove`, typed<{ removed: true }>(), {});
 export const fetchTypingAnalytics = (mode: "words" | "books", days: "7" | "30" | "90" | "all") => send("GET", `/api/v1/analytics/typing?mode=${mode}&days=${days}&timezone=${encodeURIComponent(Intl.DateTimeFormat().resolvedOptions().timeZone)}`, typed<TypingAnalyticsData>());
+// ---- Audio Dictation (TASK_028) ----
+import type { DictationAnalytics, DictationAnswerResponse, DictationHintResponse, DictationLessonSummary, DictationResult, DictationState } from "@english-lab/contracts";
+export type { DictationAnalytics, DictationAnswerResponse, DictationHintResponse, DictationLessonSummary, DictationResult, DictationState };
+const DICT = "/api/v1/typing/dictation";
+export const createDictationLesson = () => send("POST", `${DICT}/lessons`, typed<DictationLessonSummary>(), {});
+export const retryDictationLesson = (id: string) => send("POST", `${DICT}/lessons/${encodeURIComponent(id)}/retry`, typed<DictationLessonSummary>(), {});
+export const startDictationLesson = (id: string) => send("POST", `${DICT}/lessons/${encodeURIComponent(id)}/start`, typed<DictationState>(), {});
+export const fetchDictationResult = (id: string) => send("GET", `${DICT}/lessons/${encodeURIComponent(id)}/result`, typed<DictationResult>());
+export const sendDictationPlay = (exerciseId: string, source: "auto" | "manual" | "wrong_answer") => send("POST", `${DICT}/exercises/${encodeURIComponent(exerciseId)}/play`, typed<{ ok: true }>(), { source });
+export const setDictationSoundFlag = (exerciseId: string, flagged: boolean) => send("POST", `${DICT}/exercises/${encodeURIComponent(exerciseId)}/sound-flag`, typed<{ flagged: boolean }>(), { flagged });
+export const requestDictationHint = (exerciseId: string, typedText: string) => send("POST", `${DICT}/exercises/${encodeURIComponent(exerciseId)}/hint`, typed<DictationHintResponse>(), { typedText });
+export const revealDictationAnswer = (exerciseId: string) => send("POST", `${DICT}/exercises/${encodeURIComponent(exerciseId)}/reveal`, typed<DictationHintResponse>(), {});
+export type DictationPoolSummary = { ready: number; used: number; audioSeconds: number; minWords: number; maxWords: number; oldest: string | null; newest: string | null; topics: Array<{ topic: string; n: number }>; voices: Array<{ name: string; n: number }> };
+export const fetchDictationPool = () => send("GET", `${DICT}/pool`, typed<DictationPoolSummary>());
+export const prepareDictationTracks = (count: number) => send("POST", `${DICT}/pool`, typed<{ queued: number }>(), { count });
+export const openDictationTranslation = (exerciseId: string) => send("POST", `${DICT}/exercises/${encodeURIComponent(exerciseId)}/translation`, typed<{ translationRu: string }>(), {});
+export const answerDictation = (exerciseId: string, body: { attemptId: string; text: string; activeMs: number; typingMs?: number; keystrokes?: number }) => send("POST", `${DICT}/exercises/${encodeURIComponent(exerciseId)}/answer`, typed<DictationAnswerResponse>(), body);
+export const sendDictationTime = (lessonId: string, activeMs: number) => send("POST", `${DICT}/lessons/${encodeURIComponent(lessonId)}/time`, typed<{ ok: true; applied: boolean }>(), { activeMs });
+export async function fetchDictationAudio(exerciseId: string): Promise<Blob> {
+  const res = await fetch(`${DICT}/exercises/${encodeURIComponent(exerciseId)}/audio`);
+  if (!res.ok) throw new ApiRequestError("AUDIO_UNAVAILABLE", "The audio is not available.");
+  return res.blob();
+}
+export const fetchDictationAnalytics = (days: "7" | "30" | "90" | "all") => send("GET", `/api/v1/analytics/typing/dictation?days=${days}&timezone=${encodeURIComponent(Intl.DateTimeFormat().resolvedOptions().timeZone)}`, typed<DictationAnalytics>());
 /** fetch with keepalive for `pagehide`/`visibilitychange` checkpoints (CSRF requires fetch, not sendBeacon) */
 export async function sendKeepalive(path: string, body: unknown): Promise<void> {
   if (!csrfToken) return; // no token yet: losing the last seconds is acceptable
@@ -412,3 +473,18 @@ export interface ThoughtItem { id: string; textRu: string; createdAt: string; st
 export const fetchThoughts = () => send("GET", "/api/v1/thoughts", typed<{ thoughts: ThoughtItem[]; readyForBatch: number; needSkills: number }>());
 export const addThought = (text: string) => send("POST", "/api/v1/thoughts", typed<{ thought: ThoughtItem; created: boolean }>(), { text });
 export const createThoughtBatchApi = () => send("POST", "/api/v1/thoughts/batch", typed<{ batchId: string; items: number; thoughts: number }>(), {});
+// ---- Voices (TASK_029) ----
+import { VoicesResponseSchema, type VoiceInfo, type VoiceSettingsUpdate } from "@english-lab/contracts";
+export type { VoiceInfo, VoiceSettingsUpdate };
+export const fetchVoices = (purpose: "dictation" | "books" | "listening" = "dictation") => send("GET", `/api/v1/voices?purpose=${purpose}`, VoicesResponseSchema);
+export const saveVoiceSettings = (key: string, patch: VoiceSettingsUpdate) => send("PATCH", `/api/v1/voices/${encodeURIComponent(key)}/settings`, VoicesResponseSchema, patch);
+export const fetchVoiceHistory = (key: string) => send("GET", `/api/v1/voices/${encodeURIComponent(key)}/history`, typed<{ revisions: Array<{ revision: number; source: string; reason: string | null; createdAt: string; priorWeight: number; lengthScale: number; enabled: boolean }> }>());
+export interface VoiceSampleStats { speechSeconds: number; wordsPerMinute: number; syllablesPerSecond: number; lengthScale: number }
+/** the sample at the saved pace, or at `lengthScale` when given (a change not saved yet), with how fast it really speaks */
+export async function fetchVoiceSample(key: string, lengthScale?: number): Promise<{ blob: Blob; stats: VoiceSampleStats | null }> {
+  const res = await fetch(`/api/v1/voices/${encodeURIComponent(key)}/sample${lengthScale === undefined ? "" : `?lengthScale=${lengthScale}`}`);
+  if (!res.ok) throw new ApiRequestError("AUDIO_UNAVAILABLE", "The sample is not available. Is Piper installed (npm run dictation:setup)?");
+  let stats: VoiceSampleStats | null = null;
+  try { const h = res.headers.get("X-Sample-Stats"); stats = h ? (JSON.parse(h) as VoiceSampleStats) : null; } catch { stats = null; }
+  return { blob: await res.blob(), stats };
+}
