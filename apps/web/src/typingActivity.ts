@@ -1,4 +1,4 @@
-import { useEffect, useRef } from "react";
+import { useCallback, useEffect, useRef } from "react";
 import * as api from "./api";
 type Item = { id:string;sessionId:string;mode:"words"|"books"|"dictation";startMs:number;endMs:number };
 const KEY="el_typing_activity_v1"; let sending=false;
@@ -11,13 +11,17 @@ export function counterInterval(last:number,current:number,lastWall:number,now:n
  const startMs=now-Math.min(diff,elapsed); return now>startMs ? {startMs,endMs:now} : null;
 }
 /** Snapshot the existing mode clock; lifetime totals still come from the existing counters. */
-export function useTypingActivity(sessionId:string,mode:Item["mode"],counter:()=>number):void {
+export function useTypingActivity(sessionId:string,mode:Item["mode"],counter:()=>number):()=>void {
  const counterRef=useRef(counter); counterRef.current=counter;
+ const flushRef=useRef<()=>void>(()=>{});
+ const flush=useCallback(()=>flushRef.current(),[]);
  useEffect(()=>{ let last=counterRef.current(), lastWall=Date.now();
   const tick=()=>{ const now=Date.now(), current=counterRef.current();
    const interval=counterInterval(last,current,lastWall,now); if(interval){write([...read(),{id:crypto.randomUUID(),sessionId,mode,...interval}]);void drain();}
    last=current;lastWall=now; };
+  flushRef.current=tick;
   const timer=window.setInterval(tick,5000); const hide=()=>{tick();for(const x of read()) void api.sendKeepalive("/api/v1/journey/typing-interval",x);}; window.addEventListener("pagehide",hide);void drain();
-  return ()=>{tick();window.clearInterval(timer);window.removeEventListener("pagehide",hide);};
+  return ()=>{tick();flushRef.current=()=>{};window.clearInterval(timer);window.removeEventListener("pagehide",hide);};
  },[sessionId,mode]);
+ return flush;
 }

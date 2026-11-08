@@ -1,11 +1,14 @@
 import Fastify from "fastify";
+import { randomUUID } from "node:crypto";
+import { recordAttempt } from "../../../apps/server/src/domain/attempts/attempts.js";
+import { appendAssessmentRevision } from "../../../apps/server/src/domain/attempts/assessments.js";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { registerJourneyRoutes, allocateDays, learningDate } from "../../../apps/server/src/routes/journey.js";
 import { recordPracticeActivity } from "../../../apps/server/src/domain/sessions/activity.js";
 import { takeLease } from "../../../apps/server/src/domain/sessions/lease.js";
 import { registerErrorHandling } from "../../../apps/server/src/errors.js";
 import { registerSettingsRoutes } from "../../../apps/server/src/routes/settings.js";
-import { makeEnv, makeSession, type Env } from "./fixtures.js";
+import { makeEnv, makeSession, revealedSlot, exactSetAssessor, type Env } from "./fixtures.js";
 let env:Env; beforeEach(async()=>{env=await makeEnv();}); afterEach(()=>env.cleanup());
 describe("journey data",()=>{
  it("changes the Brisbane learning day at 01:00 and splits an interval at the boundary",()=>{
@@ -22,11 +25,22 @@ describe("journey data",()=>{
    env.db.prepare("INSERT INTO practice_activity_intervals VALUES (?,?,?,?,?,?,?,?)").run("boundary",session,"tab",start,end,"Australia/Brisbane","visible-recent-v1",new Date(start).toISOString());
    vi.useFakeTimers();vi.setSystemTime(new Date("2026-10-28T14:59:59Z"));
    const before=(await a.inject({url:"/api/v1/journey?timezone=UTC"})).json();
-   expect(before).toMatchObject({version:"journey-v2",timezone:"Australia/Brisbane",today:"2026-10-28",todayMs:{grammar:5000},totals:{grammar:10000}});
+   expect(before).toMatchObject({version:"journey-v3",timezone:"Australia/Brisbane",today:"2026-10-28",todayMs:{grammar:5000},totals:{grammar:10000}});
    vi.setSystemTime(new Date("2026-10-28T15:00:01Z"));
    const after=(await a.inject({url:"/api/v1/journey?timezone=UTC"})).json();
    expect(after).toMatchObject({today:"2026-10-29",todayMs:{grammar:5000},totals:{grammar:10000},activeDays:2});
   } finally {vi.useRealTimers();await a.close();}
+ });
+ it("uses the latest confirmed independent first answer for daily grammar results", async()=>{
+  const a=Fastify(); registerErrorHandling(a); registerJourneyRoutes(a,env.db);
+  try {
+   const slot=revealedSlot(env);
+   const attempt=recordAttempt(env.db,{...env.deps,assessor:exactSetAssessor()},{slotId:slot.slotId,submissionId:randomUUID(),answer:["b"],inputMode:"text"});
+   const get=async()=>{const r=await a.inject({url:"/api/v1/journey/practice-activity"}); expect(r.statusCode).toBe(200);return r.json().grammarResults[0];};
+   expect(await get()).toMatchObject({correct:0,scored:1,skills:1});
+   appendAssessmentRevision(env.db,env.deps,{attemptId:attempt.body.attemptId,expectedSequence:1,decision:{verdict:"correct",confirmation:"confirmed",source:"human",rationale:"reviewed"}});
+   expect(await get()).toMatchObject({correct:1,scored:1,skills:1});
+  } finally { await a.close(); }
  });
  it("deduplicates typing observations without adding them to lifetime counters twice",async()=>{
   const a=Fastify();registerErrorHandling(a);registerJourneyRoutes(a,env.db);try{
@@ -50,6 +64,11 @@ describe("journey data",()=>{
  const g=makeSession(env),v=makeSession(env); env.db.prepare("INSERT INTO vocabulary_sessions VALUES (?,?)").run(v,env.clock.current.toISOString());
  const now=Date.now();env.db.prepare("INSERT INTO practice_activity_intervals VALUES (?,?,?,?,?,?,?,?)").run("a",g,"t",now-10000,now-5000,"Australia/Brisbane","visible-recent-v1",new Date().toISOString());env.db.prepare("INSERT INTO practice_activity_intervals VALUES (?,?,?,?,?,?,?,?)").run("b",v,"t",now-5000,now,"Australia/Brisbane","visible-recent-v1",new Date().toISOString());
  const res=await a.inject({url:"/api/v1/journey?timezone=Australia%2FBrisbane"});expect(res.statusCode).toBe(200);expect(res.json().totals).toMatchObject({grammar:5000,vocabulary:5000});expect(res.json().todayMs).toMatchObject({grammar:5000,vocabulary:5000});
+ const activity = await a.inject({url:"/api/v1/journey/practice-activity"});
+ expect(activity.statusCode).toBe(200);
+ expect(activity.json().days.reduce((sum: number, d: {grammar:number;vocabulary:number}) => sum+d.grammar, 0)).toBe(5000);
+ expect(activity.json().days.reduce((sum: number, d: {grammar:number;vocabulary:number}) => sum+d.vocabulary, 0)).toBe(5000);
+ expect(activity.json().grammarResults).toEqual([]);
  const before=(env.db.prepare("SELECT COUNT(*) AS n FROM settings_revisions").get() as {n:number}).n; const update=await a.inject({method:"POST",url:"/api/v1/settings",payload:{journeyHours:{b2:250,c1:300,c2:400},dailyMinutes:{grammar:15,vocabulary:10,words:0,books:10,dictation:5}}});expect(update.statusCode).toBe(200);expect(update.json().values.dailyMinutes.words).toBe(0);expect(env.db.prepare("SELECT COUNT(*) AS n FROM settings_revisions").get()).toEqual({n:before+1});
  }finally{await a.close();}});
 });

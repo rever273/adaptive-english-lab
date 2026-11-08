@@ -248,7 +248,9 @@ describe("voice session: audio, draft, confirm", () => {
     expect(hits).toEqual([]);
     for (const t of rows<{ name: string }>(env!.db, "SELECT name FROM sqlite_master WHERE type = 'table'")) {
       const cols = rows<{ name: string; type: string }>(env!.db, `PRAGMA table_info(${t.name})`);
-      expect(cols.filter((c) => /audio|wav|pcm|blob/i.test(c.name) || c.type.toUpperCase() === "BLOB"), t.name).toEqual([]);
+      // Audio Dictation keeps the NAME and LENGTH of the speech the app itself synthesised (Piper), never a recording of the learner and never audio bytes
+      const synthesised = ["typing_dictation_exercises", "typing_dictation_pool"].includes(t.name) ? ["audio_file", "audio_ms"] : [];
+      expect(cols.filter((c) => (/audio|wav|pcm|blob/i.test(c.name) && !synthesised.includes(c.name)) || c.type.toUpperCase() === "BLOB"), t.name).toEqual([]);
     }
   });
 

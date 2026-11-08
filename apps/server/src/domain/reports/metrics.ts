@@ -2,7 +2,7 @@ import { MASTERY_V1, markDelayedProbes, wilson95 } from "@english-lab/learning";
 import type { RawEvidenceRow } from "../analytics/evidence.js";
 import type { AttemptFact, SlotFact } from "./facts.js";
 
-export const REPORT_VERSION = "reports-v1";
+export const REPORT_VERSION = "reports-v2";
 export const MIN_COMPARISON_N = 10;
 const Z = MASTERY_V1.wilsonZ;
 const DAY = 86_400_000;

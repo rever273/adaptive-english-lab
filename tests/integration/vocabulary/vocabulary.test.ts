@@ -71,6 +71,21 @@ describe("saving a word", () => {
     fails(() => addWord(env!.db, deps(), { word: "ok", extra: 1 }), 400, "VALIDATION_ERROR");
   });
 
+  it("limits the unsearched dictionary after filtering and preserves the total", async () => {
+    env = await makeEnv();
+    const a = addWord(env.db, deps(), { word: "alpha" }).entry;
+    addWord(env.db, deps(), { word: "bravo" });
+    addWord(env.db, deps(), { word: "charlie" });
+    patchWord(env.db, deps(), a.id, { learned: true });
+    const page = listWords(env.db, { limit: 1, learned: false });
+    expect(page.total).toBe(2);
+    expect(page.words).toHaveLength(1);
+    expect(page.words[0]!.learned).toBe(false);
+    expect(listWords(env.db, { limit: 10, learned: false }).words).toHaveLength(2);
+    removeWord(env.db, deps(), a.id);
+    expect(listWords(env.db).total).toBe(2);
+  });
+
   it("lookup finds a saved word by its lemma, a regular form, or a form the learner selected", async () => {
     env = await makeEnv();
     addWord(env.db, deps(), { word: "stop" });
@@ -149,7 +164,7 @@ describe("the learner's text is never silently overwritten", () => {
   it("learned is a flag: it does not bump the revision, does not need one, and moves no score", async () => {
     const x = await diagEnv({ diagnostic: true });
     env = x.env;
-    const sess = createDiagnosticBlock(env.db, sessionDeps(env), { purpose: "diagnostic", timezone: "Australia/Brisbane" });
+    const sess = createDiagnosticBlock(env.db, sessionDeps(env), { purpose: "diagnostic", timezone: "Australia/Brisbane", seed: "v" });
     for (const s of slotsOf(env, sess.sessionId)) answerSlot(env, sess.sessionId, s);
     const asOf = new Date(env.clock.current.getTime() + 3600_000).toISOString();
     const run = () => runMastery(env!.db, { asOf, cohort: { criterionVersion: "rubric-v1", difficulty: "B2", protocol: "diagnostic-v1" }, taxonomyId: env!.taxonomyId, now: env!.deps.now });

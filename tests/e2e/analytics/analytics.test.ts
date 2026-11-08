@@ -108,8 +108,7 @@ describe("analytics in a browser", () => {
     const dbCount = q<{ n: number }>("SELECT COUNT(*) AS n FROM attempts WHERE first_attempt = 1 AND hints_before = 0")[0]!.n;
     expect(dbCount).toBe(4);
     expect(await page.getByTestId("comparison").innerText()).toContain("Insufficient comparison data");
-    expect(await page.getByTestId("ai-findings").innerText()).toContain("not verified");
-    expect(await page.getByTestId("discovery").innerText()).toContain("model not qualified");
+    expect(await page.getByTestId("ai-findings").count()).toBe(0);
     expect(await page.getByTestId("run-id").innerText()).toContain("4 answers");
     steps.push({ right, wrong });
     await shot("analytics-1-desktop");

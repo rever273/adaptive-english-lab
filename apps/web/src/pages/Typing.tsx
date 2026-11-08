@@ -3,6 +3,10 @@ import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import * as api from "../api";
 import type { DictationResult, DictationState, TypingRecallWord, TypingBookStartResponse, TypingOverview, TypingResult, TypingWordsStartResponse } from "../api";
 import { TypingKeyboard } from "../components/TypingKeyboard";
+import { WordsTargetImage } from "../components/WordsTargetImage";
+import { checkDailyGoal, DailyGoalCheck } from "../components/DailyGoalNotice";
+import { Chart } from "../components/Chart";
+import type { BookSpeedSample } from "../game/bookSpeedSamples";
 import { WordsScene } from "../game/scene";
 import { firstTranslation } from "../format";
 import { playPracticeSound } from "../practiceSounds";
@@ -12,7 +16,7 @@ import { TypingRecall } from "./TypingRecall";
 import { LAYOUT_HINT, Toast, useToast } from "./typingShared";
 import { comboMultiplier, createWordsEngine, exportKeyStats, revealTranslation, type WordsEngineState, type WordsEvent } from "../game/wordsEngine";
 
-type Screen = { kind: "overview" } | { kind: "words"; sessionId: string; level: number; plan: TypingWordsStartResponse; paused: boolean } | { kind: "books"; sessionId: string; data: TypingBookStartResponse; paused: boolean } | { kind: "result"; result: TypingResult; struggled?: string[]; bonus?: { points: number } } | { kind: "recall"; result: TypingResult; struggled?: string[]; words: TypingRecallWord[] } | { kind: "dictation"; state: DictationState } | { kind: "dictationResult"; result: DictationResult };
+type Screen = { kind: "overview" } | { kind: "words"; sessionId: string; level: number; plan: TypingWordsStartResponse; paused: boolean } | { kind: "books"; sessionId: string; data: TypingBookStartResponse; paused: boolean } | { kind: "result"; result: TypingResult; struggled?: string[]; bonus?: { points: number }; bookSamples?: BookSpeedSample[] } | { kind: "recall"; result: TypingResult; struggled?: string[]; words: TypingRecallWord[] } | { kind: "dictation"; state: DictationState } | { kind: "dictationResult"; result: DictationResult };
 
 const clamp = (n: number, lo: number, hi: number) => Math.min(hi, Math.max(lo, n));
 const fallMs = (len: number, msPerChar: number) => Math.round(clamp(3 * len * msPerChar + 2500, 5000, 22000));
@@ -29,6 +33,10 @@ export function Typing({ onNavigate, dailyStart, onDailyDone }: { onNavigate?: (
   }, []);
   useEffect(load, [load]);
   const [dictNote, setDictNote] = useState<string | null>(null);
+  const [dailyDictation, setDailyDictation] = useState<"preparing" | "error" | "done">(dailyStart === "dictation" ? "preparing" : "done");
+  const dailyDictationBusy = useRef(false);
+  const dailyDictationCancelled = useRef(false);
+  useEffect(() => { dailyDictationCancelled.current = false; return () => { dailyDictationCancelled.current = true; }; }, []);
   // while dictation tracks are being made (a lesson or prepared ones) the card follows the progress
   const generating = overview?.dictation.lesson?.status === "generating" || (overview?.dictation.pool.generating ?? 0) > 0;
   useEffect(() => {
@@ -39,20 +47,72 @@ export function Typing({ onNavigate, dailyStart, onDailyDone }: { onNavigate?: (
 
   const dailyStarted = useRef(false);
   useEffect(() => {
-    if (!dailyStart || !overview || dailyStarted.current) return;
+    if (!dailyStart || dailyStart === "dictation" || !overview || dailyStarted.current) return;
     dailyStarted.current = true;
     if (dailyStart === "words" && overview.words.bankWords > 0) void startWords(setScreen, setError);
     else if (dailyStart === "books" && overview.books.available && !overview.books.finished) void startBook(setScreen, setError);
-    else if (dailyStart === "dictation") void runDictation(overview.dictation, setScreen, setDictNote, load);
   }, [dailyStart, overview, load]);
+
+  // A requested dictation may need to be created or finish generating before it can start.
+  useEffect(() => {
+    if (dailyDictation !== "preparing" || !overview || screen.kind !== "overview" || dailyDictationBusy.current) return;
+    const d = overview.dictation;
+    if (d.lesson?.status === "generating") return;
+    if (d.lesson?.status === "failed" || (!d.lesson && !d.available)) {
+      setDictNote(dictationNote(d));
+      setDailyDictation("error");
+      return;
+    }
+    dailyDictationBusy.current = true;
+    const start = async () => {
+      try {
+        if (!d.lesson) {
+          await api.createDictationLesson();
+          const fresh = await api.fetchTypingOverview();
+          if (!dailyDictationCancelled.current) setOverview(fresh);
+        } else {
+          const state = await api.startDictationLesson(d.lesson.id);
+          if (!dailyDictationCancelled.current) { setDailyDictation("done"); setScreen({ kind: "dictation", state }); }
+        }
+      } catch (e) {
+        if (!dailyDictationCancelled.current) { setDictNote(e instanceof Error ? e.message : String(e)); setDailyDictation("error"); }
+      } finally { dailyDictationBusy.current = false; }
+    };
+    void start();
+  }, [dailyStart, dailyDictation, overview, screen.kind, load]);
 
   if (error && screen.kind === "overview") return <p role="alert">{error}</p>;
   if (!overview) return <p className="muted">Loading typing practice…</p>;
 
+  if (dailyDictation !== "done" && screen.kind === "overview") {
+    const lesson = overview.dictation.lesson;
+    const retry = async () => {
+      setDictNote(null);
+      try {
+        if (lesson?.status === "failed") await api.retryDictationLesson(lesson.id);
+        setOverview(await api.fetchTypingOverview());
+        setDailyDictation("preparing");
+      } catch (e) { setDictNote(e instanceof Error ? e.message : String(e)); }
+    };
+    return <section className="card" aria-label="Preparing Audio Dictation">
+      <h2><i className="pi pi-volume-up" aria-hidden="true" /> Audio Dictation</h2>
+      {dailyDictation === "preparing" ? <p role="status">{lesson?.status === "generating" ? `Preparing the lesson: ${lesson.ready} / ${lesson.total} ready…` : "Opening your lesson…"}</p> : <><p className="notice notice-warning" role="alert">{dictNote ?? "Could not prepare the lesson."}</p><button className="btn btn-primary" onClick={() => void retry()}>Retry</button></>}
+      <button className="btn" onClick={() => { dailyDictationCancelled.current = true; setDailyDictation("done"); }}>Back to Typing</button>
+    </section>;
+  }
+
   if (screen.kind === "dictation") return <section className="typing-page" aria-label="Audio Dictation"><DictationGame state={screen.state} onResult={(result) => setScreen({ kind: "dictationResult", result })} onExit={() => { load(); setScreen({ kind: "overview" }); }} /></section>;
   if (screen.kind === "dictationResult") {
     const toOverview = () => { load(); setScreen({ kind: "overview" }); };
-    return <DictationResultView result={screen.result} onDailyDone={onDailyDone} onDone={toOverview} onNext={() => { void api.createDictationLesson().catch((e) => setDictNote(e instanceof Error ? e.message : String(e))).finally(toOverview); }} />;
+    return <DictationResultView result={screen.result} onDailyDone={onDailyDone} onDone={toOverview} onNext={() => {
+      dailyDictationCancelled.current = false;
+      setDictNote(null);
+      setError(null);
+      setOverview(null);
+      setDailyDictation("preparing");
+      setScreen({ kind: "overview" });
+      load();
+    }} />;
   }
 
   if (screen.kind === "recall") {
@@ -67,7 +127,7 @@ export function Typing({ onNavigate, dailyStart, onDailyDone }: { onNavigate?: (
       const started = mode === "words" ? await startWords(setScreen, setError) : await startBook(setScreen, setError);
       if (!started) toOverview();
     };
-    return <WordsResult onDailyDone={onDailyDone} result={screen.result} struggled={screen.struggled} bonus={screen.bonus} onContinue={() => void next()} onDone={toOverview} />;
+    return <><DailyGoalCheck mode={mode === "words" ? "words" : "books"} /><WordsResult onDailyDone={onDailyDone} result={screen.result} struggled={screen.struggled} bonus={screen.bonus} bookSamples={screen.bookSamples} onContinue={() => void next()} onDone={toOverview} /></>;
   }
 
   return (
@@ -119,7 +179,7 @@ export function Typing({ onNavigate, dailyStart, onDailyDone }: { onNavigate?: (
         </>
       )}
       {screen.kind === "words" && <WordsGame screen={screen} setScreen={setScreen} onExit={() => setScreen({ kind: "overview" })} />}
-      {screen.kind === "books" && <BooksGame sessionId={screen.sessionId} data={screen.data} onResult={(result, struggled) => setScreen({ kind: "result", result, struggled })} onExit={() => setScreen({ kind: "overview" })} />}
+      {screen.kind === "books" && <BooksGame sessionId={screen.sessionId} data={screen.data} onResult={(result, struggled, bookSamples) => setScreen({ kind: "result", result, struggled, bookSamples })} onExit={() => setScreen({ kind: "overview" })} />}
     </section>
   );
 }
@@ -250,8 +310,10 @@ function WordsGame({ screen, setScreen, onExit }: { screen: Extract<Screen, { ki
   const canvasRef = useRef<HTMLCanvasElement>(null);
   const sceneRef = useRef<WordsScene | null>(null);
   const engineRef = useRef<WordsEngineState | null>(null);
-  useTypingActivity(screen.sessionId, "words", () => engineRef.current?.activeMs ?? 0);
+  const flushActivity = useTypingActivity(screen.sessionId, "words", () => engineRef.current?.activeMs ?? 0);
   const [paused, setPaused] = useState(screen.paused);
+  const [imageWord, setImageWord] = useState<string | null>(null);
+  const [imageTranslation, setImageTranslation] = useState<string | null>(null);
   const pausedRef = useRef(screen.paused);
   const [hud, setHud] = useState<{ destroyed: number; total: number }>({ destroyed: 0, total: screen.plan.targetCount });
   // the speed on this level so far (correct letters per minute of active time) and the combo, refreshed while the game runs
@@ -281,6 +343,7 @@ function WordsGame({ screen, setScreen, onExit }: { screen: Extract<Screen, { ki
     if (finishing.current) return;
     finishing.current = true;
     const engine = engineRef.current!;
+    flushActivity();
     void api.completeTypingWords(screen.sessionId, {
       status,
       activeMs: Math.round(engine.activeMs),
@@ -291,7 +354,9 @@ function WordsGame({ screen, setScreen, onExit }: { screen: Extract<Screen, { ki
       wordErrors: engine.words.map((w) => ({ planIndex: w.planIndex, errors: w.mistakes })),
       keyStats: exportKeyStats(engine),
       bestCombo: engine.bestStreak,
+      bestCharStreak: engine.bestCharStreak,
     }).then(async (result) => {
+      checkDailyGoal("words");
       api.announceXp();
       // a won level may be followed by the optional memory check of up to three saved words
       if (status === "completed") {
@@ -300,7 +365,7 @@ function WordsGame({ screen, setScreen, onExit }: { screen: Extract<Screen, { ki
       }
       setScreen({ kind: "result", result });
     }).catch(() => setScreen({ kind: "overview" }));
-  }, [screen.sessionId, setScreen]);
+  }, [screen.sessionId, setScreen, flushActivity]);
 
   const onEvents = useCallback((events: WordsEvent[]) => {
     const engine = engineRef.current!;
@@ -308,12 +373,18 @@ function WordsGame({ screen, setScreen, onExit }: { screen: Extract<Screen, { ki
     for (const e of events) {
       if (e.type === "hit") {
         sound("shoot");
+        if (e.word.progress === 1) {
+          setImageWord(e.word.lemma);
+          const planWord = engine.plan[e.word.planIndex];
+          setImageTranslation(planWord?.source === "general" ? firstTranslation(planWord.translationRu) || null : null);
+        }
         if (e.word.progress === 1 && e.word.source === "vocabulary") pronunciation.speak(e.word.planIndex);
       } else if (e.type === "miss") {
         sound("incorrect");
       } else if (e.type === "appeared") {
         void api.typingWordAppearances(screen.sessionId, [{ planIndex: e.word.planIndex, order: engine.appearances.find((a) => a.planIndex === e.word.planIndex)?.order ?? engine.appearances.length }]);
       } else if (e.type === "destroyed") {
+        setImageWord(null);
         window.setTimeout(() => sound("explode"), 150); // lands with the last bolt
         setHud({ destroyed: engine.destroyedCount, total: engine.plan.length });
       } else if (e.type === "won") {
@@ -321,6 +392,7 @@ function WordsGame({ screen, setScreen, onExit }: { screen: Extract<Screen, { ki
         window.setTimeout(() => sound("complete"), 450);
         window.setTimeout(() => void finish("completed"), 1100);
       } else if (e.type === "failed") {
+        setImageWord(null);
         sound("fail");
         window.setTimeout(() => void finish("failed"), 1100);
       }
@@ -426,6 +498,7 @@ function WordsGame({ screen, setScreen, onExit }: { screen: Extract<Screen, { ki
       </div>
       <div className="typing-stage">
         <canvas ref={canvasRef} className="typing-canvas" aria-label="Words typing game" />
+        <WordsTargetImage word={imageWord} translation={imageTranslation} />
         {paused && <div className="typing-paused" role="status">Paused — press Resume, F2 or Esc to continue.</div>}
         {layoutNotice && <Toast text={LAYOUT_HINT} />}
       </div>
@@ -471,7 +544,7 @@ function TroubleWords({ words }: { words: string[] }) {
   );
 }
 
-function WordsResult({ result, struggled, bonus, onContinue, onDone, onDailyDone }: { result: TypingResult; struggled?: string[]; bonus?: { points: number } | undefined; onContinue: () => void; onDone: () => void; onDailyDone?: () => void }) {
+function WordsResult({ result, struggled, bonus, bookSamples, onContinue, onDone, onDailyDone }: { result: TypingResult; struggled?: string[]; bonus?: { points: number } | undefined; bookSamples?: BookSpeedSample[]; onContinue: () => void; onDone: () => void; onDailyDone?: () => void }) {
   const m = result.metrics;
   const stats: Array<{ label: string; value: string; tip: string }> = [
     { label: "Score", value: String(m.score), tip: STAT_TIPS.score },
@@ -516,6 +589,10 @@ function WordsResult({ result, struggled, bonus, onContinue, onDone, onDailyDone
           </ul>
         </details>
       )}
+      {bookSamples && bookSamples.length > 0 && <div className="books-session-chart" data-testid="books-session-chart">
+        <h4 className="chart-title">Typing during this level</h4>
+        <Chart ariaLabel="Typing speed and errors during this level" bars={{ color: "#e78e8e", format: (v) => `${Math.round(v)}` }} line={{ color: "#6ab7ff", format: (v) => `${Math.round(v)} WPM` }} legend="Line: typing speed in each 5-second interval (right axis); bars: errors in that interval. Pauses are excluded. Only this uninterrupted visit is shown; this chart is not saved." points={bookSamples.map((sample, i) => ({ key: `${sample.elapsedMs}-${i}`, label: fmtDuration(sample.elapsedMs), bar: sample.errors, line: sample.wpm, tip: [fmtDuration(sample.elapsedMs), `Speed: ${sample.wpm} WPM`, `Errors: ${sample.errors}`, `Interval: ${(sample.intervalMs / 1000).toFixed(1)} s`] }))} />
+      </div>}
       {struggled && struggled.length > 0 && <TroubleWords words={struggled} />}
       <div className="actions">
         {!bookFinished && <button className="btn btn-primary" onClick={onContinue} data-testid="typing-continue" autoFocus>{result.mode === "words" ? (result.status === "completed" ? `Continue to level ${String(result.level + 1).padStart(2, "0")}` : `Try level ${String(result.level).padStart(2, "0")} again`) : "Continue reading"}</button>}

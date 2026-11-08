@@ -258,6 +258,10 @@ describe("audio dictation", () => {
     // the first answer of sentence 1 had exactly one wrong word; the other first answers were right
     expect(stats.errorTypes.reduce((a, e) => a + e.count, 0)).toBe(1);
     expect(stats.summary.totalChars).toBeGreaterThan(0);
+    expect(stats.daily.reduce((sum, day) => sum + (day.chars ?? 0), 0)).toBe(stats.summary.totalChars);
+    expect(stats.daily.at(-1)?.cumulativeChars).toBe(stats.summary.totalChars);
+    const laterStats = dictationAnalytics(d, { days: 7, timezone: "UTC", now: new Date(Date.now() + 10 * 86400000) });
+    expect(laterStats.daily.every((day) => day.chars === 0 && day.cumulativeChars === stats.summary.totalChars)).toBe(true);
     expect(stats.summary.bestScore).toBe(result.score);
     expect(stats.series[0]!.independent).toBe(40);
     expect(stats.voiceBalance).toHaveLength(10);

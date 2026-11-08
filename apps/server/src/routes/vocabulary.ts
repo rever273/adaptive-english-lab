@@ -3,9 +3,10 @@ import { z } from "zod";
 import type { Db } from "../db/open.js";
 import { ApiError } from "../errors.js";
 import { addWord, getEntry, listWords, lookupWord, matchWords, patchWord, removeWord, revisionHistory, vocabularyTotals } from "../domain/vocabulary/repository.js";
+import { lookupWordBank } from "../domain/vocabulary/wordBankLookup.js";
 
 const idParams = { schema: { params: { type: "object", properties: { id: { type: "string", minLength: 1, maxLength: 64 } }, required: ["id"] } } } as const;
-const ListQuery = z.object({ q: z.string().max(80).optional(), learned: z.enum(["true", "false"]).optional(), limit: z.coerce.number().int().min(1).max(1000).optional() }).strict();
+const ListQuery = z.object({ q: z.string().max(80).optional(), learned: z.enum(["true", "false"]).optional(), limit: z.coerce.number().int().min(1).max(100000).optional() }).strict();
 
 /**
  * Vocabulary (spec/02): saving is immediate and never waits for the AI; text edits carry the revision they were made from and a stale edit is a 409
@@ -28,7 +29,7 @@ export function registerVocabularyRoutes(app: FastifyInstance, db: Db, deps: { n
     const w = z.object({ word: z.string().min(1).max(120) }).strict().safeParse(req.query);
     if (!w.success) throw new ApiError(400, "VALIDATION_ERROR", "Query is invalid");
     const entry = lookupWord(db, w.data.word);
-    return { known: entry !== null, entry };
+    return { known: entry !== null, entry, wordBank: lookupWordBank(db, w.data.word) };
   });
 
   // which words of a text are saved vocabulary (Books shows their translation while the learner types them)

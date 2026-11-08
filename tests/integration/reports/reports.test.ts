@@ -89,6 +89,37 @@ function knownDataset(e: Env): { aiAttempt: string } {
 
 const asOf = () => new Date(env!.clock.current.getTime() + 3600_000).toISOString();
 
+describe("completed course lessons in reports", () => {
+  it("counts a lesson only after both grammar sessions, across revisions, without rewriting saved reports", async () => {
+    env = await makeEnv();
+    const db = env.db;
+    const revisions = Array.from({ length: 4 }, (_, i) => {
+      const blueprint = randomUUID(), revision = randomUUID();
+      db.prepare("INSERT INTO blueprints(id, stable_key) VALUES (?,?)").run(blueprint, `report-l0${i + 1}`);
+      db.prepare("INSERT INTO blueprint_revisions(id, blueprint_id, revision, policy_json, status, created_at) VALUES (?,?,1,?,'published',?)").run(revision, blueprint, JSON.stringify({ schema_version: "blueprint-policy-v1", title: "Lesson" }), env!.clock.current.toISOString());
+      return { blueprint, revision };
+    });
+    const add = (revision: string, status = "completed") => {
+      const id = randomUUID();
+      db.prepare("INSERT INTO sessions(id, blueprint_revision_id, purpose, settings_revision_id, plan_id, selection_version, random_seed, status, created_at, timezone) VALUES (?,?,'practice',?,?,'test','seed',?,?,'Australia/Brisbane')").run(id, revision, env!.settingsId, env!.planId, status, env!.clock.current.toISOString());
+      return id;
+    };
+    for (const r of revisions) add(r.revision);
+    const before = getReport(db, env.deps, { asOf: asOf() });
+    expect(before.report.metrics.courseProgress.completedBlueprints).toBe(0);
+    const revised = randomUUID();
+    db.prepare("INSERT INTO blueprint_revisions(id, blueprint_id, revision, policy_json, status, created_at) VALUES (?,?,2,?,'published',?)").run(revised, revisions[0]!.blueprint, JSON.stringify({ schema_version: "blueprint-policy-v1", title: "Lesson" }), env.clock.current.toISOString());
+    add(revised); add(revisions[1]!.revision); add(revisions[2]!.revision);
+    add(revisions[3]!.revision, "ended_early");
+    const vocab = add(revisions[3]!.revision);
+    db.prepare("INSERT INTO vocabulary_sessions VALUES (?,?)").run(vocab, env.clock.current.toISOString());
+    const after = getReport(db, env.deps, { asOf: asOf() });
+    expect(after.report.metrics.courseProgress).toEqual({ completedBlueprints: 3, publishedBlueprints: 4 });
+    expect(after.id).not.toBe(before.id);
+    expect(readReport(db, before.id).report.metrics.courseProgress.completedBlueprints).toBe(0);
+  });
+});
+
 describe("exact numbers on a known dataset", () => {
   it("numerators and denominators, strata, pending, IDK/skip and per-skill counts are exactly what the events say", async () => {
     env = await makeEnv();
@@ -256,6 +287,11 @@ describe("exports", () => {
     const saved = getReport(env.db, env.deps, { asOf: asOf() });
     const root = mkdtempSync(path.join(os.tmpdir(), "el-export-"));
     tmp.push(root);
+    const old = { ...saved, id: randomUUID(), report: { ...saved.report, version: "reports-v1" } };
+    const oldExport = writeExport(env.db, root, old, old.report.asOf);
+    const oldJson = JSON.parse(readFileSync(path.join(root, oldExport.dir, "report.json"), "utf8"));
+    expect(oldJson.versions.report).toBe("reports-v1");
+    expect(readFileSync(path.join(root, oldExport.dir, "report.md"), "utf8")).toContain("version reports-v1");
     const out = writeExport(env.db, root, saved, saved.report.asOf);
     expect(out.dir).toMatch(/^report-\d{4}-\d{2}-\d{2}-[0-9a-f]{8}$/);
     expect(out.files.map((f) => f.name)).toEqual(["attempts.csv", "opportunities.csv", "errors.csv", "findings.csv", "summary.csv", "report.json", "report.md"]);

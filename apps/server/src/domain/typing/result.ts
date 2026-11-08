@@ -27,6 +27,8 @@ export interface TypingSessionRow {
   end_offset: number | null;
   current_offset: number | null;
   best_combo: number | null;
+  best_char_streak: number | null;
+  current_char_streak: number | null;
 }
 
 export function sessionRow(db: Db, id: string): TypingSessionRow {

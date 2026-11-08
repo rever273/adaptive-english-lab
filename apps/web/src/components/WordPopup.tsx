@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import { firstTranslation } from "../format";
-import { ApiRequestError, addExpression, addVocabulary, lookupVocabulary, vocabularyTextSpeech, type VocabEntry } from "../api";
+import { ApiRequestError, addExpression, addVocabulary, lookupVocabulary, vocabularyTextSpeech, type VocabEntry, type WordBankMatch } from "../api";
 
 const LETTER = /[\p{L}'’-]/u;
 /** a word or a short phrase of up to three English words; a sentence (punctuation inside, more words) or Russian text never matches */
@@ -25,11 +25,23 @@ const elementOf = (n: Node | null): Element | null => (n?.nodeType === Node.ELEM
 
 /** what is selected, if it is a word or short phrase worth saving: nothing for a sentence, Russian text, or a selection inside a form field */
 export function readWordSelection(): { text: string; slotId?: string } | null {
+  const input = document.activeElement;
+  if (input instanceof HTMLTextAreaElement && input.hasAttribute("data-word-selection")) {
+    let a = input.selectionStart;
+    let b = input.selectionEnd;
+    if (a === b) return null;
+    while (a > 0 && LETTER.test(input.value[a - 1]!)) a--;
+    while (b < input.value.length && LETTER.test(input.value[b]!)) b++;
+    const text = input.value.slice(a, b).replace(/\s+/g, " ").trim().replace(/^[^\p{L}]+|[^\p{L}]+$/gu, "");
+    return text.length > 0 && text.length <= 40 && PHRASE.test(text) ? { text } : null;
+  }
   const sel = window.getSelection();
   if (!sel || sel.isCollapsed || sel.rangeCount === 0) return null;
   const a = elementOf(sel.anchorNode);
   const f = elementOf(sel.focusNode);
-  if (!a || !f || a.closest(IGNORE) || f.closest(IGNORE)) return null;
+  if (!a || !f) return null;
+  const allowed = (el: Element) => el.closest("[data-word-selection]") || !el.closest(IGNORE);
+  if (!allowed(a) || !allowed(f)) return null;
   const text = wholeWords(sel).replace(/\s+/g, " ").trim().replace(/^[^\p{L}]+|[^\p{L}]+$/gu, "");
   if (text.length === 0 || text.length > 40 || !PHRASE.test(text)) return null;
   return { text, slotId: a.closest("[data-slot-id]")?.getAttribute("data-slot-id") ?? undefined };
@@ -44,6 +56,7 @@ export function WordCatcher() {
   const [pick, setPick] = useState<{ text: string; slotId?: string } | null>(null);
   const [word, setWord] = useState("");
   const [known, setKnown] = useState<VocabEntry | null>(null);
+  const [wordBank, setWordBank] = useState<WordBankMatch[]>([]);
   const [saved, setSaved] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
   const timer = useRef<ReturnType<typeof setTimeout> | null>(null);
@@ -91,8 +104,10 @@ export function WordCatcher() {
       timer.current = setTimeout(read, 180);
     };
     document.addEventListener("selectionchange", onChange);
+    document.addEventListener("select", onChange, true);
     return () => {
       document.removeEventListener("selectionchange", onChange);
+      document.removeEventListener("select", onChange, true);
       if (timer.current) clearTimeout(timer.current);
     };
   }, [read]);
@@ -101,9 +116,10 @@ export function WordCatcher() {
   useEffect(() => {
     let off = false;
     setKnown(null);
+    setWordBank([]);
     if (!text) return;
     lookupVocabulary(text)
-      .then((r) => !off && setKnown(r.entry))
+      .then((r) => { if (!off) { setKnown(r.entry); setWordBank(r.wordBank ?? []); } })
       .catch(() => undefined);
     return () => {
       off = true;
@@ -140,8 +156,14 @@ export function WordCatcher() {
       {known && !saved && (
         <p className="small" data-testid="known-word">
           <i className="pi pi-bookmark-fill" aria-hidden="true" /> Already saved{known.learned ? " · learned" : ""}.{" "}
-          {known.translation.text ? <span className={known.translation.source === "ai_draft" ? "ai-text" : undefined}>{firstTranslation(known.translation.text)}</span> : <span className="muted">No translation yet.</span>}
+          {known.translation.text ? <span className={known.translation.source === "ai_draft" ? "ai-text" : undefined}>{firstTranslation(known.translation.text)}</span> : <span className="muted">No saved translation yet.</span>}
         </p>
+      )}
+      {!known?.translation.text && wordBank.length > 0 && (
+        <div className="word-panel-translation" data-testid="word-bank-translation">
+          <span className="muted small">Word bank suggestion · unverified</span>
+          {wordBank.map((match) => <p className="small" key={match.lemma}><strong>{match.lemma}</strong>{match.partOfSpeech ? ` (${match.partOfSpeech})` : ""} — {match.translationRu}{match.form ? <span className="muted"> · {match.form === "past" ? "past form" : "past participle"} of {match.lemma}</span> : null}</p>)}
+        </div>
       )}
       <button type="button" className="btn btn-small" disabled={!word.trim() || speaking} onClick={() => void pronounce()} title="Hear the pronunciation" data-testid="pronounce-word">
         <i className="pi pi-volume-up" aria-hidden="true" /> {speaking ? "Loading…" : "Pronounce"}

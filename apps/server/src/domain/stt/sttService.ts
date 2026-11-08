@@ -15,8 +15,12 @@ export const STT_MODEL = { tag: "faster-whisper-small", runtime: "ctranslate2", 
 
 interface SpeechWorker { readonly alive: boolean; start(): Promise<SttReady>; transcribe(pcm: Buffer): Promise<Transcription>; stop(): Promise<number | null>; }
 
+/** who owns a voice stream: a practice session (the lease decides) or a Single Word lesson run (the run and its tab decide) */
+export type SttOwnerKind = "session" | "word_lesson" | "conversation";
+
 interface Stream {
   id: string;
+  kind: SttOwnerKind;
   sessionId: string;
   tabId: string;
   worker: SpeechWorker;
@@ -69,9 +73,9 @@ export class SttService {
     return this.stream ? { streamId: this.stream.id, sessionId: this.stream.sessionId } : null;
   }
 
-  async start(sessionId: string, tabId: string): Promise<{ streamId: string; maxSeconds: number; maxBytes: number; sampleRate: number; ready: SttReady }> {
+  async start(sessionId: string, tabId: string, kind: SttOwnerKind = "session"): Promise<{ streamId: string; maxSeconds: number; maxBytes: number; sampleRate: number; ready: SttReady }> {
     if (this.stopped) throw new ApiError(503, "STT_STOPPED", "Speech recognition is shutting down.");
-    assertLease(this.o.db, this.o.deps, sessionId, tabId); // only the tab that holds the practice lease may use the microphone
+    this.assertOwner(kind, sessionId, tabId); // only the tab that holds the practice lease (or the open lesson run) may use the microphone
     if (this.starting) throw new ApiError(409, "STT_BUSY", "Speech is already being prepared");
     if (this.stream) {
       if (this.stream.sessionId === sessionId && this.stream.tabId === tabId && this.stream.worker.alive) return this.describe(this.stream);
@@ -109,15 +113,14 @@ export class SttService {
       }
       try {
         if (cancelled()) throw new Error("cancelled");
-        assertLease(this.o.db, this.o.deps, sessionId, tabId);
-        const session = this.o.db.prepare("SELECT status FROM sessions WHERE id = ?").get(sessionId) as { status: string } | undefined;
-        if (session?.status !== "active") throw new Error("session ended");
+        this.assertOwner(kind, sessionId, tabId);
+        if (!this.ownerActive(kind, sessionId)) throw new Error("session ended");
       } catch {
         await made.worker.stop().catch(() => undefined);
         if (!this.o.cloud) this.o.scheduler.endPractice();
         throw new ApiError(409, "STT_START_CANCELLED", "Speech preparation was cancelled.");
       }
-      return { id: randomUUID(), sessionId, tabId, worker: made.worker, ready, lastUsed: Date.now(), modelDir: made.modelPath };
+      return { id: randomUUID(), kind, sessionId, tabId, worker: made.worker, ready, lastUsed: Date.now(), modelDir: made.modelPath };
     })();
     this.starting = run;
     try {
@@ -143,7 +146,7 @@ export class SttService {
   async transcribe(streamId: string, pcm: Buffer): Promise<{ draftId: string; text: string; audioSeconds: number; decodeSeconds: number }> {
     const s = this.need(streamId);
     try {
-      assertLease(this.o.db, this.o.deps, s.sessionId, s.tabId);
+      this.assertOwner(s.kind, s.sessionId, s.tabId);
     } catch (e) {
       await this.close(s, "lease_lost");
       throw e;
@@ -152,7 +155,7 @@ export class SttService {
     try {
       const r = await s.worker.transcribe(pcm);
       if (this.stream !== s) throw new ApiError(409, "STT_STREAM_CLOSED", "Speech session ended before transcription completed.");
-      assertLease(this.o.db, this.o.deps, s.sessionId, s.tabId);
+      this.assertOwner(s.kind, s.sessionId, s.tabId);
       this.gc();
       const draftId = randomUUID();
       this.drafts.set(draftId, { sessionId: s.sessionId, text: r.text, at: Date.now(), used: false });
@@ -179,6 +182,33 @@ export class SttService {
     const transcriptId = createTranscript(this.o.db, { sessionId: s.sessionId, slotId, asrText: d.text, submittedText: text, sttModelId, newId: this.o.deps.newId, now: this.o.deps.now });
     d.used = true;
     return { transcriptId, edited: d.text !== text };
+  }
+
+  /** the lease of a practice session, or the open run (and its tab) of a Single Word lesson */
+  private assertOwner(kind: SttOwnerKind, id: string, tabId: string): void {
+    if (kind === "session") return assertLease(this.o.db, this.o.deps, id, tabId);
+    const table = kind === "conversation" ? "conversation_sessions" : "word_lesson_runs";
+    const run = this.o.db.prepare(`SELECT status, tab_id AS tabId FROM ${table} WHERE id = ?`).get(id) as { status: string; tabId: string } | undefined;
+    if (!run || run.status !== "active" || run.tabId !== tabId) throw new ApiError(409, "LEASE_REQUIRED", "This tab is not the one practising this lesson");
+  }
+
+  private ownerActive(kind: SttOwnerKind, id: string): boolean {
+    const table = kind === "session" ? "sessions" : kind === "conversation" ? "conversation_sessions" : "word_lesson_runs";
+    return (this.o.db.prepare(`SELECT status FROM ${table} WHERE id = ?`).get(id) as { status: string } | undefined)?.status === "active";
+  }
+
+  /**
+   * A lesson answer by voice: the learner confirmed the (possibly edited) text. Returns the recognised text and the speech model so the attempt can keep
+   * both. Text only, no audio.
+   */
+  takeDraft(streamId: string, draftId: string, runId: string): { asrText: string; sttModelId: string; use: () => void } {
+    const s = this.need(streamId);
+    const d = this.drafts.get(draftId);
+    if (s.kind !== "word_lesson" || s.sessionId !== runId || !d || d.sessionId !== s.sessionId || d.used) throw new ApiError(404, "DRAFT_NOT_FOUND", "That voice draft is gone. Record again or type your answer.");
+    const model = this.o.cloud ? { tag: "whisper-large-v3", runtime: "groq", runtimeVersion: "api", digest: "provider-managed", parameters: { language: "en", temperature: 0 } } : { ...STT_MODEL, digest: path.basename(s.modelDir), parameters: { ...STT_MODEL.parameters } };
+    const sttModelId = upsertModelVersion(this.o.db, this.o.deps.newId, model);
+    // the draft is used up only when the caller has stored the answer (`use`), so a refused submission can be sent again
+    return { asrText: d.text, sttModelId, use: () => { d.used = true; } };
   }
 
   async stop(streamId: string): Promise<void> {
@@ -224,11 +254,11 @@ export class SttService {
       const idle = Date.now() - s.lastUsed > (this.o.idleMs ?? 120_000);
       let leaseOk = true;
       try {
-        assertLease(this.o.db, this.o.deps, s.sessionId, s.tabId);
+        this.assertOwner(s.kind, s.sessionId, s.tabId);
       } catch {
         leaseOk = false;
       }
-      const ended = (this.o.db.prepare("SELECT status FROM sessions WHERE id = ?").get(s.sessionId) as { status: string } | undefined)?.status !== "active";
+      const ended = !this.ownerActive(s.kind, s.sessionId);
       if (idle || !leaseOk || ended || !s.worker.alive) void this.close(s, idle ? "idle" : "ended");
     }, 2000);
     this.timer.unref?.();

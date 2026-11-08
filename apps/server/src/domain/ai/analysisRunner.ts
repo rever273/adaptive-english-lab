@@ -12,6 +12,7 @@ import type { ChatClient } from "./clients.js";
 import { TransportError } from "./clients.js";
 import { buildAnalysisUserMessageV2, ANALYSIS_SYSTEM_V4, ensurePromptVersion, type AnalysisContext } from "./prompts.js";
 import { runStructured } from "./structured.js";
+import { runWordLessonCheck, type WordLessonCheckPayload } from "../wordLessons/check.js";
 import { schemaVariant, validateAiOutput, isSchemaValidOutput, type AnalysisV2 } from "./validate.js";
 
 export interface AnalysisPayload {
@@ -38,7 +39,7 @@ const sha = (s: string) => createHash("sha256").update(s).digest("hex");
  * (job result, annotation, revision, findings) commits in ONE transaction under the fencing token or not at all. The model server
  * is called only here, only through the dispatcher, with no tools.
  */
-export class AnalysisJobRunner implements JobRunner<AnalysisPayload> {
+export class AnalysisJobRunner implements JobRunner<AnalysisPayload | WordLessonCheckPayload> {
   readonly kind = "free_text_analysis" as const;
   private readonly cfg: AiConfig;
   private modelVersionId: string | null = null;
@@ -72,7 +73,22 @@ export class AnalysisJobRunner implements JobRunner<AnalysisPayload> {
     return this.modelVersionId ? { modelVersionId: this.modelVersionId, configHash: configHashOf({ numCtx: this.cfg.analysis.numCtx, numPredict: this.cfg.analysis.numPredict }) } : null;
   }
 
-  async run(ctx: RunnerContext<AnalysisPayload>): Promise<RunnerOutput> {
+  async run(ctx: RunnerContext<AnalysisPayload | WordLessonCheckPayload>): Promise<RunnerOutput> {
+    if (!("wordLessonAttemptId" in ctx.job.payload)) return this.runAnalysis(ctx as RunnerContext<AnalysisPayload>);
+    // TASK_031: one answer of a Single Word lesson (its own tables; nothing of the exercise assessment path is touched)
+    const m = this.cfg.analysis;
+    return runWordLessonCheck(ctx as RunnerContext<WordLessonCheckPayload>, {
+      db: this.o.db,
+      chat: this.o.chat,
+      model: { tag: m.tag, digest: m.digest, numCtx: m.numCtx, temperature: m.temperature, seed: m.seed, numPredict: m.numPredict },
+      modelVersionId: this.modelVersionId,
+      installedDigest: this.o.installedDigest,
+      deps: this.o.deps,
+      sleep: this.o.sleep,
+    });
+  }
+
+  private async runAnalysis(ctx: RunnerContext<AnalysisPayload>): Promise<RunnerOutput> {
     const m = this.cfg.analysis;
     const installed = await this.o.installedDigest(m.tag);
     if (installed !== m.digest) throw new RunnerError("model_digest_mismatch", `installed digest of ${m.tag} differs from the pinned one: routing disabled, revalidate`, false);

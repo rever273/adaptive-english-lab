@@ -9,12 +9,15 @@ import * as api from "../api";
 import { ApiRequestError } from "../api";
 import { WordImage } from "../components/WordImage";
 import { PromptView } from "../components/PromptView";
+import { MatchGame } from "../components/MatchGame";
+import { MIN_WORDS, type MatchMode } from "../game/matchEngine";
 import { useVoice } from "../voice";
 import { Kbd, isPressable, isTextField, useKeys } from "../components/hotkeys";
 import { AgentTasks } from "../components/AgentTasks";
 import { AI_CHECK_WAIT_S, AUTO_ADVANCE_MS, diagnosticFinished, isShortFormat, noSpeechLeft, shouldAutoAdvance, shouldPreloadSpeech, unconfirmedLabel } from "../practiceFlow";
 import { feedbackSound, playPracticeSound } from "../practiceSounds";
 import { firstTranslation } from "../format";
+import { DailyGoalCheck } from "../components/DailyGoalNotice";
 
 /** One tab id per browser tab, kept across reloads, so a reload resumes the same practice lease instead of waiting 90 s. */
 function tabId(): string {
@@ -324,13 +327,29 @@ export function Practice({ category = "grammar", onExit, onNavigate, dailyStart 
     }
   }
 
+  // a finished vocabulary practice ends with a matching game (one of two modes, 50/50) when it had at least 3 different words; any problem skips it
+  const [match, setMatch] = useState<{ words: api.MatchWord[]; mode: MatchMode; speech: boolean } | null>(null);
+  async function openMatchGame(id: string) {
+    try {
+      const [{ words }, speech] = await Promise.all([api.fetchMatchWords(id), api.fetchVocabularySpeech().then((s) => s.enabled && s.configured).catch(() => false)]);
+      if (words.length >= MIN_WORDS) {
+        setMatch({ words, mode: Math.random() < 0.5 ? "once" : "rush", speech });
+        return;
+      }
+    } catch {
+      /* the game is optional */
+    }
+    void finish("completed");
+  }
+
   // every task closed: go straight to the results (nothing is left to choose on that screen)
   const everyTaskClosed = view.kind === "session" && view.session.progress.total > 0 && view.session.progress.closed === view.session.progress.total;
   const autoFinished = useRef<string | null>(null);
   useEffect(() => {
     if (view.kind !== "session" || !everyTaskClosed || autoFinished.current === view.session.sessionId) return;
     autoFinished.current = view.session.sessionId;
-    void finish("completed");
+    if (category === "vocabulary" && view.session.purpose === "practice") void openMatchGame(view.session.sessionId);
+    else void finish("completed");
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [everyTaskClosed, sessionId]);
 
@@ -366,7 +385,7 @@ export function Practice({ category = "grammar", onExit, onNavigate, dailyStart 
   if (view.kind === "loading") return <p role="status">Loading…</p>;
 
   if (view.kind === "summary") {
-    return <SummaryScreen summary={view.summary} onDone={() => (category === "vocabulary" ? onExit?.() : void loadDashboard())} onNavigate={onNavigate} onDailyDone={onDailyDone} />;
+    return <><DailyGoalCheck mode={category} /><SummaryScreen summary={view.summary} onDone={() => (category === "vocabulary" ? onExit?.() : void loadDashboard())} onNavigate={onNavigate} onDailyDone={onDailyDone} /></>;
   }
 
   if (view.kind === "dashboard") {
@@ -375,11 +394,15 @@ export function Practice({ category = "grammar", onExit, onNavigate, dailyStart 
         <i className="pi pi-bookmark" aria-hidden="true" /> A vocabulary session is still open. Finish it in Vocabulary before starting a grammar lesson.
         {onNavigate && <div className="actions"><button className="btn btn-primary" onClick={() => onNavigate("vocabulary")}><i className="pi pi-arrow-right" aria-hidden="true" /> Continue the vocabulary session</button></div>}
       </div>
-    )}{stockBlock && <aside className="notice notice-error" role="alert" data-testid="lesson-stock-low"><strong>More grammar exercises needed</strong><p className="small">{stockBlock}</p>{onNavigate && <div className="actions"><button className="btn btn-primary" onClick={() => onNavigate("studio")}>Open Content Studio</button><button className="link" onClick={() => setStockBlock(null)}>Dismiss</button></div>}</aside>}<DashboardScreen dashboard={view.dashboard} message={view.message} onStart={(id) => void start(id)} onStartCheck={(p) => void startCheck(p)} />{recent && <div className="actions page-actions"><button className="btn" data-testid="review-recent" onClick={() => setView({ kind: "summary", summary: recent })}><i className="pi pi-history" aria-hidden="true" /> Review last session</button></div>}{category !== "vocabulary" && <MyThoughts />}</>;
+    )}{stockBlock && <aside className="notice notice-error" role="alert" data-testid="lesson-stock-low"><strong>More grammar exercises needed</strong><p className="small">{stockBlock}</p>{onNavigate && <div className="actions"><button className="btn btn-primary" onClick={() => onNavigate("studio")}>Open Content Studio</button><button className="link" onClick={() => setStockBlock(null)}>Dismiss</button></div>}</aside>}<DashboardScreen dashboard={view.dashboard} message={view.message} onStart={(id) => void start(id)} onStartCheck={(p) => void startCheck(p)} onReviewRecent={recent ? () => setView({ kind: "summary", summary: recent }) : undefined} />{category !== "vocabulary" && <MyThoughts />}</>;
+  }
+
+  if (match) {
+    return <MatchGame words={match.words} mode={match.mode} soundsEnabled={soundsEnabled} speechEnabled={match.speech} onDone={(results) => { const played = match; setMatch(null); if (results && sessionId) void api.saveMatchResults(sessionId, played.mode, results).catch(() => {}).finally(() => void finish("completed")); else void finish("completed"); }} />;
   }
 
   const session = view.session;
-  const allClosed = session.progress.closed === session.progress.total;
+  const allClosed =session.progress.closed === session.progress.total;
   const answered = slotUi.feedback !== null;
   const repeatInfo = slotUi.reveal ? session.slots.find((x) => x.slotId === slotUi.reveal!.slotId)?.repeat : undefined;
 
@@ -438,7 +461,19 @@ export function Practice({ category = "grammar", onExit, onNavigate, dailyStart 
             locked={answered && !slotUi.pendingSubmission}
             hint={slotUi.hint}
             letters={slotUi.letters}
+            correctAnswer={category === "vocabulary" && slotUi.feedback?.verdict === "incorrect" ? (slotUi.feedback.vocabulary?.sentence?.filled ?? null) : null}
             onLetter={(index) => void act("vocabulary_letters", index)}
+            onTileHint={async (index) => {
+              if (!sessionId || !slotUi.reveal) return null;
+              try {
+                const shown = (await api.sendEvent(sessionId, slotUi.reveal.slotId, "vocabulary_letters", index)).letters ?? null;
+                setSlotUi((u) => ({ ...u, letters: shown })); // kept, so typing mode shows the same opened letters
+                return shown;
+              } catch (e) {
+                setSlotUi((u) => ({ ...u, error: errorText(e) }));
+                return null;
+              }
+            }}
             translation={slotUi.translation}
             onTranslation={() => void act("vocabulary_translation")}
             voice={isShortFormat(slotUi.reveal.format) && voiceUsable ? voice : undefined}
@@ -449,7 +484,7 @@ export function Practice({ category = "grammar", onExit, onNavigate, dailyStart 
             onShowAnswer={() => void showAnswerAndContinue()}
           />
           {slotUi.checking && <p className="notice notice-info small" role="status" data-testid="ai-checking"><i className="pi pi-spin pi-spinner" aria-hidden="true" /> Checking your answer…</p>}
-          {slotUi.feedback && <FeedbackPanel feedback={slotUi.feedback} skill={category === "vocabulary" ? null : slotUi.reveal.skill} busy={slotUi.busy} onTryAgain={tryAgain} onContinue={goOn} autoAdvance={autoPending} onStay={() => setStay(slotUi.feedback!.slotId)} />}
+          {slotUi.feedback && <><DailyGoalCheck mode={category} trigger={slotUi.feedback} /><FeedbackPanel feedback={slotUi.feedback} skill={category === "vocabulary" ? null : slotUi.reveal.skill} busy={slotUi.busy} onTryAgain={tryAgain} onContinue={goOn} autoAdvance={autoPending} onStay={() => setStay(slotUi.feedback!.slotId)} /></>}
           {slotUi.error && (
             <div className="notice notice-error" role="alert" data-testid="error">
               {slotUi.error}
@@ -681,7 +716,7 @@ function ReviewNotice({ unresolved }: { unresolved: number }) {
   );
 }
 
-function DashboardScreen({ dashboard, message, onStart, onStartCheck }: { dashboard: Dashboard; message: string | null; onStart: (blueprintRevisionId: string) => void; onStartCheck: (purpose: "diagnostic" | "heldout") => void }) {
+function DashboardScreen({ dashboard, message, onStart, onStartCheck, onReviewRecent }: { dashboard: Dashboard; message: string | null; onStart: (blueprintRevisionId: string) => void; onStartCheck: (purpose: "diagnostic" | "heldout") => void; onReviewRecent?: () => void }) {
   // lessons in course order: the first one that can still build a session is offered; the others stay one click away
   const [chosen, setChosen] = useState<string | null>(null);
   const next = dashboard.blueprints.find((b) => b.unlocked && b.completed < MAX_LESSON_PLAYS) ?? dashboard.blueprints.at(-1);
@@ -773,7 +808,7 @@ function DashboardScreen({ dashboard, message, onStart, onStartCheck }: { dashbo
         </div>
       )}
       <ChecksCard dashboard={dashboard} onStartCheck={onStartCheck} />
-      <AgentTasks />
+      <AgentTasks onReviewRecent={onReviewRecent} />
     </section>
   );
 }

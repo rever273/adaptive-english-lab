@@ -25,8 +25,8 @@ function dateList(days: number | null, timezone: string, now: Date, minDate: str
   if (days !== null) return Array.from({ length: days }, (_, k) => localDateIn(timezone, new Date(now.getTime() - (days - 1 - k) * 86_400_000)));
   if (!minDate) return [];
   const out: string[] = [];
-  const end = new Date(`${localDateIn(timezone, now)}T00:00:00`);
-  for (let d = new Date(`${minDate}T00:00:00`); d <= end; d = new Date(d.getTime() + 86_400_000)) out.push(localDateIn(timezone, d));
+  const end = Date.parse(`${localDateIn(timezone, now)}T00:00:00Z`);
+  for (let t = Date.parse(`${minDate}T00:00:00Z`); t <= end; t += 86_400_000) out.push(new Date(t).toISOString().slice(0, 10));
   return out;
 }
 
@@ -72,7 +72,14 @@ export function dictationAnalytics(db: Db, input: DictationAnalyticsInput): Dict
   ).map((r) => ({ ...r, firstCorrect: r.firstCorrect === 1, translationSeen: r.translationSeen === 1, date: localDateIn(timezone, new Date(r.correctAt)) }));
   const lessons = (db.prepare("SELECT id, completed_at AS completedAt, active_ms AS activeMs FROM typing_dictation_lessons WHERE status = 'completed' ORDER BY completed_at").all() as Array<{ id: string; completedAt: string; activeMs: number }>).map((l) => ({ ...l, date: localDateIn(timezone, new Date(l.completedAt)) }));
 
-  const minDate = [facts[0]?.date, lessons[0]?.date].filter((d): d is string => !!d).sort()[0] ?? null;
+  // Attribute each submitted attempt to its own day. The existing summary includes
+  // attempts of sentences that were eventually completed; use the same population.
+  const typedByDay = new Map<string, number>();
+  const typedRows = db.prepare(`SELECT t.created_at AS at, length(t.answer_text) AS chars FROM typing_dictation_attempts t
+    WHERE EXISTS (SELECT 1 FROM typing_dictation_attempts c WHERE c.exercise_id=t.exercise_id AND c.correct=1) ORDER BY t.created_at`).all() as Array<{at:string;chars:number}>;
+  for (const t of typedRows) { const date = localDateIn(timezone, new Date(t.at)); typedByDay.set(date, (typedByDay.get(date) ?? 0) + t.chars); }
+
+  const minDate = [facts[0]?.date, lessons[0]?.date, ...typedByDay.keys()].filter((d): d is string => !!d).sort()[0] ?? null;
   const dates = dateList(input.days, timezone, input.now, minDate);
   const inWindow = new Set(dates);
   const windowFacts = input.days === null ? facts : facts.filter((f) => inWindow.has(f.date));
@@ -88,12 +95,16 @@ export function dictationAnalytics(db: Db, input: DictationAnalyticsInput): Dict
     else hint.level3++;
   }
 
-  const daily = dates.map((date) => ({
+  const typedDates = [...typedByDay.keys()].sort(); let typedCursor = 0, cumulativeChars = 0;
+  const daily = dates.map((date) => {
+    while (typedCursor < typedDates.length && typedDates[typedCursor]! <= date) cumulativeChars += typedByDay.get(typedDates[typedCursor++]!)!;
+    return ({
     date,
     lessons: lessons.filter((l) => l.date === date).length,
     exercises: facts.filter((f) => f.date === date).length,
     activeSeconds: Math.round(lessons.filter((l) => l.date === date).reduce((a, l) => a + l.activeMs, 0) / 1000),
-  }));
+    chars: typedByDay.get(date) ?? 0, cumulativeChars,
+  }); });
 
   const series = windowLessons.map((l) => {
     const own = db.prepare("SELECT e.id AS id FROM typing_dictation_exercises e WHERE e.lesson_id = ?").all(l.id) as Array<{ id: string }>;

@@ -1,4 +1,5 @@
 import { JourneySettings } from "./Journey";
+import { NumberInput } from "../components/NumberInput";
 import { useEffect, useState } from "react";
 import type { AiModelStatus } from "@english-lab/contracts";
 import * as api from "../api";
@@ -53,7 +54,7 @@ export function Settings() {
           <div className="settings-fields">
             <label>
               Exercises per session
-              <input type="number" min={5} max={30} value={draft.taskCount} onChange={(e) => setDraft({ ...draft, taskCount: clamp(Math.round(Number(e.target.value) || 5), 5, 30) })} data-testid="set-task-count" />
+              <NumberInput min={5} max={30} value={draft.taskCount} onChange={(value) => setDraft((d) => d && ({ ...d, taskCount: value }))} data-testid="set-task-count" />
               <span className="muted small">5–30, default {saved.defaults.taskCount}. No daily limit.</span>
             </label>
           </div>
@@ -72,12 +73,28 @@ export function Settings() {
         </div>
 
         <div className="card settings-card">
+          <h3>Vocabulary</h3>
+          <div className="settings-fields">
+            <label>
+              Exercises per session
+              <NumberInput min={5} max={10} value={draft.vocabularyTaskCount} onChange={(value) => setDraft((d) => d && ({ ...d, vocabularyTaskCount: value }))} />
+              <span className="muted small">5–10, default 8. Applies to the next vocabulary session.</span>
+            </label>
+            <label>
+              New words per session
+              <NumberInput min={1} max={10} value={draft.vocabularyNewWordsPerSession} onChange={(value) => setDraft((d) => d && ({ ...d, vocabularyNewWordsPerSession: value }))} data-testid="set-vocab-new-words" />
+              <span className="muted small">1–10, default 4. Missed and due words come first; this is a target for words you have never practised, exceeded only if the session cannot otherwise be filled.</span>
+            </label>
+          </div>
+        </div>
+
+        <div className="card settings-card">
           <h3>Typing Practice</h3>
           <div className="settings-fields">
             <label className="check"><input type="checkbox" checked={draft.typingSoundsEnabled} onChange={(e) => setDraft({ ...draft, typingSoundsEnabled: e.target.checked })} data-testid="set-typing-sounds" /> Play Typing game sounds</label>
             <label>
               Words per level
-              <input type="number" min={10} max={100} value={draft.typingWordsPerLevel} onChange={(e) => setDraft({ ...draft, typingWordsPerLevel: clamp(Math.round(Number(e.target.value) || 30), 10, 100) })} data-testid="set-typing-words" />
+              <NumberInput min={10} max={100} value={draft.typingWordsPerLevel} onChange={(value) => setDraft((d) => d && ({ ...d, typingWordsPerLevel: value }))} data-testid="set-typing-words" />
               <span className="muted small">10–100, default 30. The exact number of meteor words in a Words level; it does not grow automatically.</span>
             </label>
             <label>
@@ -92,34 +109,18 @@ export function Settings() {
             </label>
             <label>
               Book session duration (minutes)
-              <input type="number" min={1} max={30} value={draft.typingBookMinutes} onChange={(e) => setDraft({ ...draft, typingBookMinutes: clamp(Math.round(Number(e.target.value) || 5), 1, 30) })} data-testid="set-typing-book-minutes" />
+              <NumberInput min={1} max={30} value={draft.typingBookMinutes} onChange={(value) => setDraft((d) => d && ({ ...d, typingBookMinutes: value }))} data-testid="set-typing-book-minutes" />
               <span className="muted small">1–30, default 5. Target duration of one Books level; the actual length rounds to a paragraph boundary.</span>
             </label>
             <label>
               Memory check words after a Words level
-              <input type="number" min={0} max={3} value={draft.typingRecallWords} onChange={(e) => setDraft({ ...draft, typingRecallWords: clamp(Math.round(Number(e.target.value) || 0), 0, 3) })} data-testid="set-typing-recall-words" />
+              <NumberInput min={0} max={3} value={draft.typingRecallWords} onChange={(value) => setDraft((d) => d && ({ ...d, typingRecallWords: value }))} data-testid="set-typing-recall-words" />
               <span className="muted small">0–3, default 2. After a won level, this many of your saved words appear as stars with their translation and a sentence to guess them from. 0 turns the check off.</span>
             </label>
             <label>
               Dictation exercises per lesson
-              <input type="number" min={5} max={20} value={draft.typingDictationExercisesPerLesson} onChange={(e) => setDraft({ ...draft, typingDictationExercisesPerLesson: clamp(Math.round(Number(e.target.value) || 10), 5, 20) })} data-testid="set-typing-dictation-count" />
+              <NumberInput min={5} max={20} value={draft.typingDictationExercisesPerLesson} onChange={(value) => setDraft((d) => d && ({ ...d, typingDictationExercisesPerLesson: value }))} data-testid="set-typing-dictation-count" />
               <span className="muted small">5–20, default 10. Sentences in one Audio Dictation lesson; a lesson already generated keeps its size. Voices: Piper en_AU-librivox-medium (CC BY 4.0, DataCraftsmanAustralia, LibriVox readers).</span>
-            </label>
-          </div>
-        </div>
-
-        <div className="card settings-card">
-          <h3>Vocabulary</h3>
-          <div className="settings-fields">
-            <label>
-              Exercises per session
-              <input type="number" min={5} max={10} value={draft.vocabularyTaskCount} onChange={(e) => setDraft({ ...draft, vocabularyTaskCount: clamp(Math.round(Number(e.target.value) || 5), 5, 10) })} />
-              <span className="muted small">5–10, default 8. Applies to the next vocabulary session.</span>
-            </label>
-            <label>
-              New words per session
-              <input type="number" min={1} max={10} value={draft.vocabularyNewWordsPerSession} onChange={(e) => setDraft({ ...draft, vocabularyNewWordsPerSession: clamp(Math.round(Number(e.target.value) || 1), 1, 10) })} data-testid="set-vocab-new-words" />
-              <span className="muted small">1–10, default 4. Missed and due words come first; this is a target for words you have never practised, exceeded only if the session cannot otherwise be filled.</span>
             </label>
           </div>
         </div>
@@ -142,7 +143,7 @@ export function Settings() {
         </label>
         <label>
           Answers to collect before the review notice
-          <input type="number" min={1} max={50} value={draft.reviewNoticeThreshold} onChange={(e) => setDraft({ ...draft, reviewNoticeThreshold: clamp(Math.round(Number(e.target.value) || 1), 1, 50) })} data-testid="set-review-threshold" />
+          <NumberInput min={1} max={50} value={draft.reviewNoticeThreshold} onChange={(value) => setDraft((d) => d && ({ ...d, reviewNoticeThreshold: value }))} data-testid="set-review-threshold" />
           <span className="muted small">1–50, default 5. Answers the local AI could not check wait in a queue; once this many have collected, Practice shows one notice with a task for your coding agent.</span>
         </label>
       </div>
@@ -176,6 +177,7 @@ export function Settings() {
 function StatusSection() {
   const [credits, setCredits] = useState<api.VocabularySpeechCredits | null>(null);
   const [groq, setGroq] = useState<api.GroqStatus | null>(null);
+  const [deepl, setDeepL] = useState<api.DeepLUsage | null>(null);
   const [configured, setConfigured] = useState<boolean | null>(null);
   const [requests, setRequests] = useState<number | null>(null);
   const [checking, setChecking] = useState(false);
@@ -183,12 +185,13 @@ function StatusSection() {
     setChecking(true);
     void Promise.all([
       api.fetchVocabularySpeech().then((s) => { setConfigured(s.configured); setRequests(s.requests); return s.configured ? api.fetchVocabularySpeechCredits().then(setCredits) : setCredits(null); }).catch(() => setCredits({ available: false, reason: "Unable to load the credits.", appCharacters30d: 0 })),
+      api.fetchDeepLUsage().then(setDeepL).catch(() => setDeepL({ available: false, reason: "Unable to load DeepL usage." })),
       api.fetchGroqStatus().then(setGroq).catch(() => setGroq({ configured: false, reachable: false, reason: "Unable to load the Groq status.", limits: null })),
     ]).finally(() => setChecking(false));
   };
   useEffect(load, []);
   return <div className="card settings-card" data-testid="service-status">
-    <h3>Voice info</h3>
+    <h3>Voice and translation info</h3>
     <h4>ElevenLabs (pronunciation)</h4>
     {configured === false && <p className="muted small">Not configured: add an ElevenLabs API key and voice ID.</p>}
     {credits?.available && credits.limit !== undefined && credits.used !== undefined
@@ -201,6 +204,12 @@ function StatusSection() {
       : credits && <p className="muted small">Credits unavailable: {credits.reason}</p>}
     {credits && <p className="muted small">Sent by this app in the last 30 days: {credits.appCharacters30d.toLocaleString()} characters.</p>}
     {requests !== null && <p className="muted small">Requests in the last 24 hours: {requests}. Cached recordings need no request.</p>}
+    <h4>DeepL (translation)</h4>
+    {deepl?.available ? <>
+      <p className="small" data-testid="deepl-usage">Characters: <strong>{deepl.used.toLocaleString("en-AU")} / {deepl.limit.toLocaleString("en-AU")}</strong> used{deepl.limit > 0 ? ` - ${Math.round(deepl.used / deepl.limit * 100)}%` : ""}</p>
+      {deepl.limit > 0 && <progress max={deepl.limit} value={deepl.used} aria-label="DeepL characters used" />}
+      <p className="muted small">Usage reported by DeepL for the account; updates may take a few minutes.</p>
+    </> : deepl && <p className="muted small" data-testid="deepl-usage">{deepl.reason}</p>}
     <h4>Groq (speech recognition)</h4>
     {groq && (!groq.configured
       ? <p className="muted small" data-testid="groq-status">{groq.reason}</p>
@@ -237,7 +246,6 @@ function VocabularySpeechSettings() {
 /** older settings revisions hold a fixed voice count; it is shown as the share of the task count it was */
 const pick = (v: Values): Draft => ({ taskCount: v.taskCount, weakRatio: v.weakRatio, voiceShare: v.voiceShare ?? Math.round((v.voiceTarget / v.taskCount) * 20) / 20, practiceSoundsEnabled: v.practiceSoundsEnabled ?? true, typingSoundsEnabled: v.typingSoundsEnabled ?? true, vocabularyTaskCount: v.vocabularyTaskCount ?? 8, vocabularyNewWordsPerSession: v.vocabularyNewWordsPerSession ?? 4, reviewNoticeThreshold: v.reviewNoticeThreshold ?? 5, difficultyMin: v.difficultyMin ?? (v.difficultyMax ? "A2" : "B1"), difficultyMax: v.difficultyMax ?? "C1", typingWordsPerLevel: v.typingWordsPerLevel ?? 30, typingVocabularyShare: v.typingVocabularyShare ?? 0.3, typingSpeedMultiplier: v.typingSpeedMultiplier ?? 1.05, typingBookMinutes: v.typingBookMinutes ?? 5, typingDictationExercisesPerLesson: v.typingDictationExercisesPerLesson ?? 10, typingRecallWords: v.typingRecallWords ?? 2 });
 const voiceCount = (d: Draft): number => Math.round(d.voiceShare * d.taskCount);
-const clamp = (n: number, lo: number, hi: number) => Math.min(hi, Math.max(lo, n));
 
 const BUSY_TEXT: Record<string, string> = {
   job_running: "an AI task is running",

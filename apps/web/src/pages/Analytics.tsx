@@ -1,19 +1,18 @@
-import { Journey } from './Journey';
+import { Journey, MODE_INFO } from './Journey';
 import { useCallback, useEffect, useState } from 'react';
 import { VocabularyAnalytics } from './VocabularyAnalytics';
 import { TypingAnalytics } from './TypingAnalytics';
+import { ConversationAnalytics } from './ConversationAnalytics';
 import { Chart } from '../components/Chart';
+import { PracticeActivityChart } from '../components/PracticeActivityChart';
 import {
     ApiRequestError,
     createExport,
     decideExternalReport,
     fetchExternal,
-    fetchFindings,
     fetchReport,
     importExternalReport,
-    type DiscoveryAuditData,
     type ExternalData,
-    type FindingData,
     type Ratio,
     type SavedReportData,
 } from '../api';
@@ -21,17 +20,6 @@ import {
 const pct = (x: number | null): string => (x === null ? '—' : `${(x * 100).toFixed(1)}%`);
 const frac = (r: Ratio): string => (r.denominator === 0 ? 'no data yet' : `${r.numerator} of ${r.denominator}`);
 const range = (r: Ratio): string => (r.wilson ? `${pct(r.wilson.low)}–${pct(r.wilson.high)}` : '—');
-
-function Cell({ r }: { r: Ratio }) {
-    return (
-        <>
-            <td>{r.denominator === 0 ? <span className="muted">unknown</span> : <strong>{pct(r.rate)}</strong>}</td>
-            <td>{frac(r)}</td>
-            <td>{range(r)}</td>
-            <td>{r.denominator > 0 && r.lowN ? <span className="badge badge-warn">few answers</span> : null}</td>
-        </>
-    );
-}
 
 /** held-out accuracy by week with Wilson whiskers; weeks without data are GAPS, never zeros */
 function WeeklyChart({ points }: { points: Array<{ week: string; r: Ratio }> }) {
@@ -184,21 +172,16 @@ function ExternalSection() {
     );
 }
 
-function GrammarAnalytics() {
+function GrammarAnalytics({ days }: { days: '7' | '30' | '90' | 'all' }) {
     const [protocol, setProtocol] = useState<'practice' | 'diagnostic-v1'>('practice');
     const [difficulty, setDifficulty] = useState('B2');
     const [saved, setSaved] = useState<SavedReportData | null>(null);
-    const [findings, setFindings] = useState<FindingData[] | null>(null);
-    const [audit, setAudit] = useState<DiscoveryAuditData | null>(null);
     const [error, setError] = useState<string | null>(null);
     const [exported, setExported] = useState<{ dir: string; files: Array<{ name: string; bytes: number }> } | null>(null);
 
     const load = useCallback(async () => {
         try {
-            const [r, f] = await Promise.all([fetchReport({ protocol, difficulty }), fetchFindings()]);
-            setSaved(r);
-            setFindings(f.findings);
-            setAudit(f.discovery);
+            setSaved(await fetchReport({ protocol, difficulty }));
             setError(null);
         } catch (e) {
             setError(e instanceof ApiRequestError ? e.message : 'Cannot load the report.');
@@ -225,13 +208,139 @@ function GrammarAnalytics() {
     if (!saved) return <p role="status">Calculating from your saved answers…</p>;
     const r = saved.report;
     const m = r.metrics;
-    const ai = (findings ?? []).filter((f) => f.provenance.model !== null || f.originalStatus !== 'confirmed');
     const empty = r.counts.attempts === 0;
 
     return (
         <>
+
+            {empty ? (
+                <section className="card">
+                    <p className="muted">
+                        No answers in this series yet. Do a practice session or a diagnostic block and the numbers appear here, with the counts behind them.
+                    </p>
+                </section>
+            ) : (
+                <>
+                    <p className="muted small">Summary and evidence cover the selected report series. The period filter applies to the charts.</p>
+                    <div className="stat-grid-2">
+                        {([
+                            ['First try, no hints', m.firstAttemptAccuracy],
+                            ['Practice, last answer', m.practiceAccuracy],
+                            ['Delayed check', m.heldoutAccuracy],
+                            ['Remembered after 7+ days', m.delayedRetention],
+                            ['Mistake repeated', m.errorRecurrence.rate],
+                            ["I don't know", m.idk],
+                            ['Skipped', m.skip],
+                        ] as const).map(([label, value]) => <div className="stat" key={label}><span className="stat-num">{pct(value.rate)}</span><span className="stat-label">{label} <span className="muted">({frac(value)})</span>{value.wilson && <span className="muted"> | 95%: {range(value)}</span>}{value.denominator > 0 && value.lowN && <span className="muted"> | few answers</span>}</span></div>)}
+                        <div className="stat"><span className="stat-num">{m.courseProgress.completedBlueprints}</span><span className="stat-label">lessons completed ({m.courseProgress.publishedBlueprints} available)</span></div>
+                        <div className="stat"><span className="stat-num">{m.firstAttemptAccuracy.assisted.correct}/{m.firstAttemptAccuracy.assisted.attempts}</span><span className="stat-label">first tries with help correct</span></div>
+                        <div className="stat"><span className="stat-num">{m.pending.slots}</span><span className="stat-label">answers awaiting review ({m.pending.attempts} attempts)</span></div>
+                        <div className="stat"><span className="stat-num">{m.sessionProgress.closed}/{m.sessionProgress.total}</span><span className="stat-label">latest session slots done</span></div>
+                    </div>
+                    <section className="card"><h2>Practice activity</h2><PracticeActivityChart mode="grammar" days={days} /><Chart ariaLabel="Grammar answers per day" bars={{ color: '#6ab7ff', format: (v) => `${Math.round(v)}` }} points={(days === 'all' ? r.activity : r.activity.filter((a) => a.date >= new Date(Date.now() - (Number(days) - 1) * 86400000).toLocaleDateString('en-CA'))).map((a) => ({ key: a.date, label: a.date.slice(5), bar: a.attempts, tip: [a.date, `Answers: ${a.attempts}`] }))} legend="Answers recorded per day for the selected report series." /></section>
+                    <section className="card"><h2>Three kinds of evidence</h2><div className="rate-grid">
+                      {(['recognition', 'correction', 'production'] as const).map((kind) => <div className="rate-row" key={kind}><div className="rate-head"><strong>{{ recognition: 'Recognise', correction: 'Correct', production: 'Produce' }[kind]}</strong><span>{pct(r.byDimension[kind].rate)}</span></div><span className="bar rate-bar" aria-hidden="true"><span style={{ width: `${(r.byDimension[kind].rate ?? 0) * 100}%` }} /></span><span className="small muted">{frac(r.byDimension[kind])}{r.byDimension[kind].lowN ? ' - few answers' : ''}</span></div>)}
+                    </div></section>
+                    <section className="card" aria-labelledby="h-h">
+                        <h2 id="h-h">Delayed checks by week</h2>
+                        <WeeklyChart points={r.weeklyHeldout.map((w) => ({ week: w.week, r: w.heldout }))} />
+                        <details>
+                            <summary>Table behind the chart</summary>
+                            <table className="summary-table wide">
+                                <thead>
+                                    <tr>
+                                        <th>Week starting</th>
+                                        <th>Right</th>
+                                        <th>Counts</th>
+                                        <th>95% range</th>
+                                    </tr>
+                                </thead>
+                                <tbody>
+                                    {r.weeklyHeldout.map((w) => (
+                                        <tr key={w.week}>
+                                            <td>{w.week}</td>
+                                            <td>{pct(w.heldout.rate)}</td>
+                                            <td>{frac(w.heldout)}</td>
+                                            <td>{range(w.heldout)}</td>
+                                        </tr>
+                                    ))}
+                                </tbody>
+                            </table>
+                        </details>
+                        <h3>Last 28 days against the 28 before</h3>
+                        {r.comparison.status === 'ok' ? (
+                            <p data-testid="comparison">
+                                {pct(r.comparison.current.firstTry.rate)} ({frac(r.comparison.current.firstTry)}, {r.comparison.current.from} to{' '}
+                                {r.comparison.current.to}) against {pct(r.comparison.previous.firstTry.rate)} ({frac(r.comparison.previous.firstTry)},{' '}
+                                {r.comparison.previous.from} to {r.comparison.previous.to})
+                                {r.comparison.mixDiffers ? '. The mix of exercise types differs, so read this with care.' : '.'}
+                            </p>
+                        ) : (
+                            <p className="muted" data-testid="comparison">
+                                Insufficient comparison data: each window needs at least 10 answers. No claim of progress is made.
+                            </p>
+                        )}
+                    </section>
+
+                    <section className="card" aria-labelledby="d-h">
+                        <h2 id="d-h">Skills with the most slips</h2>
+                        <table className="summary-table wide" data-testid="skills">
+                            <thead>
+                                <tr>
+                                    <th>Skill</th>
+                                    <th>Slips</th>
+                                    <th>Chances</th>
+                                    <th />
+                                </tr>
+                            </thead>
+                            <tbody>
+                                {[...r.skills]
+                                    .sort((a, b) => (b.rate.rate ?? 0) - (a.rate.rate ?? 0) || b.opportunities - a.opportunities)
+                                    .slice(0, 12)
+                                    .map((s) => (
+                                        <tr key={s.skillId}>
+                                            <td>
+                                                <code>{s.skillId}</code>
+                                            </td>
+                                            <td>{s.failures}</td>
+                                            <td>
+                                                {s.opportunities}
+                                                {s.rate.lowN ? <span className="muted small"> (few)</span> : null}
+                                            </td>
+                                            <td>
+                                                <span className="bar" aria-hidden="true">
+                                                    <span style={{ width: `${(s.rate.rate ?? 0) * 100}%` }} />
+                                                </span>{' '}
+                                                {pct(s.rate.rate)}
+                                            </td>
+                                        </tr>
+                                    ))}
+                            </tbody>
+                        </table>
+                        {r.recurring.length > 0 && (
+                            <>
+                                <h3>Mistakes that came back</h3>
+                                <ul data-testid="recurring">
+                                    {r.recurring.map((x) => (
+                                        <li key={x.skillId}>
+                                            <code>{x.skillId}</code>: {x.failuresAfterFirst} more slip{x.failuresAfterFirst === 1 ? '' : 's'} in{' '}
+                                            {x.opportunitiesAfterFirst} later chances; first {x.firstFailure}, latest {x.lastFailure} ({x.contexts} different
+                                            contexts).
+                                        </li>
+                                    ))}
+                                </ul>
+                            </>
+                        )}
+                    </section>
+
+
+                </>
+            )}
+
+            <ExternalSection />
+
             <section className="card" aria-labelledby="an-h">
-                <h2 id="an-h">Analytics</h2>
+                <h2 id="an-h"><i className="pi pi-chart-line" aria-hidden="true" /> Analytics</h2>
                 <p className="lede">
                     Only confirmed answers count here. A first attempt without hints is the main line; answers waiting for the AI are listed as pending and are
                     never counted as wrong.
@@ -293,266 +402,21 @@ function GrammarAnalytics() {
                 )}
             </section>
 
-            {empty ? (
-                <section className="card">
-                    <p className="muted">
-                        No answers in this series yet. Do a practice session or a diagnostic block and the numbers appear here, with the counts behind them.
-                    </p>
-                </section>
-            ) : (
-                <>
-                    <section className="card" aria-labelledby="m-h">
-                        <h2 id="m-h">Verified results</h2>
-                        <div className="table-wrap">
-                            <table className="summary-table wide" data-testid="metrics">
-                                <thead>
-                                    <tr>
-                                        <th>Measure</th>
-                                        <th>Value</th>
-                                        <th>Counts</th>
-                                        <th>95% range</th>
-                                        <th />
-                                    </tr>
-                                </thead>
-                                <tbody>
-                                    <tr>
-                                        <td>
-                                            First try, no hints <span className="muted small">(main line)</span>
-                                        </td>
-                                        <Cell r={m.firstAttemptAccuracy} />
-                                    </tr>
-                                    <tr>
-                                        <td>
-                                            First try with a hint or shown answer <span className="muted small">(separate)</span>
-                                        </td>
-                                        <td colSpan={3}>
-                                            {m.firstAttemptAccuracy.assisted.correct} of {m.firstAttemptAccuracy.assisted.attempts} right
-                                        </td>
-                                        <td />
-                                    </tr>
-                                    <tr>
-                                        <td>
-                                            Practice, last answer <span className="muted small">(includes retries)</span>
-                                        </td>
-                                        <Cell r={m.practiceAccuracy} />
-                                    </tr>
-                                    <tr>
-                                        <td>Delayed check (held-out)</td>
-                                        <Cell r={m.heldoutAccuracy} />
-                                    </tr>
-                                    <tr>
-                                        <td>Remembered after 7+ days</td>
-                                        <Cell r={m.delayedRetention} />
-                                    </tr>
-                                    <tr>
-                                        <td>
-                                            Same mistake again <span className="muted small">(after the first time)</span>
-                                        </td>
-                                        <Cell r={m.errorRecurrence.rate} />
-                                    </tr>
-                                    <tr>
-                                        <td>“I don’t know”</td>
-                                        <Cell r={m.idk} />
-                                    </tr>
-                                    <tr>
-                                        <td>Skipped</td>
-                                        <Cell r={m.skip} />
-                                    </tr>
-                                </tbody>
-                            </table>
-                        </div>
-                        <p className="muted small" data-testid="pending">
-                            Waiting for AI review: {m.pending.slots} answer{m.pending.slots === 1 ? '' : 's'} (not marked right or wrong). Session:{' '}
-                            {m.sessionProgress.closed} of {m.sessionProgress.total} done. Lessons completed: {m.courseProgress.completedBlueprints} of{' '}
-                            {m.courseProgress.publishedBlueprints}.
-                        </p>
-                    </section>
 
-                    <section className="card" aria-labelledby="h-h">
-                        <h2 id="h-h">Delayed checks by week</h2>
-                        <WeeklyChart points={r.weeklyHeldout.map((w) => ({ week: w.week, r: w.heldout }))} />
-                        <details>
-                            <summary>Table behind the chart</summary>
-                            <table className="summary-table wide">
-                                <thead>
-                                    <tr>
-                                        <th>Week starting</th>
-                                        <th>Right</th>
-                                        <th>Counts</th>
-                                        <th>95% range</th>
-                                    </tr>
-                                </thead>
-                                <tbody>
-                                    {r.weeklyHeldout.map((w) => (
-                                        <tr key={w.week}>
-                                            <td>{w.week}</td>
-                                            <td>{pct(w.heldout.rate)}</td>
-                                            <td>{frac(w.heldout)}</td>
-                                            <td>{range(w.heldout)}</td>
-                                        </tr>
-                                    ))}
-                                </tbody>
-                            </table>
-                        </details>
-                        <h3>Last 28 days against the 28 before</h3>
-                        {r.comparison.status === 'ok' ? (
-                            <p data-testid="comparison">
-                                {pct(r.comparison.current.firstTry.rate)} ({frac(r.comparison.current.firstTry)}, {r.comparison.current.from} to{' '}
-                                {r.comparison.current.to}) against {pct(r.comparison.previous.firstTry.rate)} ({frac(r.comparison.previous.firstTry)},{' '}
-                                {r.comparison.previous.from} to {r.comparison.previous.to})
-                                {r.comparison.mixDiffers ? '. The mix of exercise types differs, so read this with care.' : '.'}
-                            </p>
-                        ) : (
-                            <p className="muted" data-testid="comparison">
-                                Insufficient comparison data: each window needs at least 10 answers. No claim of progress is made.
-                            </p>
-                        )}
-                    </section>
-
-                    <section className="card" aria-labelledby="d-h">
-                        <h2 id="d-h">By kind of task and by skill</h2>
-                        <table className="summary-table wide">
-                            <thead>
-                                <tr>
-                                    <th>Kind</th>
-                                    <th>Right (first try)</th>
-                                    <th>Counts</th>
-                                    <th>95% range</th>
-                                </tr>
-                            </thead>
-                            <tbody>
-                                {(['recognition', 'correction', 'production'] as const).map((d) => (
-                                    <tr key={d}>
-                                        <td>{{ recognition: 'Recognise', correction: 'Correct', production: 'Produce' }[d]}</td>
-                                        <td>{pct(r.byDimension[d].rate)}</td>
-                                        <td>{frac(r.byDimension[d])}</td>
-                                        <td>{range(r.byDimension[d])}</td>
-                                    </tr>
-                                ))}
-                            </tbody>
-                        </table>
-                        <h3>Skills with the most slips</h3>
-                        <table className="summary-table wide" data-testid="skills">
-                            <thead>
-                                <tr>
-                                    <th>Skill</th>
-                                    <th>Slips</th>
-                                    <th>Chances</th>
-                                    <th />
-                                </tr>
-                            </thead>
-                            <tbody>
-                                {[...r.skills]
-                                    .sort((a, b) => (b.rate.rate ?? 0) - (a.rate.rate ?? 0) || b.opportunities - a.opportunities)
-                                    .slice(0, 12)
-                                    .map((s) => (
-                                        <tr key={s.skillId}>
-                                            <td>
-                                                <code>{s.skillId}</code>
-                                            </td>
-                                            <td>{s.failures}</td>
-                                            <td>
-                                                {s.opportunities}
-                                                {s.rate.lowN ? <span className="muted small"> (few)</span> : null}
-                                            </td>
-                                            <td>
-                                                <span className="bar" aria-hidden="true">
-                                                    <span style={{ width: `${(s.rate.rate ?? 0) * 100}%` }} />
-                                                </span>{' '}
-                                                {pct(s.rate.rate)}
-                                            </td>
-                                        </tr>
-                                    ))}
-                            </tbody>
-                        </table>
-                        {r.recurring.length > 0 && (
-                            <>
-                                <h3>Mistakes that came back</h3>
-                                <ul data-testid="recurring">
-                                    {r.recurring.map((x) => (
-                                        <li key={x.skillId}>
-                                            <code>{x.skillId}</code>: {x.failuresAfterFirst} more slip{x.failuresAfterFirst === 1 ? '' : 's'} in{' '}
-                                            {x.opportunitiesAfterFirst} later chances; first {x.firstFailure}, latest {x.lastFailure} ({x.contexts} different
-                                            contexts).
-                                        </li>
-                                    ))}
-                                </ul>
-                            </>
-                        )}
-                    </section>
-
-                    <section className="card" aria-labelledby="a-h">
-                        <h2 id="a-h">Days you practised</h2>
-                        <p className="muted small">Just a record, no streaks and no targets.</p>
-                        <p className="small" data-testid="activity">
-                            {r.activity.map((a) => `${a.date}: ${a.attempts}`).join(' · ')}
-                        </p>
-                    </section>
-                </>
-            )}
-
-            <ExternalSection />
-
-            <section className="card" aria-labelledby="f-h" data-testid="ai-findings">
-                <h2 id="f-h">AI-detected, not verified</h2>
-                <p className="lede">
-                    The local AI sometimes points at something in a written answer. These are suggestions, not confirmed mistakes. They are not counted in any
-                    number above and they never change your scores.
-                </p>
-                {audit && (
-                    <p className="notice notice-info small" data-testid="discovery">
-                        {audit.enabled ? 'The AI hint can nudge which exercise comes next.' : `${audit.disabledReason}.`} {audit.note}
-                    </p>
-                )}
-                {ai.length === 0 ? (
-                    <p className="muted">No AI suggestions yet.</p>
-                ) : (
-                    <ul className="findings">
-                        {ai.map((f) => (
-                            <li key={f.findingId} data-status={f.effectiveStatus}>
-                                <span className={`badge ${f.effectiveStatus === 'rejected' ? 'badge-warn' : 'badge-info'}`}>{f.label}</span>{' '}
-                                <code>{f.skillId}</code>
-                                {f.correction && (
-                                    <>
-                                        {' '}
-                                        — suggested: <strong>{f.correction}</strong>
-                                    </>
-                                )}
-                                <div className="small muted">
-                                    Model {f.provenance.model ?? 'unknown'} · confidence {f.confidence ?? 'n/a'} · {f.inputMode}
-                                    {f.transcriptEdited ? ', edited transcript' : ''}
-                                    {f.isLatestAnalysis ? '' : ' · superseded analysis'}
-                                </div>
-                                {f.history.length > 0 && (
-                                    <details className="small">
-                                        <summary>History ({f.history.length})</summary>
-                                        <ul>
-                                            {f.history.map((h) => (
-                                                <li key={h.sequence}>
-                                                    {h.verdict} by {h.reviewer}: {h.reason}
-                                                </li>
-                                            ))}
-                                        </ul>
-                                    </details>
-                                )}
-                            </li>
-                        ))}
-                    </ul>
-                )}
-            </section>
         </>
     );
 }
 
 /** Grammar | Vocabulary: two separate analytics areas with their own filters; nothing is mixed between them */
 export function Analytics({ initialView = 'grammar' }: { initialView?: 'grammar' | 'vocabulary' | 'journey' } = {}) {
-    const [view, setView] = useState<'grammar' | 'vocabulary' | 'typing' | 'journey'>(initialView);
+    const [view, setView] = useState<'grammar' | 'vocabulary' | 'typing' | 'conversation' | 'journey'>(initialView);
+    const [days, setDays] = useState<'7' | '30' | '90' | 'all'>('30');
     return (
         <>
             <div className="segmented page-switch" role="radiogroup" aria-label="Which analytics">
                 <label className={view === 'grammar' ? 'on' : ''}>
                     <input type="radio" name="an-view" checked={view === 'grammar'} onChange={() => setView('grammar')} />{' '}
-                    <i className="pi pi-pencil" aria-hidden="true" /> Grammar
+                    <i className={`pi ${MODE_INFO.grammar.icon}`} aria-hidden="true" /> Grammar
                 </label>
                 <label className={view === 'vocabulary' ? 'on' : ''}>
                     <input
@@ -562,12 +426,13 @@ export function Analytics({ initialView = 'grammar' }: { initialView?: 'grammar'
                         onChange={() => setView('vocabulary')}
                         data-testid="analytics-vocabulary"
                     />{' '}
-                    <i className="pi pi-bookmark" aria-hidden="true" /> Vocabulary
+                    <i className={`pi ${MODE_INFO.vocabulary.icon}`} aria-hidden="true" /> Vocabulary
                 </label>
                 <label className={view === 'typing' ? 'on' : ''}>
                     <input type="radio" name="an-view" checked={view === 'typing'} onChange={() => setView('typing')} data-testid="analytics-typing" />{' '}
                     <i className="pi pi-bullseye" aria-hidden="true" /> Typing
                 </label>
+                <label className={view === 'conversation' ? 'on' : ''}><input type="radio" name="an-view" checked={view === 'conversation'} onChange={() => setView('conversation')} data-testid="analytics-conversation" /> <i className="pi pi-comments" aria-hidden="true" /> Conversation</label>
             </div>
 
             <label className={view === 'journey' ? 'on journey-tab' : 'journey-tab'}>
@@ -575,12 +440,16 @@ export function Analytics({ initialView = 'grammar' }: { initialView?: 'grammar'
                 <i className="pi pi-compass" aria-hidden="true" /> Journey
             </label>
 
+            {view !== 'journey' && <div className="analytics-period"><div className="segmented" role="radiogroup" aria-label="Period">{(['7', '30', '90', 'all'] as const).map((d) => <label key={d} className={days === d ? 'on' : ''}><input type="radio" name="analytics-days" checked={days === d} onChange={() => setDays(d)} /> {d === 'all' ? 'All time' : `${d} days`}</label>)}</div></div>}
+
             {view === 'grammar' ? (
-                <GrammarAnalytics />
+                <GrammarAnalytics days={days} />
             ) : view === 'vocabulary' ? (
-                <VocabularyAnalytics />
+                <VocabularyAnalytics days={days} />
             ) : view === 'typing' ? (
-                <TypingAnalytics />
+                <TypingAnalytics days={days} />
+            ) : view === 'conversation' ? (
+                <ConversationAnalytics days={days} />
             ) : (
                 <Journey />
             )}

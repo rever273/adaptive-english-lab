@@ -14,6 +14,7 @@ import { LexiconHints } from "./domain/vocabulary/lexiconHint.js";
 import { TutorJobRunner } from "./domain/tutor/runner.js";
 import { GroqWorker } from "./adapters/stt/groqWorker.js";
 import { createDictationEnv } from "./domain/typing/dictation/env.js";
+import { LocalDictationAsr } from "./domain/typing/dictation/asr.js";
 import { existsSync, readFileSync } from "node:fs";
 import path from "node:path";
 import { parseEnv } from "node:util";
@@ -56,8 +57,10 @@ async function main(): Promise<void> {
     .filter((v): v is string => typeof v === "string" && v.trim().length > 0)
     .map((v) => v.trim());
   const translateEmail = process.env.MYMEMORY_EMAIL ?? localEnv.MYMEMORY_EMAIL;
+  const deeplKey = process.env.DEEPL_API_KEY ?? localEnv.DEEPL_API_KEY;
   const cloudSpeech = Boolean(groqKey);
   const dictation = createDictationEnv(config, groqKey);
+  const conversationAsr = groqKey ? dictation.asr : new LocalDictationAsr({ script: path.join(config.projectRoot, "workers", "dictation_asr", "check.py"), device: "cpu" });
   const instanceId = randomUUID();
   const startedAt = new Date().toISOString();
   const lock: LockInfo = {
@@ -160,7 +163,7 @@ async function main(): Promise<void> {
     app?.log.info({ reason }, "shutdown: stop admission");
     try {
       await stt.shutdown(); // the voice child first: it holds the card
-      await Promise.all([dictation.tts.stop(), dictation.asr.stop()]); // Audio Dictation helpers (our own child processes only)
+      await Promise.all([dictation.tts.stop(), dictation.asr.stop(), ...(conversationAsr !== dictation.asr ? [conversationAsr.stop()] : [])]); // our own speech workers only
       residency.halt(); // no new warm-up from here on
       await scheduler.stop(); // stop admission, abort + discard the running unit, prove the release, give the lease back
       await residency.shutdown(); // unload our model (bounded); if the process dies abruptly keep_alive expiry frees the card
@@ -181,8 +184,10 @@ async function main(): Promise<void> {
     elevenLabsKey,
     elevenLabsVoiceIds,
     ...(translateEmail ? { translateEmail } : {}),
+    ...(deeplKey?.trim() ? { deeplKey: deeplKey.trim() } : {}),
     ...(groqKey ? { groqKey } : {}),
     dictation,
+    conversationAsr,
     instanceId,
     startedAt,
     shutdownToken: lock.shutdownToken,

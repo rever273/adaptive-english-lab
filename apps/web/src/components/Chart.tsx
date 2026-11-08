@@ -12,9 +12,11 @@ export interface ChartPoint {
   /** tooltip lines; the first one is the heading */
   tip: string[];
   bar?: number | null;
+  bar2?: number | null;
   line?: number | null;
   /** drawn faded (few answers, failed attempt …) */
   muted?: boolean;
+  highlight?: boolean;
   /** optional interval around the line value (drawn as a whisker) */
   band?: { low: number; high: number } | null;
 }
@@ -48,7 +50,7 @@ function axisOf(values: Array<number | null | undefined>, s: ChartSeries): { top
   return niceTicks(Math.max(1, ...present));
 }
 
-export function Chart({ points, bars, line, ariaLabel, legend, secondary }: { points: ChartPoint[]; bars?: ChartSeries; line?: ChartSeries; ariaLabel: string; legend?: string; secondary?: { factor: number; color: string; format: (v: number) => string } }) {
+export function Chart({ points, bars, bars2, line, ariaLabel, legend, secondary }: { points: ChartPoint[]; bars?: ChartSeries; bars2?: ChartSeries; line?: ChartSeries; ariaLabel: string; legend?: string; secondary?: { factor: number; color: string; format: (v: number) => string } }) {
   const id = useId().replace(/:/g, "");
   const [hover, setHover] = useState<number | null>(null);
   const box = useRef<HTMLDivElement>(null);
@@ -73,12 +75,12 @@ export function Chart({ points, bars, line, ariaLabel, legend, secondary }: { po
   const slot = plotW / n;
   const x = (i: number) => padL + slot * (i + 0.5);
 
-  const barAxis = bars ? axisOf(points.map((p) => p.bar), bars) : null;
+  const barAxis = bars ? axisOf(points.flatMap((p) => [p.bar, ...(bars2 ? [p.bar2] : [])]), bars) : null;
   const lineAxis = line ? axisOf(points.map((p) => p.line), line) : null;
   const leftAxis = (barAxis ?? lineAxis)!;
   const leftSeries = (bars ?? line)!;
   const yOf = (v: number, axis: { top: number }) => PAD_T + plotH - (v / axis.top) * plotH;
-  const bw = Math.max(3, Math.min(34, slot - 4));
+  const bw = Math.max(0.4, Math.min(34, slot * 0.8));
 
   // the line is split into runs so gaps stay gaps
   const runs: Array<Array<{ x: number; y: number }>> = [];
@@ -134,7 +136,10 @@ export function Chart({ points, bars, line, ariaLabel, legend, secondary }: { po
           ))}
           {hover !== null && <rect className="chart2-hover" x={padL + slot * hover} y={PAD_T} width={slot} height={plotH} rx={4} />}
           {bars && barAxis && points.map((p, i) => typeof p.bar === "number" && (
-            <rect key={p.key} x={x(i) - bw / 2} y={yOf(p.bar, barAxis)} width={bw} height={Math.max(1.5, base - yOf(p.bar, barAxis))} rx={Math.min(4, bw / 2)} fill={`url(#${id}b)`} opacity={p.muted ? 0.4 : hover === i ? 1 : 0.88} />
+            <rect key={p.key} x={x(i) - bw / 2} y={yOf(p.bar, barAxis)} width={bars2 ? bw / 2 : bw} height={Math.max(1.5, base - yOf(p.bar, barAxis))} rx={Math.min(4, bw / 2)} fill={`url(#${id}b)`} opacity={p.muted ? 0.4 : hover === i ? 1 : 0.88} />
+          ))}
+          {bars2 && barAxis && points.map((p, i) => typeof p.bar2 === "number" && (
+            <rect key={`b2-${p.key}`} x={x(i)} y={yOf(p.bar2, barAxis)} width={bw / 2} height={Math.max(1.5, base - yOf(p.bar2, barAxis))} rx={Math.min(3, bw / 4)} fill={bars2.color} opacity={p.muted ? 0.4 : 0.88} />
           ))}
           {line && lineAxis && runs.map((run, i) => (
             <g key={i}>
@@ -148,7 +153,7 @@ export function Chart({ points, bars, line, ariaLabel, legend, secondary }: { po
             return (
               <g key={p.key}>
                 {p.band && <line x1={x(i)} x2={x(i)} y1={yOf(p.band.low, lineAxis)} y2={yOf(p.band.high, lineAxis)} stroke={line.color} strokeWidth={2} opacity={0.4} />}
-                <circle cx={x(i)} cy={cy} r={hover === i ? 5.5 : n > 40 ? 2 : 3.2} fill={p.muted ? "var(--surface)" : line.color} stroke={line.color} strokeWidth={p.muted ? 1.8 : 0} opacity={p.muted && hover !== i ? 0.7 : 1} />
+                <circle cx={x(i)} cy={cy} r={p.highlight ? (hover === i ? 7 : 6) : hover === i ? 5.5 : n > 40 ? 2 : 3.2} fill={p.highlight ? "#ffbd59" : p.muted ? "var(--surface)" : line.color} stroke={p.highlight ? "var(--surface)" : line.color} strokeWidth={p.highlight ? 2 : p.muted ? 1.8 : 0} opacity={p.muted && hover !== i ? 0.7 : 1} />
               </g>
             );
           })}

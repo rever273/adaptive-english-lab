@@ -101,9 +101,9 @@ export function TypingRecall({ sessionId, words, onDone }: { sessionId: string; 
             <Star done={w.done} active={s.active === i} index={i} />
             <p className="recall-translation" lang="ru">{w.translationRu}</p>
             {w.sentence && <p className="recall-sentence">{w.sentence}</p>}
-            <p className="recall-letters" aria-label={w.done ? w.lemma : `${w.lemma.length} letters`}>
+            <p className="recall-letters" aria-label={w.done ? w.lemma : `${w.lemma.length} letters, starting with ${w.lemma[0]}`}>
               {w.lemma.split("").map((ch, k) => (
-                <span key={k} className={k < w.filled ? (w.kinds[k] === "hinted" ? "hinted" : "typed") : "blank"}>{k < w.filled ? ch : "_"}</span>
+                <span key={k} className={k < w.filled ? (w.kinds[k] === "hinted" ? "hinted" : "typed") : k === 0 ? "hinted" : "blank"}>{k < w.filled || k === 0 ? ch : "_"}</span>
               ))}
             </p>
             {w.done && <p className="muted small recall-points">{w.revealed ? "shown" : `+${wordPoints(w)}`}</p>}

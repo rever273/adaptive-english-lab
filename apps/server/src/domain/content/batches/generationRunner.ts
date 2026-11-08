@@ -27,6 +27,7 @@ import type { DictationEnv } from "../../typing/dictation/lessons.js";
 import { expressionsForForms } from "../../vocabulary/expressions.js";
 import { matchForms } from "../../vocabulary/forms.js";
 import { EXPRESSION_PROMPT, expressionFormat, EXPRESSION_SYSTEM_V1, validateExpressionOutput, type ExpressionDraft } from "../../vocabulary/expressions.js";
+import { runWordLessonJob, type WordLessonPayload } from "../../wordLessons/runner.js";
 import { THOUGHT_SYSTEM_V1, thoughtFormat, validateInterpretation, type Interpretation } from "../../thoughts/interpret.js";
 
 export interface GenerationPayload {
@@ -88,7 +89,7 @@ interface QueuedItem {
  * validates, de-duplicates and stores. A stored draft is `draft -> validated (code) -> pending_review (code)`, never approved. Items
  * and the job result commit in ONE transaction, so a crash or duplicate delivery can neither lose nor repeat an ordinal.
  */
-export class GenerationJobRunner implements JobRunner<GenerationPayload | ThoughtPayload | DictationPayload | ExpressionPayload> {
+export class GenerationJobRunner implements JobRunner<GenerationPayload | ThoughtPayload | DictationPayload | ExpressionPayload | WordLessonPayload> {
   readonly kind = "generation" as const;
   private modelVersionId: string | null = null;
 
@@ -226,7 +227,25 @@ export class GenerationJobRunner implements JobRunner<GenerationPayload | Though
     };
   }
 
-  async run(ctx: RunnerContext<GenerationPayload | ThoughtPayload | DictationPayload | ExpressionPayload>): Promise<RunnerOutput> {
+  /** TASK_031: one Single Word Context Practice lesson (several model calls, stored only when every stage passed) */
+  private runWordLesson(ctx: RunnerContext<WordLessonPayload>): Promise<RunnerOutput> {
+    const m = this.pinned;
+    return runWordLessonJob(ctx, {
+      db: this.o.db,
+      chat: this.o.chat,
+      model: { tag: m.tag, digest: m.digest },
+      params: { numCtx: GENERATION_PARAMS.numCtx, temperature: GENERATION_PARAMS.temperature, seed: GENERATION_PARAMS.seed },
+      deps: this.o.deps,
+      sleep: this.o.sleep,
+      assertModel: async () => {
+        const installed = await this.o.installedDigest(m.tag);
+        if (installed !== m.digest) throw new RunnerError("model_digest_mismatch", `installed digest of ${m.tag} differs from the pinned one`, false);
+      },
+    });
+  }
+
+  async run(ctx: RunnerContext<GenerationPayload | ThoughtPayload | DictationPayload | ExpressionPayload | WordLessonPayload>): Promise<RunnerOutput> {
+    if ("wordLessonId" in ctx.job.payload) return this.runWordLesson(ctx as RunnerContext<WordLessonPayload>);
     if ("expressionId" in ctx.job.payload) return this.runExpression(ctx as RunnerContext<ExpressionPayload>);
     if ("dictationLessonId" in ctx.job.payload || "dictationPool" in ctx.job.payload) return this.runDictation(ctx as RunnerContext<DictationPayload>);
     if ("thoughtId" in ctx.job.payload) return this.runThought(ctx as RunnerContext<ThoughtPayload>);

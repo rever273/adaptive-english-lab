@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 import { spellNumbers } from "@english-lab/contracts";
-import { alignWords, isCorrect, tokenize, wordDistance } from "../../../apps/server/src/domain/typing/dictation/check.js";
+import { alignWords, isCorrect, rawTokens, tokenize, wordDistance } from "../../../apps/server/src/domain/typing/dictation/check.js";
 import { displayWords, revealFor, revealedSet, stuckWord } from "../../../apps/server/src/domain/typing/dictation/hints.js";
 import { checkSentence, checkWav } from "../../../apps/server/src/domain/typing/dictation/quality.js";
 import { variedLengthScale } from "../../../apps/server/src/domain/typing/dictation/runner.js";
@@ -78,6 +78,13 @@ describe("hint position", () => {
   it("a hint finds the stuck word across a contraction written either way", () => {
     expect(stuckWord(displayWords("I am sure it is fine here today"), tokenize("I'm sure it's fine"))).toBe(6);
     expect(stuckWord(displayWords("I'm sure it's fine here today"), tokenize("I am sure it is"))).toBe(3);
+  });
+  it("points to the wrong second word when the typed pair can form a contraction", () => {
+    const words = displayWords("We were going to visit the market.");
+    for (const text of ["We would going to visit the market", "We are going to visit the market"]) {
+      expect(stuckWord(words, tokenize(text), rawTokens(text))).toBe(1);
+    }
+    expect(stuckWord(words, tokenize("They are going"), rawTokens("They are going"))).toBe(0);
   });
   it("hyphenated display words count as several parts", () => {
     expect(stuckWord(displayWords("a well-known fact today"), tokenize("a well known"))).toBe(2);

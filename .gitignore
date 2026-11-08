@@ -6,6 +6,7 @@ var/
 *.sqlite-shm
 .env
 .env.*
+!.env.example
 englishlab.local.json
 *.tsbuildinfo
 
@@ -36,10 +37,4 @@ vocabulary-speech/
 
 # personal launcher (stop, build, start attached)
 start.bat
-migrations/
-
-# Journey activity migrations are required to run the feature.
-!migrations/
-migrations/*
-!migrations/038_practice_activity.sql
-!migrations/039_journey_typing_activity.sql
+# Migrations are required to build and run the app: they are tracked (027-037 were wrongly ignored before).

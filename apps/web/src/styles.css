@@ -53,6 +53,15 @@ h2 {
     margin: 0 0 0.75rem;
     font-size: 1.125rem;
 }
+h3 {
+    font-size: 1rem;
+}
+h4 {
+    font-size: 0.95rem;
+}
+p {
+    font-size: inherit;
+}
 
 .lede,
 .muted {
@@ -142,14 +151,14 @@ code {
     display: flex;
     flex-wrap: wrap;
     gap: 0.25rem;
-    max-width: 76rem;
-    margin: 0 auto;
+    max-width: 85rem;
+    margin: 1em auto 0.2em;
 }
 .activity-tracks {
     display: flex;
     flex-wrap: wrap;
     gap: 0.5rem 1.25rem;
-    max-width: 76rem;
+    max-width: 85rem;
     margin: 0.3rem auto 0.55rem;
 }
 .activity-track {
@@ -188,8 +197,17 @@ code {
     font: inherit;
     cursor: pointer;
 }
-.tab-group-start {
-    margin-left: 1.75rem;
+.tab-group {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 0.25rem;
+    padding: 0.1rem 0.5rem;
+    border: 1px solid var(--border);
+    border-radius: 0.8rem;
+    background: var(--surface);
+}
+.topbar nav {
+    gap: 0.6rem;
 }
 .tab-on {
     border-bottom-color: var(--accent);
@@ -308,6 +326,11 @@ textarea {
     color: var(--warn-fg);
     padding: 0.5rem 0.75rem;
     border-radius: 0.5rem;
+}
+.gap-input-wrapper {
+    display: flex;
+    align-items: center;
+    gap: 0.5rem;
 }
 .passage {
     border-left: 3px solid var(--border);
@@ -456,7 +479,7 @@ textarea {
     gap: 0.4rem;
 }
 .inline input {
-    width: 5rem;
+    width: 1rem;
 }
 .batch-list {
     list-style: none;
@@ -781,6 +804,7 @@ input:not([type='checkbox']):not([type='radio']):not([type='range']) {
     border: 1px solid var(--border);
     border-radius: 0.4rem;
     padding: 0.35rem 0.5rem;
+    min-width: 4.5em;
 }
 textarea {
     background: var(--surface-2);
@@ -1237,8 +1261,8 @@ h2 .pi {
 .field-add {
     display: flex;
     gap: 0.4rem;
-    flex: 1 1 22rem;
-    max-width: 34rem;
+    flex: 1 1 2rem;
+    max-width: 55rem;
     margin-top: 0.5rem;
 }
 .toolbar .field-add {
@@ -1278,7 +1302,7 @@ h2 .pi {
     border: 1px solid var(--border);
     border-radius: 0.55rem;
     overflow: hidden;
-    margin: 0.25rem 0 0.75rem;
+    margin: 0.25rem 0.25rem 0.75rem;
 }
 .segmented label {
     position: relative;
@@ -1833,6 +1857,20 @@ td.row-actions .btn + .btn {
     margin: 0;
     max-width: 40rem;
 }
+.vocab-practice-layout {
+    display: grid;
+    grid-template-columns: minmax(0, 1fr) auto;
+    align-items: center;
+    gap: 1rem;
+}
+@media (max-width: 700px) {
+    .vocab-practice-layout {
+        grid-template-columns: minmax(0, 1fr);
+    }
+    .vocab-practice-layout > .btn {
+        justify-self: start;
+    }
+}
 .btn-big {
     padding: 0.65rem 1.2rem;
     font-size: 1rem;
@@ -2108,6 +2146,63 @@ td.row-actions .btn + .btn {
 .typing-stage {
     position: relative;
 }
+.words-target-image-area {
+    position: absolute;
+    top: 5%;
+    right: 2%;
+    width: 20%;
+    pointer-events: none;
+}
+.words-target-image {
+    display: block;
+    width: 100%;
+    aspect-ratio: 1;
+    object-fit: cover;
+    border: 3px solid #7652a6;
+    border-radius: 1rem;
+    box-shadow: 0 10px 25px rgb(0 0 0 / 45%);
+    opacity: 0;
+    transform: translateY(6px);
+    transition:
+        opacity 280ms ease,
+        transform 280ms ease;
+}
+.words-target-image.is-visible {
+    opacity: 1;
+    transform: translateY(0);
+    animation: words-image-appear 280ms ease both;
+}
+.words-target-translation {
+    display: table;
+    font:
+        600 15px system-ui,
+        sans-serif;
+    max-width: 100%;
+    margin: 0.6rem auto 0;
+    padding: 0.4rem 0.7rem;
+    border-radius: 0.45rem;
+    background: #2b1948;
+    color: #fff;
+    text-align: center;
+    overflow-wrap: anywhere;
+    box-shadow: 0 5px 15px rgb(0 0 0 / 30%);
+}
+@keyframes words-image-appear {
+    from {
+        opacity: 0;
+        transform: translateY(6px);
+    }
+    to {
+        opacity: 1;
+        transform: translateY(0);
+    }
+}
+@media (prefers-reduced-motion: reduce) {
+    .words-target-image {
+        transition: none;
+        animation: none;
+    }
+}
 .typing-canvas {
     display: block;
     width: 100%;
@@ -2149,7 +2244,7 @@ td.row-actions .btn + .btn {
     font-size: 0.85rem;
     font-weight: 600;
     color: #fff;
-    text-shadow: 0 1px 3px rgba(0, 0, 0, 0.8);
+    text-shadow: 2px 2px 4px #000;
     font-variant-numeric: tabular-nums;
 }
 .typing-paused {
@@ -2405,6 +2500,37 @@ kbd {
 }
 
 /* global word panel (bottom left, mirrors the AI panel on the right) */
+.daily-goal-notice {
+    position: fixed;
+    left: 1rem;
+    bottom: 1rem;
+    z-index: 1100;
+    max-width: min(24rem, calc(100vw - 2rem));
+    padding: 0.8rem 1rem;
+    border: 1px solid #3fbf6f;
+    border-radius: 0.65rem;
+    background: #162a25;
+    color: #d8ffe5;
+    box-shadow: 0 10px 30px rgb(0 0 0 / 45%);
+    display: flex;
+    align-items: flex-start;
+    gap: 0.5rem;
+    text-align: left;
+    cursor: pointer;
+}
+.daily-goal-notice .pi {
+    color: #69df98;
+    margin-right: 0.35rem;
+}
+.daily-goal-notice small {
+    display: block;
+    margin-top: 0.3rem;
+    color: #a8d9ba;
+}
+.daily-goal-notice .daily-goal-close {
+    margin: 0 0 0 0.5rem;
+    font-size: 0.8rem;
+}
 .word-panel {
     position: fixed;
     left: 1rem;
@@ -2456,6 +2582,15 @@ kbd {
 }
 .word-panel p {
     margin: 0.25rem 0;
+}
+.word-panel-translation {
+    margin: 0.35rem 0 0.55rem;
+    padding: 0.45rem 0.55rem;
+    border: 1px solid var(--border);
+    border-radius: 0.4rem;
+    background: rgb(63 191 111 / 8%);
+    max-height: 12rem;
+    overflow-y: auto;
 }
 
 /* vocabulary feedback: word + Russian on their own line, the finished sentence with the word coloured, then its translation */
@@ -3121,7 +3256,7 @@ button.letter-hint-tile:hover {
     color: var(--muted);
 }
 .bk-skip {
-    color: #284a90;
+    color: #6894ef;
 }
 .bk-err {
     color: #ff4d4d;
@@ -3779,6 +3914,16 @@ button.letter-hint-tile:hover {
     font-size: 1.7rem;
     color: #c6b9ff;
 }
+.daily-counts {
+    display: flex;
+    gap: 0.7rem;
+}
+.daily-count.reached {
+    border-color: var(--ok);
+}
+.daily-count.reached strong {
+    color: var(--ok-fg);
+}
 .daily-count strong span,
 .daily-count small {
     color: var(--muted);
@@ -3989,13 +4134,846 @@ button.letter-hint-tile:hover {
 }
 
 /* vocabulary recall built from letter tiles */
-.tile-meaning { color: #f0b86e; font-style: italic; padding: 0 0.15em; }
-.tile-slots { display: flex; flex-wrap: wrap; gap: 0.2rem 1rem; margin: 0.6rem 0; }
-.tile-word { display: inline-flex; gap: 0.25rem; }
-.tile-slot { display: inline-flex; align-items: center; justify-content: center; width: 34px; height: 38px; border: 1px dashed #6daaff; border-radius: 6px; color: #c6e1ff; font-weight: 700; font-size: 1.05rem; background: transparent; }
-button.tile-slot-filled { border-style: solid; background: #25364d; cursor: pointer; }
-.tile-pool { display: flex; flex-wrap: wrap; gap: 0.4rem; margin: 0.4rem 0 0.6rem; }
-.tile { width: 40px; height: 42px; border: 1px solid #6daaff; border-radius: 8px; background: #25364d; color: #c6e1ff; font-weight: 700; font-size: 1.1rem; cursor: pointer; }
-.tile:hover:not(:disabled) { background: #365575; }
-.tile:disabled { opacity: 0.3; cursor: default; }
+.tile-meaning {
+    color: #f0b86e;
+    font-style: italic;
+    padding: 0 0.15em;
+}
+.tile-slots {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 0.2rem 1rem;
+    margin: 0.6rem 0;
+}
+.tile-word {
+    display: inline-flex;
+    gap: 0.25rem;
+}
+.tile-slot {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    width: 34px;
+    height: 38px;
+    border: 1px dashed #6daaff;
+    border-radius: 6px;
+    color: #c6e1ff;
+    font-weight: 700;
+    font-size: 1.05rem;
+    background: transparent;
+}
+button.tile-slot-filled {
+    border-style: solid;
+    background: #25364d;
+    cursor: pointer;
+}
+.tile-pool {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 0.4rem;
+    margin: 0.4rem 0 0.6rem;
+}
+.tile {
+    width: 40px;
+    height: 42px;
+    border: 1px solid #6daaff;
+    border-radius: 8px;
+    background: #25364d;
+    color: #c6e1ff;
+    font-weight: 700;
+    font-size: 1.1rem;
+    cursor: pointer;
+}
+.tile:hover:not(:disabled) {
+    background: #365575;
+}
+.tile:disabled {
+    opacity: 0.3;
+    cursor: default;
+}
 
+/* ---- TASK_031: Single Word Context Practice ---- */
+.wl-block {
+    border-color: color-mix(in srgb, var(--accent) 45%, var(--border));
+    background: linear-gradient(120deg, color-mix(in srgb, var(--accent) 12%, var(--surface)), var(--surface) 70%);
+}
+.wl-block h3 .pi {
+    color: var(--accent);
+}
+.wl-pick-row {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 0.75rem 1rem;
+    align-items: center;
+    margin: 0.6rem 0 0.4rem;
+}
+.wl-picker {
+    position: relative;
+    flex: 1 1 28rem;
+    min-width: 14rem;
+}
+.wl-picker-input {
+    width: 100%;
+    font-size: 1.05rem;
+    padding-right: 2.2rem;
+}
+.wl-picker-caret {
+    position: absolute;
+    right: 0.8rem;
+    top: 50%;
+    transform: translateY(-50%);
+    color: var(--muted);
+    pointer-events: none;
+}
+.wl-picker-list {
+    position: absolute;
+    z-index: 30;
+    left: 0;
+    right: 0;
+    top: calc(100% + 4px);
+    margin: 0;
+    padding: 0.25rem;
+    list-style: none;
+    max-height: 18rem;
+    overflow-y: auto;
+    background: var(--surface-2);
+    border: 1px solid var(--border);
+    border-radius: 0.5rem;
+    box-shadow: 0 8px 24px rgb(0 0 0 / 35%);
+}
+.wl-picker-row {
+    display: flex;
+    justify-content: space-between;
+    gap: 1rem;
+    padding: 0.45rem 0.65rem;
+    border-radius: 0.4rem;
+    cursor: pointer;
+}
+.wl-picker-on {
+    background: color-mix(in srgb, var(--accent) 22%, var(--surface-2));
+}
+.wl-picker-done {
+    background: color-mix(in srgb, var(--ok) 14%, transparent);
+}
+.wl-picker-done.wl-picker-on {
+    background: color-mix(in srgb, var(--ok) 28%, var(--surface-2));
+}
+.wl-picker-score {
+    color: var(--ok-fg);
+    font-weight: 600;
+    white-space: nowrap;
+}
+.wl-picker-empty {
+    padding: 0.5rem 0.65rem;
+}
+.wl-lesson .wl-steps {
+    margin-bottom: 0.9rem;
+}
+.wl-bar {
+    display: grid;
+    grid-template-columns: repeat(5, 1fr);
+    gap: 4px;
+    margin-top: 0.4rem;
+}
+.wl-bar span {
+    height: 6px;
+    border-radius: 3px;
+    background: var(--border);
+}
+.wl-bar span.done {
+    background: var(--ok);
+}
+.wl-bar span.now {
+    background: var(--accent);
+}
+.wl-examples {
+    list-style: decimal;
+    padding-left: 1.4rem;
+    display: grid;
+    gap: 0.8rem;
+}
+.wl-en {
+    font-size: 1.1rem;
+    margin: 0;
+}
+.wl-ru {
+    margin: 0.1rem 0 0;
+    color: var(--muted);
+}
+.wl-card {
+    margin-top: 1rem;
+}
+.wl-pattern {
+    margin: 0.5rem 0 0.75rem;
+    padding: 0.55rem 0.8rem;
+    border-left: 3px solid var(--accent);
+    background: var(--surface-2);
+    border-radius: 0.3rem;
+}
+.wl-pattern p {
+    margin: 0.2rem 0;
+}
+.wl-answer textarea,
+.wl-answer .gap-input {
+    width: 100%;
+    max-width: 40rem;
+}
+.wl-answer .gap-input {
+    width: min(18rem, 100%);
+}
+.wl-issues {
+    margin: 0.3rem 0;
+    padding-left: 1.2rem;
+}
+.wl-target {
+    color: var(--accent);
+}
+.wl-hero {
+    --tier: var(--accent);
+    display: grid;
+    grid-template-columns: auto 1fr auto;
+    align-items: center;
+    gap: 0.4rem 1.2rem;
+    margin: 0.6rem 0 0.8rem;
+    padding: 1rem 1.3rem;
+    border-radius: 0.8rem;
+    border: 1px solid color-mix(in srgb, var(--tier) 45%, var(--border));
+    background: linear-gradient(120deg, color-mix(in srgb, var(--tier) 16%, var(--surface)), var(--surface) 80%);
+}
+.wl-tier-high {
+    --tier: var(--ok);
+}
+.wl-tier-mid {
+    --tier: var(--accent);
+}
+.wl-tier-low {
+    --tier: var(--warn);
+}
+.wl-score {
+    margin: 0;
+    font-size: 3.4rem;
+    line-height: 1;
+    font-variant-numeric: tabular-nums;
+}
+.wl-score strong {
+    color: var(--tier);
+}
+.wl-score span {
+    font-size: 1.3rem;
+    color: var(--muted);
+    margin-left: 0.15rem;
+}
+.wl-hero-time {
+    margin: 0;
+    color: var(--muted);
+    font-size: 0.9rem;
+    white-space: nowrap;
+}
+.wl-meter {
+    height: 0.65rem;
+    border-radius: 999px;
+    background: var(--surface-2);
+    border: 1px solid var(--border);
+    overflow: hidden;
+}
+.wl-meter span {
+    display: block;
+    height: 100%;
+    border-radius: 999px;
+    background: linear-gradient(90deg, #3b82f6, #22d3ee 50%, #4ade80);
+    transition: width 0.6s ease;
+}
+.wl-meter-small {
+    height: 0.4rem;
+    margin-top: 0.45rem;
+}
+.wl-stages {
+    list-style: none;
+    margin: 0.8rem 0 1rem;
+    padding: 0;
+    display: grid;
+    gap: 0.5rem;
+}
+.wl-stage-row {
+    display: grid;
+    grid-template-columns: auto 1fr auto;
+    align-items: center;
+    gap: 0.9rem;
+    padding: 0.7rem 1rem;
+    border-radius: 0.6rem;
+    border: 1px solid var(--border);
+    background: var(--surface-2);
+}
+.wl-stage-no {
+    display: grid;
+    place-items: center;
+    width: 2rem;
+    height: 2rem;
+    border-radius: 50%;
+    background: var(--accent);
+    color: var(--on-accent);
+    font-weight: 700;
+}
+.wl-stage-title {
+    margin: 0;
+    font-weight: 600;
+}
+.wl-stage-note {
+    margin: 0.1rem 0 0;
+    color: var(--muted);
+    font-size: 0.85rem;
+}
+.wl-stage-points {
+    margin: 0;
+    white-space: nowrap;
+    font-variant-numeric: tabular-nums;
+}
+.wl-stage-points strong {
+    font-size: 1.5rem;
+}
+.wl-stage-points span {
+    color: var(--muted);
+}
+.wl-stage-points .wl-stage-none {
+    font-size: 0.85rem;
+}
+@media (max-width: 560px) {
+    .wl-hero {
+        grid-template-columns: auto 1fr;
+    }
+    .wl-hero-time {
+        grid-column: 1 / -1;
+    }
+}
+
+/* Keep each statistic's icon with its value, on one centred line. */
+.vocab-analytics-stats .stat {
+    display: block;
+    text-align: center;
+}
+.vocab-analytics-stats .stat > i {
+    margin-right: 0.45rem;
+}
+.vocab-analytics-stats .stat-label {
+    display: block;
+}
+@media (max-width: 1100px) {
+    .vocab-dictionary-wrap {
+        overflow-x: visible;
+    }
+    .vocab-dictionary-table,
+    .vocab-dictionary-table tbody,
+    .vocab-dictionary-table tr {
+        display: block;
+        width: 100%;
+    }
+    .vocab-dictionary-table thead {
+        position: absolute;
+        width: 1px;
+        height: 1px;
+        overflow: hidden;
+        clip: rect(0, 0, 0, 0);
+    }
+    .vocab-dictionary-table tr {
+        margin-bottom: 1rem;
+        border: 1px solid var(--border, #38404e);
+        border-radius: 0.6rem;
+        overflow-wrap: anywhere;
+    }
+    .vocab-dictionary-table td {
+        display: block;
+        width: auto;
+        text-align: left;
+        white-space: normal;
+    }
+    .vocab-dictionary-table td::before {
+        display: inline-block;
+        min-width: 8rem;
+        color: #9aa4b8;
+        font-size: 0.8rem;
+    }
+    .vocab-dictionary-table tr:not(.edit-row) td:nth-child(1)::before {
+        content: 'Learned';
+    }
+    .vocab-dictionary-table tr:not(.edit-row) td:nth-child(2)::before {
+        content: 'Image';
+    }
+    .vocab-dictionary-table tr:not(.edit-row) td:nth-child(3)::before {
+        content: 'Word';
+    }
+    .vocab-dictionary-table tr:not(.edit-row) td:nth-child(4)::before {
+        content: 'Translation';
+    }
+    .vocab-dictionary-table tr:not(.edit-row) td:nth-child(5)::before {
+        content: 'Description';
+    }
+    .vocab-dictionary-table tr:not(.edit-row) td:nth-child(6)::before {
+        content: 'Synonyms';
+    }
+    .vocab-dictionary-table tr:not(.edit-row) td:nth-child(7)::before {
+        content: 'Part of speech';
+    }
+    .vocab-dictionary-table tr:not(.edit-row) td:nth-child(8)::before {
+        content: 'Collocations';
+    }
+    .vocab-dictionary-table tr:not(.edit-row) td:nth-child(9)::before {
+        content: 'Example';
+    }
+    .vocab-dictionary-table tr:not(.edit-row) td:nth-child(10)::before {
+        content: 'Tried';
+    }
+    .vocab-dictionary-table tr:not(.edit-row) td:nth-child(11)::before {
+        content: 'In bank';
+    }
+    .vocab-dictionary-table tr:not(.edit-row) td:nth-child(12)::before {
+        content: 'Seen';
+    }
+}
+
+.analytics-period {
+    display: flex;
+    justify-content: flex-end;
+    margin: 0 0 1rem;
+}
+
+@media (max-width: 700px) {
+    .stat-grid-2 {
+        grid-auto-flow: row;
+        grid-template-columns: repeat(2, minmax(0, 1fr));
+        grid-template-rows: none;
+    }
+}
+
+.prepared-track-stats {
+    display: grid;
+    grid-template-columns: repeat(auto-fit, minmax(9rem, 1fr));
+    gap: 0.65rem;
+}
+.prepared-track-stats .stat {
+    padding: 0.75rem;
+}
+.findings details > summary {
+    cursor: pointer;
+}
+
+/* ---- TASK_031: lesson screen, second pass ---- */
+.wl-word-block {
+    margin: 0 0 1rem;
+    padding: 0.8rem 1rem;
+    border-radius: 0.6rem;
+    border: 1px solid color-mix(in srgb, #a78bfa 55%, var(--border));
+    background: linear-gradient(120deg, color-mix(in srgb, #a78bfa 16%, var(--surface)), var(--surface) 75%);
+}
+.wl-word-title {
+    margin: 0 0 0.4rem;
+    font-size: 1.25rem;
+    display: flex;
+    gap: 0.6rem;
+    align-items: baseline;
+}
+.wl-pos {
+    font-size: 0.8rem;
+    color: #c4b5fd;
+    border: 1px solid color-mix(in srgb, #a78bfa 50%, transparent);
+    border-radius: 999px;
+    padding: 0 0.5rem;
+}
+.wl-word-facts {
+    display: grid;
+    grid-template-columns: max-content 1fr;
+    gap: 0.25rem 1rem;
+    margin: 0;
+}
+.wl-word-facts dt {
+    color: var(--muted);
+}
+.wl-word-facts dd {
+    margin: 0;
+}
+.wl-examples {
+    list-style: none;
+    padding: 0;
+    margin: 0 0 1rem;
+    display: grid;
+    gap: 0.7rem;
+}
+.wl-ex-card {
+    display: flex;
+    gap: 0.9rem;
+    align-items: flex-start;
+    padding: 0.75rem 1rem;
+    border-radius: 0.6rem;
+    border: 1px solid var(--border);
+    background: var(--surface-2);
+}
+.wl-ex-no {
+    flex: none;
+    width: 1.9rem;
+    height: 1.9rem;
+    border-radius: 50%;
+    display: grid;
+    place-items: center;
+    font-weight: 700;
+    color: var(--on-accent);
+    background: var(--accent);
+}
+.wl-block-card {
+    padding: 0.75rem 1rem;
+    border-radius: 0.6rem;
+    border: 1px solid var(--border);
+    background: var(--surface-2);
+}
+.wl-sentence-ru {
+    margin: 0.6rem 0 1rem;
+    padding: 0.6rem 1rem;
+    border-radius: 0.6rem;
+    border: 1px dashed var(--border);
+    color: var(--muted);
+}
+.wl-gap-row {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 0.75rem;
+    align-items: center;
+}
+.wl-word-tr {
+    padding: 0.35rem 0.8rem;
+    border-radius: 999px;
+    background: color-mix(in srgb, #a78bfa 20%, var(--surface));
+    border: 1px solid color-mix(in srgb, #a78bfa 55%, var(--border));
+    color: #ddd6fe;
+}
+.wl-yours {
+    margin: 0.4rem 0 0.6rem;
+    padding: 0.45rem 0.75rem;
+    border-radius: 0.5rem;
+    border: 1px solid var(--border);
+    background: var(--surface);
+}
+.wl-yours-label {
+    display: block;
+    font-size: 0.75rem;
+    color: var(--muted);
+    text-transform: uppercase;
+    letter-spacing: 0.04em;
+}
+.wl-yours-bad {
+    border-color: var(--err);
+    background: var(--err-bg);
+    color: var(--err-fg);
+}
+.wl-yours-ok {
+    border-color: var(--ok);
+    background: var(--ok-bg);
+    color: var(--ok-fg);
+}
+
+/* matching game after a vocabulary practice */
+.match-cols {
+    display: grid;
+    grid-template-columns: 1fr 1fr;
+    gap: 1.2rem;
+    margin: 0.8rem 0;
+}
+.match-col {
+    display: flex;
+    flex-direction: column;
+    gap: 0.6rem;
+}
+.match-btn {
+    min-height: 3rem;
+    padding: 0.55rem 0.9rem;
+    border: 1px solid #3b4a63;
+    border-radius: 10px;
+    background: #1b2433;
+    color: #e6edf7;
+    font: inherit;
+    font-weight: 600;
+    cursor: pointer;
+    transition:
+        background 0.15s,
+        border-color 0.15s,
+        transform 0.15s,
+        color 0.15s;
+}
+.match-btn:hover:not(:disabled) {
+    background: #26334a;
+}
+.match-btn.match-sel {
+    background: #3a2f6b;
+    border-color: #b79cff;
+    color: #fff;
+    transform: scale(1.04);
+    animation: match-pulse 0.9s ease-in-out infinite;
+}
+.match-btn.match-ok {
+    background: #1f6b3a;
+    border-color: #2f9a55;
+    color: #9aa8a0;
+    cursor: default;
+}
+.match-btn.match-bad {
+    background: #7a2230;
+    border-color: #d1495b;
+    color: #fff;
+    animation: match-shake 0.45s ease-in-out;
+}
+.match-btn.match-gap {
+    visibility: hidden;
+}
+.match-btn.match-enter:not(.match-ok) {
+    animation: match-appear 0.25s ease-out;
+}
+.match-btn.match-sel.match-enter {
+    animation: match-pulse 0.9s ease-in-out infinite;
+}
+.match-done {
+    color: var(--ok-fg);
+    font-weight: 600;
+}
+@keyframes match-pulse {
+    0%,
+    100% {
+        box-shadow: 0 0 0 0 rgba(183, 156, 255, 0.55);
+    }
+    50% {
+        box-shadow: 0 0 0 6px rgba(183, 156, 255, 0);
+    }
+}
+@keyframes match-shake {
+    0%,
+    100% {
+        transform: translateX(0);
+    }
+    20% {
+        transform: translateX(-7px);
+    }
+    40% {
+        transform: translateX(7px);
+    }
+    60% {
+        transform: translateX(-5px);
+    }
+    80% {
+        transform: translateX(5px);
+    }
+}
+@keyframes match-appear {
+    from {
+        opacity: 0;
+        transform: scale(0.92);
+    }
+    to {
+        opacity: 1;
+        transform: scale(1);
+    }
+}
+@media (prefers-reduced-motion: reduce) {
+    .match-btn,
+    .match-btn.match-sel,
+    .match-btn.match-bad,
+    .match-btn.match-enter {
+        animation: none;
+        transition: none;
+    }
+}
+@media (max-width: 560px) {
+    .match-cols {
+        gap: 0.6rem;
+    }
+}
+
+/* a wrong typed word after the answer: the letters that differ are red */
+.gap-input-marked {
+    display: inline-flex;
+    align-items: center;
+}
+.gap-typo {
+    color: #ff6b7d;
+    font-weight: 700;
+    text-decoration: underline wavy #ff6b7d;
+    text-underline-offset: 3px;
+}
+.conversation {
+    max-width: 920px;
+    margin: 1.5rem auto;
+}
+.conversation button {
+    font: inherit;
+    padding: 0.5rem 0.9rem;
+    border: 1px solid var(--border);
+    border-radius: 0.5rem;
+    background: var(--surface-2);
+    color: var(--text);
+    cursor: pointer;
+}
+.conversation button:hover:not(:disabled) {
+    border-color: var(--accent);
+}
+.conversation button:disabled {
+    opacity: 0.5;
+    cursor: not-allowed;
+}
+.conversation-card {
+    padding: 1.25rem;
+    margin: 1rem 0;
+    border: 1px solid var(--border);
+    border-radius: 16px;
+    background: var(--surface);
+}
+.conversation-topics {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 0.5rem;
+}
+.conversation-topics .selected {
+    background: #3567c7;
+    color: white;
+}
+.conversation-header {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    gap: 1rem;
+}
+.conversation-header h2 {
+    margin-bottom: 0.3rem;
+}
+.conversation-chat {
+    display: flex;
+    flex-direction: column;
+    gap: 1rem;
+    margin: 1.5rem 0;
+    padding: 1.25rem;
+    min-height: 300px;
+    max-height: 55vh;
+    overflow-y: auto;
+    border-radius: 16px;
+    background: var(--surface);
+}
+.conversation-row {
+    display: flex;
+    align-items: flex-start;
+    gap: 0.6rem;
+    max-width: 85%;
+}
+.conversation-row.user {
+    align-self: flex-end;
+    flex-direction: row-reverse;
+}
+.conversation-row i {
+    padding: 0.6rem;
+    border-radius: 50%;
+    background: var(--info-bg);
+    color: var(--info-fg);
+}
+.conversation-row div {
+    padding: 0.8rem 1rem;
+    border-radius: 16px;
+    background: var(--surface-2);
+    white-space: pre-wrap;
+}
+.conversation-row.user div {
+    background: var(--info-bg);
+}
+.conversation-compose textarea {
+    display: block;
+    width: 100%;
+    min-height: 80px;
+    margin-bottom: 0.6rem;
+}
+.conversation-compose textarea {
+    color: var(--text);
+    border: 1px solid var(--border);
+    border-radius: 0.5rem;
+    padding: 0.75rem;
+    font: inherit;
+    resize: vertical;
+}
+.conversation-topics .conversation-topic.colour-0 {
+    background: #293d59;
+}
+.conversation-topics .conversation-topic.colour-1 {
+    background: #3d3157;
+}
+.conversation-topics .conversation-topic.colour-2 {
+    background: #25463f;
+}
+.conversation-topics .conversation-topic.colour-3 {
+    background: #53402d;
+}
+.conversation-topics .conversation-topic.colour-4 {
+    background: #51323d;
+}
+.conversation-topics .conversation-topic.colour-5 {
+    background: #324652;
+}
+.conversation-topics .conversation-topic.colour-6 {
+    background: #424532;
+}
+.conversation-topics .conversation-topic.colour-7 {
+    background: #493954;
+}
+.conversation-topics .conversation-topic.selected {
+    outline: 2px solid var(--accent);
+    outline-offset: 2px;
+}
+.conversation-start {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 1rem;
+}
+.conversation-start h3,
+.conversation-start p {
+    margin: 0.25rem 0;
+}
+.conversation-chat {
+    gap: 0.7rem;
+    margin: 0.8rem 0;
+    padding: 1rem;
+    min-height: 150px;
+    height: clamp(150px, calc(100dvh - 650px), 380px);
+    max-height: none;
+}
+.conversation-vocab {
+    color: #72c7ff;
+    font-weight: 650;
+}
+.conversation-translation {
+    height: 5.5rem;
+    margin: 0 0 0.8rem;
+    padding: 0.5rem 0.8rem;
+    border: 1px solid var(--border);
+    border-radius: 0.5rem;
+    background: var(--surface);
+    display: flex;
+    flex-direction: column;
+    gap: 0.25rem;
+}
+.conversation-translation-body {
+    flex: 1;
+    min-height: 0;
+    overflow-y: auto;
+    line-height: 1.35;
+}
+.conversation-speech-status {
+    height: 1.25rem;
+    flex: none;
+    overflow-y: auto;
+}
+.conversation button.conversation-replay {
+    padding: 0.1rem 0.35rem;
+    margin-left: 0.5rem;
+    border: 0;
+    background: transparent;
+    color: var(--accent);
+}
+.conversation-auto-speech {
+    display: inline-flex;
+    align-items: center;
+    gap: 0.4rem;
+    margin-left: 0.7rem;
+    color: var(--muted);
+    cursor: pointer;
+}

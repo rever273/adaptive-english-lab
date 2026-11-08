@@ -2,11 +2,11 @@ import { useState } from "react";
 import { fetchAgentTask } from "../api";
 
 /** D62: two complete prompts for the learner's coding agent. The text holds IDs and commands only, never answers. */
-export function AgentTasks() {
+export function AgentTasks({ onReviewRecent }: { onReviewRecent?: () => void }) {
   const [task, setTask] = useState<{ text: string; copied: boolean } | null>(null);
   const [error, setError] = useState<string | null>(null);
 
-  const copy = async (kind: "progress" | "lessons") => {
+  const copy = async (kind: "progress") => {
     setError(null);
     try {
       const { text } = await fetchAgentTask(kind);
@@ -30,9 +30,7 @@ export function AgentTasks() {
         <button className="btn" onClick={() => void copy("progress")} data-testid="copy-progress">
           <i className="pi pi-check-square" aria-hidden="true" /> Copy task: review my results
         </button>
-        <button className="btn" onClick={() => void copy("lessons")} data-testid="copy-lessons">
-          <i className="pi pi-plus-circle" aria-hidden="true" /> Copy task: create new lessons
-        </button>
+        {onReviewRecent && <button className="btn" data-testid="review-recent" onClick={onReviewRecent}><i className="pi pi-history" aria-hidden="true" /> Review last session</button>}
       </div>
       {error && (
         <p className="notice notice-error small" role="alert">

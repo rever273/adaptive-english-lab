@@ -1,4 +1,4 @@
-// npm run typing:seed [-- --csv <file>] [-- --db <sqlite file>]
+// npm run typing:seed [-- --csv <file>] [-- --irregular <json file>] [-- --db <sqlite file>]
 // Imports the learner's old word list into the replaceable `typing_word_bank` (D72). Columns are found by header name. The bank is replaced in
 // one transaction, so a reseed is idempotent and history is never touched. The CSV stays local and is never published.
 import { createHash } from "node:crypto";
@@ -20,6 +20,10 @@ if (!csvFile) {
   console.error("No CSV source: pass --csv <file> or set lexiconCsv in englishlab.local.json");
   process.exit(2);
 }
+// irregular verb forms (generated-english-irregular-verbs, irregular.verbs.build.json); optional, looked for next to the CSV by default
+const irregularFile = opt("--irregular") ?? path.join(path.dirname(csvFile), "irregular.verbs.build.json");
+const irregularJson = existsSync(irregularFile) ? readFileSync(irregularFile, "utf8") : undefined;
+if (!irregularJson) console.warn(`irregular verb list not found (${irregularFile}): past / participle forms stay empty`);
 const dbFile = path.resolve(opt("--db") ?? config.dbPath);
 if (!existsSync(dbFile)) {
   console.error(`database not found: ${dbFile} (start the app once to apply migrations)`);
@@ -35,7 +39,7 @@ try {
     console.error("typing_word_bank table is missing: start the app once to apply migrations");
     process.exit(2);
   }
-  const result = importWordBank(db, csvText, sourceSha, { now: () => new Date() });
+  const result = importWordBank(db, csvText, sourceSha, { now: () => new Date() }, irregularJson);
   console.log(JSON.stringify({ ...result, source: csvFile, sourceSha256: sourceSha }, null, 2));
 } finally {
   db.close();

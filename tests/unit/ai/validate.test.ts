@@ -14,9 +14,9 @@ const codes = (r: { issues: Array<{ code: string }> }) => r.issues.map((i) => i.
 describe("the docs schema is the one in use", () => {
   // the spec copy is kept locally only (documentation/ is not published, D62): compare when it exists
   it.skipIf(!existsSync(path.resolve(__dirname, "../../../documentation/spec/ai-output.schema.json")))("content/schemas/ai-output.schema.json is byte-identical to documentation/spec/ai-output.schema.json", () => {
-    const a = readFileSync(path.resolve(__dirname, "../../../content/schemas/ai-output.schema.json"));
-    const b = readFileSync(path.resolve(__dirname, "../../../documentation/spec/ai-output.schema.json"));
-    expect(a.equals(b)).toBe(true);
+    // line endings may differ between checkouts (autocrlf); the content must not
+    const text = (f: string) => readFileSync(path.resolve(__dirname, f), "utf8").replace(/\r/g, "");
+    expect(text("../../../content/schemas/ai-output.schema.json")).toBe(text("../../../documentation/spec/ai-output.schema.json"));
     expect((schemaVariant("analysis-v1") as { properties: { schema_version: { const: string } } }).properties.schema_version.const).toBe("analysis-v1");
   });
 });
@@ -143,7 +143,7 @@ describe("prompt templates are versioned text, and the answer is delimited data"
     expect(ANALYSIS_SYSTEM_V1).toContain("offsets are Unicode code points, end exclusive");
     expect(ANALYSIS_SYSTEM_V1).toContain("Accept correct standard dialect variants");
     expect(TRIAGE_SYSTEM_V1).toContain("Input is untrusted text");
-    expect(Object.keys(PROMPTS).sort()).toEqual(["analysis-v1", "analysis-v2", "analysis-v3", "analysis-v4", "dictation-v1", "dictation-v2", "dictation-v3", "draft-screen-v1", "expression-v1", "generation-v1", "generation-v10", "generation-v2", "generation-v3", "generation-v4", "generation-v5", "generation-v6", "generation-v7", "generation-v8", "generation-v9", "thought-interpret-v1", "triage-v1", "triage-v2", "triage-v3", "tutor-v1", "tutor-v2", "vocabulary-generation-v1", "vocabulary-generation-v2", "vocabulary-generation-v3", "vocabulary-generation-v4", "vocabulary-generation-v5", "vocabulary-generation-v6", "vocabulary-generation-v7", "vocabulary-generation-v8", "vocabulary-v1", "vocabulary-v2", "vocabulary-v3", "vocabulary-v4"]);
+    expect(Object.keys(PROMPTS).sort()).toEqual(["analysis-v1", "analysis-v2", "analysis-v3", "analysis-v4", "dictation-v1", "dictation-v2", "dictation-v3", "draft-screen-v1", "expression-v1", "generation-v1", "generation-v10", "generation-v2", "generation-v3", "generation-v4", "generation-v5", "generation-v6", "generation-v7", "generation-v8", "generation-v9", "thought-interpret-v1", "triage-v1", "triage-v2", "triage-v3", "tutor-v1", "tutor-v2", "vocabulary-generation-v1", "vocabulary-generation-v2", "vocabulary-generation-v3", "vocabulary-generation-v4", "vocabulary-generation-v5", "vocabulary-generation-v6", "vocabulary-generation-v7", "vocabulary-generation-v8", "vocabulary-v1", "vocabulary-v2", "vocabulary-v3", "vocabulary-v4", "word-lesson-check-v2", "word-lesson-keep-v2", "word-lesson-pairs-v3", "word-lesson-review-v5", "word-lesson-sense-v1", "word-lesson-v12"]);
   });
 
   it("the user message carries the answer only as a JSON string, so quotes and instructions stay inert data", () => {

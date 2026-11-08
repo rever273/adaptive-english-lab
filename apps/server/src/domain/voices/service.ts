@@ -4,7 +4,7 @@ import type { Db } from "../../db/open.js";
 import { ApiError } from "../../errors.js";
 import { isSoundFlagged } from "./flags.js";
 import { loadVoices, saveVoiceSettings, voiceBySpeaker, voiceByKey, voiceHistory, type Voice, type VoicePurpose, type VoiceRevision } from "./catalog.js";
-import { alternativeVoice, pickVoice, planVoiceList, type Weighted } from "./select.js";
+import { alternativeVoice, pickVoice, planVoiceList, voiceSuits, type Weighted } from "./select.js";
 import { variedLengthScale } from "./speed.js";
 import { computeWeights, VOICE_WEIGHTS_VERSION, type VoiceWeight } from "./weights.js";
 
@@ -84,6 +84,17 @@ export class VoiceService {
   /** one voice by weight; null when no voice is on for the purpose */
   pick(db: Db, o: Opts & { seed: string | number; topicGroup?: string; exclude?: string[]; previousKey?: string }): Voice | null {
     return pickVoice(this.weighted(db, o), o);
+  }
+
+  /** Longer conversations favour the user's preferred enabled voices; retain seeded variety and the existing quality weights. */
+  pickForConversation(db: Db, o: Opts & { seed: string | number; topicGroup?: string }): Voice | null {
+    const open = this.weighted(db, o).filter(c => c.weight > 0);
+    const suitable = open.filter(c => voiceSuits(c.voice, o.topicGroup));
+    const pool = suitable.length ? suitable : open;
+    if (!pool.length) return null;
+    const best = Math.max(...pool.map(c => c.voice.priorWeight));
+    const preferred = pool.filter(c => c.voice.priorWeight >= best * 0.85);
+    return pickVoice(preferred, o);
   }
 
   /** one voice per sentence of a plan (D85, D124) */

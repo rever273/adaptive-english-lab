@@ -170,10 +170,14 @@ describe("combo and characters in the statistics", () => {
     const started = startWords(d, deps);
     const appearances = started.words.map((w, i) => ({ planIndex: w.planIndex, order: i }));
     recordAppearances(d, deps, started.sessionId, appearances);
-    completeWords(d, deps, started.sessionId, { status: "completed", activeMs: 60000, charsTyped: 77, errors: 0, appearances, destroyedPlanIndexes: started.words.map((w) => w.planIndex), bestCombo: 7 });
+    completeWords(d, deps, started.sessionId, { status: "completed", activeMs: 60000, charsTyped: 77, errors: 0, appearances, destroyedPlanIndexes: started.words.map((w) => w.planIndex), bestCombo: 7, bestCharStreak: 35 });
     const stats = typingAnalytics(d, { mode: "words", days: 7, timezone: "UTC", now: new Date() });
-    expect(stats.summary).toMatchObject({ totalChars: 77, bestCombo: 7 });
+    expect(stats.summary).toMatchObject({ totalChars: 77, bestCombo: 7, bestCharStreak: 35 });
+    expect(stats.series.charStreak?.at(-1)).toMatchObject({ value: 35, status: "completed" });
     expect(stats.series.daily.reduce((a, x) => a + (x.chars ?? 0), 0)).toBe(77);
+    expect(stats.series.daily.at(-1)?.cumulativeChars).toBe(77);
+    const later = typingAnalytics(d, { mode: "words", days: 7, timezone: "UTC", now: new Date(Date.now() + 10 * 86400000) });
+    expect(later.series.daily.every((x) => x.chars === 0 && x.cumulativeChars === 77)).toBe(true);
     expect(typingAnalytics(d, { mode: "books", days: 7, timezone: "UTC", now: new Date() }).summary).toMatchObject({ totalChars: 0, bestCombo: null });
   });
 });

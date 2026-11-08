@@ -236,6 +236,16 @@ export function patchWord(db: Db, deps: Deps, entryId: string, input: unknown): 
 }
 
 export function listWords(db: Db, o: { q?: string; learned?: boolean; limit?: number } = {}): { words: EntryView[]; total: number } {
+  // For the unfiltered dictionary, select the requested window before constructing
+  // the detailed view (which performs several per-entry lookups).
+  if (!o.q) {
+    const where = `WHERE ${VISIBLE} AND (@learned IS NULL OR learned = @learned)`;
+    const params = { learned: o.learned === undefined ? null : Number(o.learned), limit: o.limit ?? 500 };
+    const total = (db.prepare(`SELECT COUNT(*) AS n FROM vocabulary_entries ${where}`).get({ learned: params.learned }) as { n: number }).n;
+    const selected = db.prepare(`SELECT id, lemma, pos, learned, user_revision, surface_forms_json, created_at FROM vocabulary_entries ${where}
+      ORDER BY COALESCE((SELECT MAX(created_at) FROM vocabulary_encounters WHERE entry_id=vocabulary_entries.id AND kind='displayed'), '') DESC, created_at DESC, lemma ASC LIMIT @limit`).all(params) as EntryRow[];
+    return { words: selected.map((r) => view(db, r)), total };
+  }
   const rows = (db.prepare("SELECT id, lemma, pos, learned, user_revision, surface_forms_json, created_at FROM vocabulary_entries ORDER BY lemma").all() as EntryRow[]).filter((r) => !isRemoved(db, r.id));
   const q = o.q ? normalizeWord(o.q) : "";
   // most recently shown first, then never-shown words by when they were saved (newest first)

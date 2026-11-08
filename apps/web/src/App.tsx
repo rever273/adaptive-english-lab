@@ -6,6 +6,7 @@ import { AiActivity } from "./components/AiActivity";
 import { AiModelNotice } from "./components/AiModelNotice";
 import { XpTracks } from "./components/XpTracks";
 import { WordCatcher } from "./components/WordPopup";
+import { DailyGoalNotice } from "./components/DailyGoalNotice";
 import { Kbd, useKeys } from "./components/hotkeys";
 import { ContentStockNotice } from "./components/ContentStockNotice";
 
@@ -16,17 +17,19 @@ const ContentStudio = lazy(() => import("./pages/ContentStudio").then((m) => ({ 
 const Practice = lazy(() => import("./pages/Practice").then((m) => ({ default: m.Practice })));
 const Vocabulary = lazy(() => import("./pages/Vocabulary").then((m) => ({ default: m.Vocabulary })));
 const Typing = lazy(() => import("./pages/Typing").then((m) => ({ default: m.Typing })));
+const Conversation = lazy(() => import("./pages/Conversation").then((m) => ({ default: m.Conversation })));
 const Tutor = lazy(() => import("./pages/Tutor").then((m) => ({ default: m.Tutor })));
 const Settings = lazy(() => import("./pages/Settings").then((m) => ({ default: m.Settings })));
 const Status = lazy(() => import("./pages/Status").then((m) => ({ default: m.Status })));
 
-type Page = "daily" | "practice" | "vocabulary" | "typing" | "tutor" | "analytics" | "studio" | "tasks" | "settings";
+type Page = "daily" | "practice" | "vocabulary" | "typing" | "conversation" | "tutor" | "analytics" | "studio" | "tasks" | "settings";
 
 const PAGES: Array<{ id: Page; label: string; icon: string; path: string; group: "daily" | "tasks" | "tools" }> = [
   { id: "daily", label: "Daily Practice", icon: "pi-calendar", path: "/daily", group: "daily" },
   { id: "practice", label: "Practice", icon: "pi-play-circle", path: "/practice", group: "tasks" },
   { id: "vocabulary", label: "Vocabulary", icon: "pi-bookmark", path: "/vocabulary", group: "tasks" },
   { id: "typing", label: "Typing", icon: "pi-bullseye", path: "/typing", group: "tasks" },
+  { id: "conversation", label: "Conversation", icon: "pi-comments", path: "/conversation", group: "tasks" },
   { id: "tutor", label: "Tutor", icon: "pi-comments", path: "/tutor", group: "tools" },
   { id: "analytics", label: "Analytics", icon: "pi-chart-line", path: "/analytics", group: "tools" },
   { id: "studio", label: "Content Studio", icon: "pi-box", path: "/content-studio", group: "tools" },
@@ -73,12 +76,12 @@ export function App() {
   const [sequential, setSequential] = useState(() => { try { return localStorage.getItem("el_daily_sequence") === "1"; } catch { return false; } });
   const launchDaily = (mode: api.JourneyMode) => {
     setDailyMode(mode); try { sessionStorage.setItem("el_daily_mode", mode); } catch { /* storage unavailable */ }
-    go(mode === "grammar" ? "practice" : mode === "vocabulary" ? "vocabulary" : "typing");
+    go(mode === "conversation" ? "conversation" : mode === "grammar" ? "practice" : mode === "vocabulary" || mode === "wordLesson" ? "vocabulary" : "typing");
   };
   const leaveDaily = () => { setDailyMode(null); try { sessionStorage.removeItem("el_daily_mode"); } catch { /* storage unavailable */ } go("daily"); };
   const dailyDone = async () => {
     if (sequential && dailyMode) {
-      try { const d = await api.fetchJourney(); const next = dailyOrder(d.today,d.dailyOrder).find(m => m !== dailyMode && d.dailyMinutes[m] > 0 && d.todayMs[m] < d.dailyMinutes[m] * 60000); if (next) { launchDaily(next); return; } } catch { /* return to the plan */ }
+      try { const d = await api.fetchJourney(); const next = dailyOrder(d.dailyMinutes,d.todayMs,d.dailyOrder).find(m => m !== dailyMode && d.dailyMinutes[m] > 0 && d.todayMs[m] < d.dailyMinutes[m] * 60000); if (next) { launchDaily(next); return; } } catch { /* return to the plan */ }
     }
     leaveDaily();
   };
@@ -91,10 +94,10 @@ export function App() {
     window.addEventListener("popstate", onPop);
     return () => window.removeEventListener("popstate", onPop);
   }, []);
-  // Alt+1 ... Alt+8 open the tabs
+  // Alt+1 ... Alt+9 and Alt+0 open the tabs
   useKeys((e) => {
     if (!e.altKey || e.ctrlKey || e.metaKey || e.repeat) return;
-    const i = Number(e.key) - 1;
+    const i = e.key === "0" ? 9 : Number(e.key) - 1;
     if (Number.isInteger(i) && i >= 0 && i < PAGES.length) {
       e.preventDefault();
       go(PAGES[i]!.id);
@@ -116,12 +119,16 @@ export function App() {
           <JourneyButton onOpen={() => go("analytics", "journey")} />
         </div>
         <nav aria-label="Main">
-          {PAGES.map((p, i) => (
-            <button key={p.id} className={`tab has-kbd${page === p.id ? " tab-on" : ""}${i > 0 && p.group !== PAGES[i - 1]!.group ? " tab-group-start" : ""}`} aria-current={page === p.id ? "page" : undefined} onClick={() => { setDailyMode(null); try { sessionStorage.removeItem("el_daily_mode"); } catch { /* unavailable */ } go(p.id); }} title={`Alt+${i + 1}`}>
-              <Kbd k={String(i + 1)} />
+          {(["daily", "tasks", "tools"] as const).map((g) => (
+            <div key={g} className="tab-group">
+              {PAGES.map((p, i) => p.group === g && (
+            <button key={p.id} className={`tab has-kbd${page === p.id ? " tab-on" : ""}`} aria-current={page === p.id ? "page" : undefined} onClick={() => { setDailyMode(null); try { sessionStorage.removeItem("el_daily_mode"); } catch { /* unavailable */ } go(p.id); }} title={`Alt+${i === 9 ? 0 : i + 1}`}>
+              <Kbd k={String(i === 9 ? 0 : i + 1)} />
               <i className={`pi ${p.icon}`} aria-hidden="true" />
               {p.label}
             </button>
+              ))}
+            </div>
           ))}
         </nav>
       </header>
@@ -132,9 +139,11 @@ export function App() {
         ) : page === "practice" ? (
           <Practice dailyStart={dailyMode === "grammar"} onDailyDone={dailyMode === "grammar" ? () => void dailyDone() : undefined} onNavigate={(p) => go(p)} />
         ) : page === "vocabulary" ? (
-          <Vocabulary dailyStart={dailyMode === "vocabulary"} onDailyDone={dailyMode === "vocabulary" ? () => void dailyDone() : undefined} onNavigate={(p) => go(p, "vocabulary")} />
+          <Vocabulary dailyStart={dailyMode === "vocabulary"} wordLessonFocus={dailyMode === "wordLesson"} onDailyDone={dailyMode === "vocabulary" || dailyMode === "wordLesson" ? () => void dailyDone() : undefined} onNavigate={(p) => go(p, "vocabulary")} />
         ) : page === "typing" ? (
           <Typing key={dailyMode ?? "typing"} dailyStart={dailyMode === "words" || dailyMode === "books" || dailyMode === "dictation" ? dailyMode : undefined} onDailyDone={dailyMode === "words" || dailyMode === "books" || dailyMode === "dictation" ? () => void dailyDone() : undefined} onNavigate={(p) => go(p)} />
+        ) : page === "conversation" ? (
+          <Conversation onDailyDone={dailyMode === "conversation" ? () => void dailyDone() : undefined} />
         ) : page === "tutor" ? (
           <Tutor />
         ) : page === "analytics" ? (
@@ -152,6 +161,7 @@ export function App() {
         </Suspense>
       </main>
       <WordCatcher />
+      <DailyGoalNotice />
       {page !== "studio" && <ContentStockNotice onOpen={c => go("studio", c)} />}
       <AiActivity onOpenTasks={() => go("tasks")} />
       <AiModelNotice />

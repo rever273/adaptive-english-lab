@@ -72,6 +72,7 @@ export const TypingWordsCompleteRequestSchema = z
     keyStats: KeyStats,
     /** words in a row without a wrong key (Words) */
     bestCombo: z.number().int().min(0).max(100000).optional(),
+    bestCharStreak: z.number().int().min(0).max(10_000_000).optional(),
   })
   .strict();
 export type TypingWordsCompleteRequest = z.infer<typeof TypingWordsCompleteRequestSchema>;
@@ -91,6 +92,8 @@ export const TypingBookStartResponseSchema = z
     startOffset: z.number().int(),
     endOffset: z.number().int(),
     currentOffset: z.number().int(),
+    keyRulesVersion: z.union([z.literal(1), z.literal(2), z.literal(3)]).optional(),
+    charStreak: z.object({ current: z.number().int().nonnegative(), best: z.number().int().nonnegative() }).nullable().optional(),
     /** the book text from startOffset to endOffset; the client indexes it as offset - startOffset */
     text: z.string(),
     chapters: z.array(z.object({ title: z.string(), startOffset: z.number().int(), endOffset: z.number().int() })),
@@ -104,11 +107,12 @@ export const TypingBookStartResponseSchema = z
   .strict();
 export type TypingBookStartResponse = z.infer<typeof TypingBookStartResponseSchema>;
 
-export const TypingBookCheckpointRequestSchema = z.object({ offset: z.number().int().nonnegative(), ...Counters }).strict();
+const CharStreak = z.object({ current: z.number().int().min(0).max(10_000_000), best: z.number().int().min(0).max(10_000_000) }).strict();
+export const TypingBookCheckpointRequestSchema = z.object({ offset: z.number().int().nonnegative(), ...Counters, charStreak: CharStreak.optional() }).strict();
 export type TypingBookCheckpointRequest = z.infer<typeof TypingBookCheckpointRequestSchema>;
 
 /** bestCombo: the longest run of characters typed correctly (Precision Combo) */
-export const TypingBookCompleteRequestSchema = z.object({ offset: z.number().int().nonnegative(), ...Counters, keyStats: KeyStats, bestCombo: z.number().int().min(0).max(10_000_000).optional() }).strict();
+export const TypingBookCompleteRequestSchema = z.object({ offset: z.number().int().nonnegative(), ...Counters, keyStats: KeyStats, bestCombo: z.number().int().min(0).max(10_000_000).optional(), charStreak: CharStreak.optional() }).strict();
 export type TypingBookCompleteRequest = z.infer<typeof TypingBookCompleteRequestSchema>;
 
 export const TypingOverviewSchema = z
@@ -194,6 +198,7 @@ export const TypingAnalyticsSchema = z
         /** characters typed in all finished attempts of this mode, and the best combo (Words: words in a row; Books: characters in a row) */
         totalChars: z.number().int().optional(),
         bestCombo: z.number().int().nullable().optional(),
+        bestCharStreak: z.number().int().nullable().optional(),
         /** Words only: the memory check after levels (words typed from their translation) */
         recall: z.object({ checks: z.number().int(), words: z.number().int(), withoutHelpRate: z.number().nullable(), avgPoints: z.number().nullable() }).strict().optional(),
       })
@@ -212,9 +217,10 @@ export const TypingAnalyticsSchema = z
         accuracy: z.array(Point),
         score: z.array(Point),
         /** every day of the window, zero when nothing happened */
-        daily: z.array(z.object({ date: z.string(), attempts: z.number().int(), activeSeconds: z.number().int(), chars: z.number().int().optional() }).strict()),
+        daily: z.array(z.object({ date: z.string(), attempts: z.number().int(), activeSeconds: z.number().int(), chars: z.number().int().optional(), cumulativeChars: z.number().int().optional() }).strict()),
         duration: z.array(Point),
         personalBest: z.array(z.object({ at: z.string(), wpm: z.number(), score: z.number() }).strict()),
+        charStreak: z.array(z.object({ at: z.string(), value: z.number().int().nullable(), status: z.string() }).strict()).optional(),
       })
       .strict(),
   })

@@ -23,9 +23,11 @@ import { registerBackupRoutes } from "./routes/backups.js";
 import { registerVocabularyRoutes } from "./routes/vocabulary.js";
 import { registerVocabularyExpressionRoutes } from "./routes/vocabularyExpressions.js";
 import { registerVocabularySpeechRoutes } from "./routes/vocabularySpeech.js";
+import { registerVocabularyMatchRoutes } from "./routes/vocabularyMatch.js";
 import { registerGroqStatusRoute } from "./routes/groqStatus.js";
 import { registerVocabularyImageRoutes } from "./routes/vocabularyImages.js";
 import { registerVocabularyPracticeRoutes } from "./routes/vocabularyPractice.js";
+import { registerWordLessonRoutes } from "./routes/wordLessons.js";
 import { registerUiRoutes } from "./routes/ui.js";
 import { registerTutorRoutes } from "./routes/tutor.js";
 import { registerAttemptRoutes } from "./routes/attempts.js";
@@ -46,6 +48,8 @@ import { registerAiModelRoutes } from "./routes/aiModel.js";
 import { LOCAL_MODEL_TAG } from "./domain/ai/config.js";
 import type { ModelResidency } from "./queue/modelResidency.js";
 import { registerSecurity } from "./security.js";
+import { registerConversationRoutes } from "./routes/conversation.js";
+import { LocalDictationAsr, type DictationAsr } from "./domain/typing/dictation/asr.js";
 
 export interface AppDeps {
   config: AppConfig;
@@ -73,9 +77,11 @@ export interface AppDeps {
   elevenLabsVoiceIds?: string[];
   /** optional e-mail for the public translation service (raises its daily quota); from `.env` */
   translateEmail?: string;
+  deeplKey?: string;
   groqKey?: string;
   /** Audio Dictation: Piper, the speech check and the content files; built from the config when omitted */
   dictation?: DictationEnv;
+  conversationAsr?: DictationAsr;
   aiStatus?: () => Capabilities["ai"] | Promise<Capabilities["ai"]>;
   /** HMAC key for the session cookie / CSRF token; random per start when omitted. */
   csrfSecret?: Buffer;
@@ -128,14 +134,20 @@ export async function buildApp(deps: AppDeps): Promise<FastifyInstance> {
   const base = { now: deps.attempts?.now ?? (() => new Date()), newId: deps.attempts?.newId ?? randomUUID };
   registerSessionRoutes(app, db, base, { ...(deps.sessions ?? {}), onLease: () => deps.scheduler?.kick(), onSessionEnd: (id) => void deps.stt?.stopForSession(id), onVoiceDone: async (id) => { deps.scheduler?.releaseVoiceHold(id); await deps.stt?.stopForSession(id); deps.scheduler?.kick(); } });
   registerVocabularyPracticeRoutes(app, db, base);
+  registerWordLessonRoutes(app, db, base, { onQueued: () => deps.scheduler?.kick(), stt: deps.stt });
   const dictation = deps.dictation ?? createDictationEnv(config, deps.groqKey);
+  // Chat verification runs outside the GPU queue: cloud Whisper, or a dedicated CPU worker when no Groq key exists.
+  const conversationAsr = deps.conversationAsr ?? (deps.groqKey ? dictation.asr : new LocalDictationAsr({ script: path.join(config.projectRoot, "workers", "dictation_asr", "check.py"), device: "cpu" }));
+  if (!deps.groqKey) app.addHook("onClose", async () => { await conversationAsr.stop(); });
+  registerConversationRoutes(app, db, base, { topics: dictation.topics, onQueued: () => deps.scheduler?.kick(), stt: deps.stt, dictation, asr: conversationAsr });
   registerTypingRoutes(app, db, base, { booksDir: path.join(config.dataRoot, "typing-books"), dictation });
   registerTypingBookSpeechRoutes(app, db, dictation);
   registerVoiceRoutes(app, db, { env: dictation, sampleDir: path.join(config.dataRoot, "voice-samples") });
   registerTypingDictationRoutes(app, db, base, { env: dictation, onQueued: () => deps.scheduler?.kick() });
-  registerTranslateRoutes(app, { ...(deps.translateEmail ? { email: deps.translateEmail } : {}) });
+  registerTranslateRoutes(app, { ...(deps.translateEmail ? { email: deps.translateEmail } : {}), ...(deps.deeplKey ? { deeplKey: deps.deeplKey } : {}) });
   registerVocabularyImageRoutes(app, config.vocabularyImagesDir, db);
   registerVocabularySpeechRoutes(app, db, base, { key: deps.elevenLabsKey, voiceId: deps.elevenLabsVoiceId, voiceIds: deps.elevenLabsVoiceIds, cacheDir: path.join(config.dataRoot, "vocabulary-speech") });
+  registerVocabularyMatchRoutes(app, db, base);
   registerGroqStatusRoute(app, { key: deps.groqKey });
   registerUiRoutes(app);
   registerQueueRoutes(app, db, base, deps.scheduler ?? null);

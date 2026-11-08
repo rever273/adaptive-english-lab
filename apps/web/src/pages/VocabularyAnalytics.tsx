@@ -1,5 +1,6 @@
 import { useEffect, useState } from "react";
 import { Chart } from "../components/Chart";
+import { PracticeActivityChart } from "../components/PracticeActivityChart";
 import { ApiRequestError, fetchVocabAnalytics, type Rate, type VocabAnalytics as Data } from "../api";
 
 const FAMILY: Record<string, { label: string; icon: string; note: string }> = {
@@ -53,23 +54,11 @@ function DailyChart({ series }: { series: Data["series"] }) {
  * Vocabulary Analytics (vocabulary TZ, stage F): its own filters and figures, all counted on the server from stored events. XP shows
  * activity; accuracy shows first independent tries with their sample size; "learned" is the learner's own flag, not proof.
  */
-export function VocabularyAnalytics() {
-  const [days, setDays] = useState<"7" | "30" | "90" | "all">(() => {
-    try {
-      return (localStorage.getItem("vocabAnalytics.days") as "7" | "30" | "90" | "all" | null) ?? "30";
-    } catch {
-      return "30";
-    }
-  });
+export function VocabularyAnalytics({ days = "30" }: { days?: "7" | "30" | "90" | "all" }) {
   const [d, setD] = useState<Data | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [allWeak, setAllWeak] = useState(false);
   useEffect(() => {
-    try {
-      localStorage.setItem("vocabAnalytics.days", days);
-    } catch {
-      /* convenience only */
-    }
     setD(null);
     fetchVocabAnalytics(days).then(setD).catch((e) => setError(e instanceof ApiRequestError ? e.message : "Cannot load vocabulary analytics."));
   }, [days]);
@@ -77,29 +66,27 @@ export function VocabularyAnalytics() {
   return (
     <section className="card" aria-labelledby="va-h" data-testid="vocab-analytics">
       <h2 id="va-h"><i className="pi pi-chart-line" aria-hidden="true" /> Vocabulary analytics</h2>
-      <div className="filter-row">
-        <div className="segmented" role="radiogroup" aria-label="Period">
-          {(["7", "30", "90", "all"] as const).map((v) => (
-            <label key={v} className={days === v ? "on" : ""}><input type="radio" name="va-days" checked={days === v} onChange={() => setDays(v)} /> {v === "all" ? "All time" : `${v} days`}</label>
-          ))}
-        </div>
-        {d && <span className="muted small">Time zone {d.window.timezone}. Rates need at least {d.minSample} first tries.</span>}
-      </div>
       {error && <p className="notice notice-error" role="alert">{error}</p>}
       {!d ? (
         !error && <p role="status">Loading…</p>
       ) : (
         <>
-          <div className="stat-grid">
+          <div className="stat-grid-2 vocab-analytics-stats">
             <div className="stat stat-info"><i className="pi pi-bookmark-fill" aria-hidden="true" /><span className="stat-value">Lv {d.xp.level}</span><span className="stat-label">{d.xp.total} Vocabulary XP (activity, not a grade)</span></div>
             <div className="stat stat-ok"><i className="pi pi-check-circle" aria-hidden="true" /><span className="stat-value">{pct(d.overall) === null ? "—" : `${pct(d.overall)}%`}</span><span className="stat-label">first try right · {d.overall.correct}/{d.overall.total}</span></div>
             <div className="stat stat-info"><i className="pi pi-eye" aria-hidden="true" /><span className="stat-value">{d.encounters.uniqueWordsShown}</span><span className="stat-label">your words actually shown · {d.encounters.displays} times</span></div>
             <div className="stat stat-info"><i className="pi pi-book" aria-hidden="true" /><span className="stat-value">{d.encounters.typedInBooks.words}</span><span className="stat-label">your words typed in Books · {d.encounters.typedInBooks.occurrences} times</span></div>
+            <div className="stat stat-info"><i className="pi pi-check-square" aria-hidden="true" /><span className="stat-value">{d.growth.learnedNow}</span><span className="stat-label">words marked learned</span></div>
             <div className="stat stat-skip"><i className="pi pi-database" aria-hidden="true" /><span className="stat-value">{d.encounters.bankWords}</span><span className="stat-label">words present in approved exercises · {d.encounters.bankContexts} places</span></div>
           </div>
 
-          <h3>Day by day</h3>
-          <DailyChart series={d.series} />
+          <div className="charts-grid"><PracticeActivityChart mode="vocabulary" days={days} /><div><h3>Day by day</h3><DailyChart series={d.series} /></div></div>
+
+          <h3>Your dictionary</h3>
+          {d.growth.series.length === 0 ? <p className="muted">No words added or marked learned in this period.</p> : <Chart ariaLabel="Dictionary additions and words marked learned" bars={{ color: "#6ab7ff", format: (v) => `${Math.round(v)}` }} bars2={{ color: "#51b788", format: (v) => `${Math.round(v)}` }} legend="Blue bars: words added; green bars: words you marked learned on that date." points={d.growth.series.map((g) => ({ key: g.date, label: g.date.slice(5), bar: g.added, bar2: g.learned, tip: [g.date, `Added: ${g.added}`, `Marked learned: ${g.learned}`] }))} />}
+          <p className="muted small">
+            {d.growth.learnedNow} word(s) are marked learned now{d.growth.learnedWithoutDate > 0 ? `; ${d.growth.learnedWithoutDate} were marked before dates were recorded` : ""}. “Learned” is your own mark, not a test result.
+          </p>
 
           <h3>Three kinds of evidence <span className="muted small">(never added together into one score)</span></h3>
           <div className="rate-grid">
@@ -110,7 +97,7 @@ export function VocabularyAnalytics() {
           </div>
           <p className="muted small">Not in any rate: {d.overall.skipped} skipped, {d.overall.assisted} with a hint or the answer shown first, {d.overall.pending} not confirmed yet. “I don’t know” counts as a miss.</p>
 
-          <h3>Words that need another look <span className="muted small">(missed on {d.weakMinMisses}+ first tries)</span></h3>
+          <div className="card"><h3>Words that need another look <span className="muted small">(missed on {d.weakMinMisses}+ first tries)</span></h3>
           {d.weak.length === 0 ? (
             <p className="muted">No word has been missed on {d.weakMinMisses} or more first tries in this period.</p>
           ) : (
@@ -141,25 +128,7 @@ export function VocabularyAnalytics() {
             </div>
           )}
 
-          <h3>Your dictionary</h3>
-          {d.growth.series.length === 0 ? (
-            <p className="muted">No words added or marked learned in this period.</p>
-          ) : (
-            <ul className="growth">
-              {d.growth.series.map((g) => (
-                <li key={g.date}>
-                  <span className="growth-date">{g.date}</span>
-                  <span className="growth-bars">
-                    {g.added > 0 && <span className="growth-added" title={`${g.added} added`}>+{g.added} added</span>}
-                    {g.learned > 0 && <span className="growth-learned" title={`${g.learned} marked learned`}>{g.learned} marked learned</span>}
-                  </span>
-                </li>
-              ))}
-            </ul>
-          )}
-          <p className="muted small">
-            {d.growth.learnedNow} word(s) are marked learned now{d.growth.learnedWithoutDate > 0 ? `; ${d.growth.learnedWithoutDate} were marked before dates were recorded` : ""}. “Learned” is your own mark, not a test result.
-          </p>
+          </div>
         </>
       )}
     </section>

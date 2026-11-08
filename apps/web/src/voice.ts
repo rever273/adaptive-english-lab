@@ -91,6 +91,8 @@ export interface VoiceController {
   prepare: () => void;
   /** discard the draft and go back to typing */
   clear: () => void;
+  /** close the server-side voice session now (it holds the graphics card with local speech recognition) */
+  close: () => void;
 }
 
 /** the card may still be busy with a background model for a few seconds: these answers mean "wait", not "failed" */
@@ -104,7 +106,10 @@ const friendly = (e: unknown): string => {
   return "Voice is not available right now. You can type your answer.";
 };
 
-export function useVoice(sessionId: string | null, tabId: string, enabled: boolean): VoiceController {
+/** opens the server-side voice session; a practice session by default (a lesson run passes its own starter, which must be a stable function) */
+type VoiceStarter = (ownerId: string, tabId: string) => ReturnType<typeof sttStart>;
+
+export function useVoice(sessionId: string | null, tabId: string, enabled: boolean, starter: VoiceStarter = sttStart): VoiceController {
   const [state, setState] = useState<VoiceState>({ phase: "idle" });
   const [provider, setProvider] = useState<"groq" | "local" | null>(null);
   const stream = useRef<string | null>(null);
@@ -136,7 +141,7 @@ export function useVoice(sessionId: string | null, tabId: string, enabled: boole
   const finish = useCallback(async () => {
     const cap = capture.current;
     capture.current = null;
-    if (!cap) return;
+    if (!cap) { if (stateRef.current.phase === "recording") setState({ phase: "idle" }); return; }
     const id = stream.current;
     const current = generation.current;
     setState({ phase: "transcribing" });
@@ -159,14 +164,20 @@ export function useVoice(sessionId: string | null, tabId: string, enabled: boole
 
   /** opens the server-side voice session, waiting (not failing) while the card is still being freed */
   const opening = useRef<Promise<void> | null>(null);
+  const openingGeneration = useRef<number | null>(null);
   const open = useCallback(async (current: number) => {
     if (stream.current) return;
-    if (opening.current) return opening.current;
+    while (opening.current) {
+      if (openingGeneration.current === current) return opening.current;
+      await opening.current.catch(() => undefined);
+      if (current !== generation.current || stream.current) return;
+    }
+    openingGeneration.current = current;
     opening.current = (async () => {
       const deadline = Date.now() + WAIT_LIMIT_MS;
       for (;;) {
         try {
-          const started = await sttStart(sessionRef.current!, tabId);
+          const started = await starter(sessionRef.current!, tabId);
           const id = started.streamId;
           if (current !== generation.current) {
             void sttStop(id).catch(() => undefined);
@@ -182,9 +193,10 @@ export function useVoice(sessionId: string | null, tabId: string, enabled: boole
       }
     })().finally(() => {
       opening.current = null;
+      openingGeneration.current = null;
     });
     return opening.current;
-  }, [tabId]);
+  }, [tabId, starter]);
 
   const prepare = useCallback(() => {
     if (!enabled || !sessionRef.current || stream.current) return;
@@ -238,5 +250,6 @@ export function useVoice(sessionId: string | null, tabId: string, enabled: boole
     stopRecording: finish,
     prepare,
     clear: () => setState({ phase: "idle" }),
+    close: () => { release(); setState({ phase: "idle" }); },
   };
 }

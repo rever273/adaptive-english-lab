@@ -109,6 +109,7 @@ export const NIMBLE_TRIAGE_V2 = {
   reviewThreshold: 0.12,
 } as const;
 
+import { WORD_LESSON_KEEP_PROMPT, WORD_LESSON_KEEP_SYSTEM_V1, WORD_LESSON_SENSE_PROMPT, WORD_LESSON_SENSE_SYSTEM_V1, WORD_LESSON_PAIRS_PROMPT, WORD_LESSON_PAIRS_SYSTEM_V1, WORD_LESSON_CHECK_PROMPT, WORD_LESSON_CHECK_SYSTEM_V1, WORD_LESSON_PROMPT, WORD_LESSON_REVIEW_PROMPT, WORD_LESSON_REVIEW_SYSTEM_V1, WORD_LESSON_SYSTEM_V1 } from "../wordLessons/prompts.js";
 import { GENERATION_SYSTEM_V2, GENERATION_SYSTEM_V3, GENERATION_SYSTEM_V4, GENERATION_SYSTEM_V5, GENERATION_SYSTEM_V6, GENERATION_SYSTEM_V7, GENERATION_SYSTEM_V8, GENERATION_SYSTEM_V9 } from "../content/batches/draftFormats.js";
 import { VOCABULARY_SYSTEM, VOCABULARY_SYSTEM_V2 as VOCABULARY_GENERATION_SYSTEM_V2, VOCABULARY_SYSTEM_V3 as VOCABULARY_GENERATION_SYSTEM_V3, VOCABULARY_SYSTEM_V4 as VOCABULARY_GENERATION_SYSTEM_V4, VOCABULARY_SYSTEM_V5 as VOCABULARY_GENERATION_SYSTEM_V5, VOCABULARY_SYSTEM_V6 as VOCABULARY_GENERATION_SYSTEM_V6, VOCABULARY_SYSTEM_V7 as VOCABULARY_GENERATION_SYSTEM_V7, VOCABULARY_SYSTEM_V8 as VOCABULARY_GENERATION_SYSTEM_V8 } from "../content/batches/vocabularyDrafts.js";
 
@@ -168,6 +169,12 @@ export const PROMPTS: Record<string, PromptDef> = {
   "dictation-v1": { id: "dictation-v1", purpose: "generation", template: DICTATION_SYSTEM_V1 },
   "dictation-v2": { id: "dictation-v2", purpose: "generation", template: DICTATION_SYSTEM_V2 },
   "dictation-v3": { id: "dictation-v3", purpose: "generation", template: DICTATION_SYSTEM_V3 },
+  [WORD_LESSON_PROMPT]: { id: WORD_LESSON_PROMPT, purpose: "generation", template: WORD_LESSON_SYSTEM_V1 },
+  [WORD_LESSON_REVIEW_PROMPT]: { id: WORD_LESSON_REVIEW_PROMPT, purpose: "generation", template: WORD_LESSON_REVIEW_SYSTEM_V1 },
+  [WORD_LESSON_KEEP_PROMPT]: { id: WORD_LESSON_KEEP_PROMPT, purpose: "generation", template: WORD_LESSON_KEEP_SYSTEM_V1 },
+  [WORD_LESSON_SENSE_PROMPT]: { id: WORD_LESSON_SENSE_PROMPT, purpose: "generation", template: WORD_LESSON_SENSE_SYSTEM_V1 },
+  [WORD_LESSON_PAIRS_PROMPT]: { id: WORD_LESSON_PAIRS_PROMPT, purpose: "generation", template: WORD_LESSON_PAIRS_SYSTEM_V1 },
+  [WORD_LESSON_CHECK_PROMPT]: { id: WORD_LESSON_CHECK_PROMPT, purpose: "analysis", template: WORD_LESSON_CHECK_SYSTEM_V1 },
   "tutor-v1": { id: "tutor-v1", purpose: "tutor", template: TUTOR_SYSTEM_V1 },
   "tutor-v2": { id: "tutor-v2", purpose: "tutor", template: TUTOR_SYSTEM_V2 },
   "vocabulary-v2": { id: "vocabulary-v2", purpose: "vocabulary", template: VOCABULARY_SYSTEM_V2 },

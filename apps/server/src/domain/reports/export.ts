@@ -4,7 +4,7 @@ import path from "node:path";
 import type { Db } from "../../db/open.js";
 import type { Watermarks } from "./facts.js";
 import { discoveryAudit, isAiDetected, listFindings, type FindingView } from "./findings.js";
-import { REPORT_VERSION, type Ratio } from "./metrics.js";
+import { type Ratio } from "./metrics.js";
 import type { SavedReport } from "./report.js";
 
 /** Spreadsheet-safe CSV cell: quotes, newlines and delimiters escaped, and a leading = + - @ (or tab/CR) neutralised so a cell can never be a formula. */
@@ -92,7 +92,7 @@ function markdown(s: SavedReport, findings: FindingView[], disc: ReturnType<type
   return [
     `# English Lab report ${s.id}`,
     ``,
-    `- version ${REPORT_VERSION}; as of ${r.asOf} (${r.timezone}); cohort ${r.cohort.criterionVersion} / ${r.cohort.difficulty} / ${r.cohort.protocol}`,
+    `- version ${r.version}; as of ${r.asOf} (${r.timezone}); cohort ${r.cohort.criterionVersion} / ${r.cohort.difficulty} / ${r.cohort.protocol}`,
     `- input hash ${s.inputHash}; event watermarks ${JSON.stringify(s.watermarks)}; created ${s.createdAt}`,
     ``,
     `## Verified results (confirmed, unaided first attempts unless stated)`,
@@ -141,7 +141,7 @@ export function writeExport(db: Db, exportsRoot: string, saved: SavedReport, asO
     "errors.csv": errorsCsv(findings),
     "findings.csv": findingsCsv(findings),
     "summary.csv": summaryCsv(saved),
-    "report.json": JSON.stringify({ schema_version: "report-export-v1", versions: { report: REPORT_VERSION }, run: { id: saved.id, inputHash: saved.inputHash, createdAt: saved.createdAt, watermarks: w, taxonomyId: saved.taxonomyId }, report: saved.report, findings, discovery: disc }, null, 2),
+    "report.json": JSON.stringify({ schema_version: "report-export-v1", versions: { report: saved.report.version }, run: { id: saved.id, inputHash: saved.inputHash, createdAt: saved.createdAt, watermarks: w, taxonomyId: saved.taxonomyId }, report: saved.report, findings, discovery: disc }, null, 2),
     "report.md": markdown(saved, findings, disc),
   };
   const files: ExportResult["files"] = [];

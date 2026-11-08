@@ -55,6 +55,7 @@ export class BooksScene {
   private engine: BooksEngineState;
   private level: number;
   private paused: () => boolean;
+  private onActiveFrame?: (dt: number) => void;
   private bg = makeBackground(21);
   private visuals = new Map<number, MeteorVisual>();
   private fx = new Effects();
@@ -76,12 +77,13 @@ export class BooksScene {
   private spots: Spot[] = [];
   private spotsFor = "";
 
-  constructor(canvas: HTMLCanvasElement, opts: { engine: BooksEngineState; level: number; paused: () => boolean }) {
+  constructor(canvas: HTMLCanvasElement, opts: { engine: BooksEngineState; level: number; paused: () => boolean; onActiveFrame?: (dt: number) => void }) {
     this.canvas = canvas;
     this.ctx = canvas.getContext("2d")!;
     this.engine = opts.engine;
     this.level = opts.level;
     this.paused = opts.paused;
+    this.onActiveFrame = opts.onActiveFrame;
     this.resize();
   }
 
@@ -90,11 +92,13 @@ export class BooksScene {
     this.last = performance.now();
     const loop = (t: number) => {
       if (!this.running) return;
-      const dt = clampDt(t - this.last);
+      const elapsed = Math.max(0, t - this.last);
+      const dt = clampDt(elapsed);
       this.last = t;
       if (!this.paused()) {
         this.clock += dt;
         this.step(dt);
+        this.onActiveFrame?.(elapsed);
       }
       this.draw();
       this.raf = requestAnimationFrame(loop);

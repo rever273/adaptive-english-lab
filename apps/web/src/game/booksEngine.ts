@@ -1,4 +1,4 @@
-import { buildKeys, splitSentences, tokensOf, type TypingToken } from "@english-lab/contracts";
+import { buildKeys, splitSentences, tokensOf, type BookKeyRulesVersion, type TypingToken } from "@english-lab/contracts";
 
 /**
  * Pure Books-game logic: no DOM, no Date.now. The host feeds `tick(dtMs)` (to accumulate inter-key gaps) and `key()`. The text
@@ -37,6 +37,8 @@ export interface BooksEngineState {
    *  corrected after a mistake is never counted. */
   combo: number;
   bestCombo: number;
+  charStreak: number;
+  bestCharStreak: number;
   /** game score: one point per combo character times the tier multiplier. Display only. */
   comboScore: number;
   /** counts the milestones reached (the scene flashes when it changes) */
@@ -68,25 +70,37 @@ export interface BooksEngineConfig {
   initialActiveMs: number;
   initialCharsTyped: number;
   initialErrors: number;
+  keyRulesVersion?: BookKeyRulesVersion;
+  charStreak?: { current: number; best: number } | null;
 }
 
 /** All required keys of `[start, end)` in the level text, in order. */
-export function keysForRange(text: string, start: number, end: number): Array<{ offset: number; key: string }> {
+export function keysForRange(text: string, start: number, end: number, rules: BookKeyRulesVersion = 1): Array<{ offset: number; key: string }> {
   const out: Array<{ offset: number; key: string }> = [];
   for (const s of splitSentences(text)) {
     if (s.end <= start) continue;
     if (s.start >= end) break;
-    for (const k of buildKeys(text, Math.max(s.start, start), Math.min(s.end, end))) out.push(k);
+    for (const k of buildKeys(text, Math.max(s.start, start), Math.min(s.end, end), rules)) out.push(k);
   }
   return out;
+}
+
+/** The last sentence completely behind the next required key. */
+export function previousCompletedSentence(sentences: ReadonlyArray<{ start: number; end: number }>, offset: number): { start: number; end: number } | null {
+  let previous = null;
+  for (const sentence of sentences) {
+    if (sentence.end > offset) break;
+    previous = sentence;
+  }
+  return previous;
 }
 
 const MAX_GAP_MS = 5000;
 
 export function createBooksEngine(config: BooksEngineConfig): BooksEngineState {
   const localStart = Math.max(0, config.initialOffset - config.startOffset);
-  const allKeys = keysForRange(config.text, 0, config.text.length);
-  const tokens = splitSentences(config.text).flatMap((sent) => tokensOf(config.text, sent));
+  const allKeys = keysForRange(config.text, 0, config.text.length, config.keyRulesVersion);
+  const tokens = splitSentences(config.text).flatMap((sent) => tokensOf(config.text, sent, config.keyRulesVersion));
   const remaining = allKeys.filter((k) => k.offset >= localStart);
   const offset = remaining.length ? remaining[0]!.offset : config.text.length;
   return {
@@ -107,6 +121,8 @@ export function createBooksEngine(config: BooksEngineConfig): BooksEngineState {
     keyStats: new Map(),
     combo: 0,
     bestCombo: 0,
+    charStreak: config.charStreak?.current ?? 0,
+    bestCharStreak: config.charStreak?.best ?? 0,
     comboScore: 0,
     milestoneSeq: 0,
   };
@@ -167,6 +183,7 @@ export function handleBookKey(s: BooksEngineState, key: string): BookKeyResult {
   const facts = (pair: string) => s.keyStats.get(pair) ?? s.keyStats.set(pair, { count: 0, totalMs: 0, errors: 0 }).get(pair)!;
   const wrong = (): BookKeyResult => {
     s.combo = 0;
+    s.charStreak = 0;
     const wp = pairAt(s.offset);
     if (wp && s.errors.length === 0) facts(wp).errors++; // the first wrong key of an expected letter counts against its pair
 
@@ -185,6 +202,9 @@ export function handleBookKey(s: BooksEngineState, key: string): BookKeyResult {
       f.count++;
       f.totalMs += Math.round(gap);
     }
+    // Correct keystrokes after fixing an error start a new character streak.
+    s.charStreak++;
+    s.bestCharStreak = Math.max(s.bestCharStreak, s.charStreak);
     // a character that was corrected after a mistake does not count again; every other one extends the combo
     if (!s.slipped.has(at)) {
       s.combo++;

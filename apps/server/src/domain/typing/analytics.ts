@@ -22,12 +22,10 @@ function dateList(days: number | null, timezone: string, now: Date, minDate: str
     return out;
   }
   if (!minDate) return [];
-  const start = new Date(minDate + "T00:00:00");
-  const end = new Date(localDateIn(timezone, now) + "T00:00:00");
+  const start = Date.parse(minDate + "T00:00:00Z");
+  const end = Date.parse(localDateIn(timezone, now) + "T00:00:00Z");
   const out: string[] = [];
-  for (let d = start; d <= end; d = new Date(d.getTime() + 86_400_000)) {
-    out.push(localDateIn(timezone, d));
-  }
+  for (let t = start; t <= end; t += 86_400_000) out.push(new Date(t).toISOString().slice(0, 10));
   return out;
 }
 
@@ -82,7 +80,21 @@ export function typingAnalytics(db: Db, input: AnalyticsInput): TypingAnalytics 
     cur.chars += r.chars_typed;
     perDate.set(d, cur);
   }
-  const daily = dates.map((d) => ({ date: d, attempts: perDate.get(d)?.attempts ?? 0, activeSeconds: perDate.get(d)?.activeSeconds ?? 0, chars: perDate.get(d)?.chars ?? 0 }));
+  let cumulative = 0;
+  const allDates = [...perDate.keys()].sort();
+  let cursor = 0;
+  const daily = dates.map((d) => {
+    while (cursor < allDates.length && allDates[cursor]! <= d) cumulative += perDate.get(allDates[cursor++]!)!.chars;
+    return { date: d, attempts: perDate.get(d)?.attempts ?? 0, activeSeconds: perDate.get(d)?.activeSeconds ?? 0, chars: perDate.get(d)?.chars ?? 0, cumulativeChars: cumulative };
+  });
+
+  // Older Books sessions may have a recorded combo but could have lost earlier
+  // visits on reload. Old Words combos count words, not characters.
+  const recordedCharStreak = (r: TypingSessionRow): number | null => r.best_char_streak ?? (mode === "books" ? r.best_combo : null);
+  const values = finished.map(recordedCharStreak).filter((n): n is number => n !== null);
+  const visibleDates = new Set(dates);
+  const charStreak = finished.filter((r) => input.days === null || visibleDates.has(localDateIn(timezone, new Date(r.ended_at ?? r.started_at))))
+    .map((r) => ({ at: r.ended_at ?? r.started_at, value: recordedCharStreak(r), status: r.status }));
 
   const summary = {
     totalActiveMs,
@@ -95,6 +107,7 @@ export function typingAnalytics(db: Db, input: AnalyticsInput): TypingAnalytics 
     avgAccuracy,
     maxScore,
     totalChars: finished.reduce((a, r) => a + r.chars_typed, 0),
+    bestCharStreak: values.length ? Math.max(...values) : null,
     bestCombo: finished.reduce<number | null>((best, r) => (r.best_combo !== null && r.best_combo !== undefined && (best === null || r.best_combo > best) ? r.best_combo : best), null),
     last: lastRow ? buildTypingResult(db, lastRow) : null,
     ...(mode === "words"
@@ -106,7 +119,7 @@ export function typingAnalytics(db: Db, input: AnalyticsInput): TypingAnalytics 
     mode,
     window: { days: input.days, timezone },
     summary,
-    series: { wpm, accuracy, score, daily, duration, personalBest },
+    series: { wpm, accuracy, score, daily, duration, personalBest, charStreak },
     keyInsights: keyInsights(db),
   };
 }

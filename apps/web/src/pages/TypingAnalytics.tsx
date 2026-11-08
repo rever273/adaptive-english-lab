@@ -1,8 +1,10 @@
 import { useEffect, useState } from "react";
 import { fetchTypingAnalytics, type TypingAnalyticsData as Data } from "../api";
 import { Chart } from "../components/Chart";
+import { CumulativeCharacters } from "../components/CharacterCharts";
 import { fmtTotalTime } from "../format";
 import { TypingDictationAnalytics } from "./TypingDictationAnalytics";
+import { MODE_INFO } from "./Journey";
 
 const fmtDay = (iso: string) => new Date(iso.slice(0, 10) + "T00:00:00").toLocaleDateString("en-AU", { day: "numeric", month: "short" });
 const fmtWpm = (v: number | null) => (v === null ? "—" : String(Math.round(v)));
@@ -11,14 +13,16 @@ const SERIES_COLOR = { wpm: "#6ab7ff", accuracy: "#51b788", score: "#f3c94d", du
 
 function LineChart({ title, points, unit, color, cpm }: { title: string; points: Data["series"]["wpm"]; unit: string; color: keyof typeof SERIES_COLOR; cpm?: boolean }) {
   if (points.length === 0) return <figure className="chart-wrap"><figcaption className="muted small">{title}: no data yet</figcaption></figure>;
-  const fmt = (v: number) => `${Math.round(v * 10) / 10}${unit}`;
+  const fmt = (v: number) => `${Math.round((color === "duration" ? v / 60 : v) * 10) / 10}${unit}`;
+  const eligible = points.filter((p) => p.status === "completed");
+  const best = (color === "wpm" || color === "score") && eligible.length ? Math.max(...eligible.map((p) => p.value)) : null;
   return (
     <div>
       <h4 className="chart-title">{title}</h4>
       <Chart
         ariaLabel={title}
         line={{ color: SERIES_COLOR[color], format: fmt }}
-        points={points.map((p, i) => ({ key: `${p.at}-${i}`, label: fmtDay(p.at), line: p.value, muted: p.status !== "completed", tip: [fmtDay(p.at), `${title}: ${fmt(p.value)}`, ...(cpm ? [`CPM: ${Math.round(p.value * 5)}`] : []), `Attempt: ${p.status}`] }))}
+        points={points.map((p, i) => ({ key: `${p.at}-${i}`, label: fmtDay(p.at), line: p.value, muted: p.status !== "completed", highlight: best !== null && p.status === "completed" && p.value === best, tip: [fmtDay(p.at), `${title}: ${fmt(p.value)}`, ...(cpm ? [`CPM: ${Math.round(p.value * 5)}`] : []), `Attempt: ${p.status}`, ...(best !== null && p.status === "completed" && p.value === best ? ["Best completed result on this chart"] : [])] }))}
         secondary={cpm ? { factor: 5, color: "#9aa4b8", format: (v) => `${Math.round(v)}` } : undefined}
         legend={cpm ? "Left axis: WPM · right axis: CPM (characters per minute = WPM × 5) · hollow points are failed or interrupted attempts" : "Hollow points are failed or interrupted attempts"}
       />
@@ -29,17 +33,12 @@ function LineChart({ title, points, unit, color, cpm }: { title: string; points:
 type Mode = "words" | "books" | "dictation";
 type Days = "7" | "30" | "90" | "all";
 
-function Toolbar({ mode, setMode, days, setDays }: { mode: Mode; setMode: (m: Mode) => void; days: Days; setDays: (d: Days) => void }) {
+function Toolbar({ mode, setMode }: { mode: Mode; setMode: (m: Mode) => void }) {
   return (
     <div className="analytics-toolbar">
       <div className="segmented" role="radiogroup" aria-label="Typing mode">
         {(["words", "books", "dictation"] as const).map((m) => (
-          <label key={m} className={mode === m ? "on" : ""}><input type="radio" name="typing-mode" checked={mode === m} onChange={() => setMode(m)} /> {m === "words" ? "Words" : m === "books" ? "Books" : "Audio Dictation"}</label>
-        ))}
-      </div>
-      <div className="segmented" role="radiogroup" aria-label="Period">
-        {(["7", "30", "90", "all"] as const).map((d) => (
-          <label key={d} className={days === d ? "on" : ""}><input type="radio" name="typing-days" checked={days === d} onChange={() => setDays(d)} /> {d === "all" ? "All" : `${d}d`}</label>
+          <label key={m} className={mode === m ? "on" : ""}><input type="radio" name="typing-mode" checked={mode === m} onChange={() => setMode(m)} /> <i className={`pi ${MODE_INFO[m].icon}`} aria-hidden="true" /> {m === "words" ? "Words" : m === "books" ? "Books" : "Audio Dictation"}</label>
         ))}
       </div>
     </div>
@@ -52,26 +51,20 @@ function KeyInsights({ data }: { data: Data["keyInsights"] }) {
   return (
     <div className="card key-insights">
       <h4 className="chart-title">Letter pairs to practise</h4>
-      <div className="key-insights-cols">
-        <div>
-          <p className="small"><strong>Slowest</strong>{data.typicalMs !== null && <span className="muted"> (typical gap {data.typicalMs} ms)</span>}</p>
-          <ul className="small">{data.slowPairs.map((p) => <li key={p.pair}><code>{p.pair}</code> · {p.meanMs} ms · {p.count}×</li>)}</ul>
-        </div>
-        <div>
-          <p className="small"><strong>Most mistyped</strong></p>
-          <ul className="small">{data.errorPairs.length === 0 ? <li className="muted">none yet</li> : data.errorPairs.map((p) => <li key={p.pair}><code>{p.pair}</code> · {Math.round(p.errorRate * 100)}% wrong · {p.count}×</li>)}</ul>
-        </div>
-      </div>
+      {data.typicalMs !== null && <p className="muted small">Typical gap: {data.typicalMs} ms</p>}
+      <div className="table-wrap"><table className="data-table small"><thead><tr><th>Kind</th><th>Letter pair</th><th>Result</th><th>Samples</th></tr></thead><tbody>
+        {data.slowPairs.map((p) => <tr key={`slow-${p.pair}`}><td>Slowest</td><td><code>{p.pair}</code></td><td>{p.meanMs} ms</td><td>{p.count}</td></tr>)}
+        {data.errorPairs.map((p) => <tr key={`error-${p.pair}`}><td>Most mistyped</td><td><code>{p.pair}</code></td><td>{Math.round(p.errorRate * 100)}% wrong</td><td>{p.count}</td></tr>)}
+      </tbody></table></div>
       <p className="muted small">About one word in ten in the next Words levels contains one of the weakest pairs. The time is the gap between two correct key presses (pauses over 2 s are ignored).</p>
     </div>
   );
 }
 
 /** the dictation mode has its own endpoint: its value never reaches the Words/Books analytics request */
-export function TypingAnalytics() {
+export function TypingAnalytics({ days = "30" }: { days?: Days }) {
   const [mode, setMode] = useState<Mode>("words");
-  const [days, setDays] = useState<Days>("30");
-  const toolbar = <Toolbar mode={mode} setMode={setMode} days={days} setDays={setDays} />;
+  const toolbar = <Toolbar mode={mode} setMode={setMode} />;
   if (mode === "dictation") return <TypingDictationAnalytics days={days} toolbar={toolbar} />;
   return <ClassicAnalytics mode={mode} days={days} toolbar={toolbar} />;
 }
@@ -107,7 +100,9 @@ function ClassicAnalytics({ mode, days, toolbar }: { mode: "words" | "books"; da
         <div className="stat"><span className="stat-num">{s.avgAccuracy === null ? "—" : `${Math.round(s.avgAccuracy)}%`}</span><span className="stat-label">average accuracy</span></div>
         <div className="stat"><span className="stat-num">{s.maxScore ?? "—"}</span><span className="stat-label">best score</span></div>
         <div className="stat" title="Every key pressed in finished attempts, wrong ones included"><span className="stat-num">{(s.totalChars ?? 0).toLocaleString("en-AU")}</span><span className="stat-label">characters typed</span></div>
-        <div className="stat" title={mode === "books" ? "Longest run of characters typed correctly in a row (Precision Combo)" : "Most words in a row destroyed without a wrong key"}><span className="stat-num">{s.bestCombo ?? "—"}</span><span className="stat-label">best combo ({mode === "books" ? "characters" : "words"})</span></div>
+        {mode === "words" && <div className="stat" title="Most words in a row destroyed without a wrong key"><span className="stat-num">{s.bestCombo ?? "?"}</span><span className="stat-label">best combo (words)</span></div>}
+        {mode === "books" && <div className="stat" title="Longest recorded run of correct characters. Older results may cover only the final visit."><span className="stat-num">{s.bestCharStreak ?? "?"}</span><span className="stat-label">best character streak</span></div>}
+        {mode === "words" && <div className="stat" title="Most consecutive correct characters, across words. Older sessions did not record this."><span className="stat-num">{s.bestCharStreak ?? "?"}</span><span className="stat-label">best character streak</span></div>}
         {mode === "words" && <div className="stat"><span className="stat-num">{s.failed}</span><span className="stat-label">failed attempts</span></div>}
       </div>
 
@@ -126,11 +121,14 @@ function ClassicAnalytics({ mode, days, toolbar }: { mode: "words" | "books"; da
         <LineChart title="Typing speed over time" points={data.series.wpm} unit=" wpm" color="wpm" cpm />
         <LineChart title="Accuracy over time" points={data.series.accuracy} unit="%" color="accuracy" />
         <LineChart title="Score over time" points={data.series.score} unit="" color="score" />
-        <LineChart title="Practice duration" points={data.series.duration} unit=" s" color="duration" />
+        <LineChart title="Practice duration" points={data.series.duration} unit=" min" color="duration" />
       </div>
 
+      <div><h4 className="chart-title">Longest error-free character streak</h4>
+        {!data.series.charStreak?.some((point) => point.value !== null) ? <p className="muted small">No recorded character streaks in this period yet.</p> : <Chart ariaLabel="Longest error-free character streak per attempt" line={{ color: "#b78bff", format: (v) => `${Math.round(v)} chars` }} points={data.series.charStreak.map((point, i) => ({ key: `${point.at}-${i}`, label: fmtDay(point.at), line: point.value, muted: point.status !== "completed", tip: [fmtDay(point.at), point.value === null ? "Not recorded" : `Longest streak: ${point.value} characters`, `Attempt: ${point.status}`] }))} legend={mode === "books" ? "Longest recorded streak per attempt; older sessions may only cover the final visit after a restart. Gaps are unrecorded sessions." : "Longest streak of correct characters per attempt, across words. Failed attempts are hollow; gaps are unrecorded sessions."} />}
+      </div>
       <DailyActivity data={data.series.daily} />
-      <PersonalBest data={data.series.personalBest} />
+      <CumulativeCharacters data={data.series.daily} />
 
       <KeyInsights data={data.keyInsights} />
 
@@ -155,22 +153,10 @@ function DailyActivity({ data }: { data: Data["series"]["daily"] }) {
       <Chart
         ariaLabel="Daily activity"
         bars={{ color: "#3fbf6f", format: (v) => fmtTotalTime(v) }}
-        points={data.map((d) => ({ key: d.date, label: fmtDay(d.date), bar: d.activeSeconds, tip: [fmtDay(d.date), `Practice time: ${fmtTotalTime(d.activeSeconds)}`, `Attempts: ${d.attempts}`, `Characters typed: ${(d.chars ?? 0).toLocaleString("en-AU")}`] }))}
-        legend="Practice time per day; empty days are zero"
+        line={{ color: "#b78bff", format: (v) => Math.round(v).toLocaleString("en-AU") }}
+        points={data.map((d) => ({ key: d.date, label: fmtDay(d.date), bar: d.activeSeconds, line: d.chars ?? 0, tip: [fmtDay(d.date), `Practice time: ${fmtTotalTime(d.activeSeconds)}`, `Attempts: ${d.attempts}`, `Characters typed: ${(d.chars ?? 0).toLocaleString("en-AU")}`] }))}
+        legend="Bars: practice time; line: characters typed (right axis). Finished attempts are attributed to their end date."
       />
-    </div>
-  );
-}
-
-function PersonalBest({ data }: { data: Data["series"]["personalBest"] }) {
-  if (data.length === 0) return <p className="muted">No completed levels yet, so there is no personal best to show.</p>;
-  const last = data[data.length - 1]!;
-  return (
-    <div className="card">
-      <h3>Personal best</h3>
-      <p className="small">
-        Best WPM <strong>{Math.round(last.wpm)}</strong> · best score <strong>{last.score}</strong> (first reached {fmtDay(last.at)}).
-      </p>
     </div>
   );
 }

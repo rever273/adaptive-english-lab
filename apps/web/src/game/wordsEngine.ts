@@ -81,6 +81,8 @@ export interface WordsEngineState {
   /** destroyed words in a row without a wrong key (any wrong key resets it) */
   streak: number;
   bestStreak: number;
+  charStreak: number;
+  bestCharStreak: number;
   /** game score: 10 per letter of a destroyed word, times the combo multiplier. Display only. */
   score: number;
   keyStats: Map<string, PairFacts>;
@@ -115,6 +117,8 @@ export function createWordsEngine(config: WordsEngineConfig): WordsEngineState {
     errorPlanIndex: null,
     streak: 0,
     bestStreak: 0,
+    charStreak: 0,
+    bestCharStreak: 0,
     score: 0,
     keyStats: new Map(),
   };
@@ -207,6 +211,7 @@ export function handleWordKey(s: WordsEngineState, config: WordsEngineConfig, ke
 
   const miss = (word: WordsWord | null) => {
     s.streak = 0;
+    s.charStreak = 0;
     // a wrong key while the second letter of a pair was expected counts against that pair
     if (word && word.progress >= 1) {
       const pair = word.lemma.slice(word.progress - 1, word.progress + 1).toLowerCase();
@@ -252,6 +257,8 @@ export function handleWordKey(s: WordsEngineState, config: WordsEngineConfig, ke
   }
   w.progress++;
   s.charsTyped += 1;
+  s.charStreak++;
+  s.bestCharStreak = Math.max(s.bestCharStreak, s.charStreak);
   events.push({ type: "hit", word: w });
   if (w.progress >= w.lemma.length) destroyWord(s, w, events);
   return events;

@@ -22,6 +22,10 @@ import {
   type TypingOverview,
   type TypingResult,
   type TypingWordsStartResponse,
+  type WordLessonEventKind,
+  type WordLessonListResponse,
+  type WordLessonRunState,
+  type WordLessonStudioStatus,
 } from "@english-lab/contracts";
 import type { ZodType } from "zod";
 
@@ -95,6 +99,8 @@ export const fetchVocabularySpeech = () => send("GET", "/api/v1/vocabulary-speec
 export type VocabularySpeechCredits = { available: boolean; reason?: string; used?: number; limit?: number; remaining?: number; resetsAt?: string | null; tier?: string | null; appCharacters30d: number };
 export const fetchVocabularySpeechCredits = () => send("GET", "/api/v1/vocabulary-speech/credits", typed<VocabularySpeechCredits>());
 export type GroqStatus = { configured: boolean; reachable: boolean; reason?: string; limits: { capturedAt: string; status: number | null; headers: Record<string, string> } | null };
+export type DeepLUsage = { available: true; used: number; limit: number } | { available: false; reason: string };
+export const fetchDeepLUsage = () => send("GET", "/api/v1/translate/usage", typed<DeepLUsage>());
 export const fetchGroqStatus = () => send("GET", "/api/v1/groq-status", typed<GroqStatus>());
 export const setVocabularySpeech = (enabled: boolean) => send("POST", "/api/v1/vocabulary-speech/settings", typed<VocabularySpeechStatus>(), { enabled });
 async function speechRequest(path: string, signal?: AbortSignal): Promise<Blob | null> {
@@ -125,6 +131,12 @@ export async function vocabularyTextSpeech(text: string): Promise<Blob | null> {
   }
   return res.status === 204 ? null : res.blob();
 }
+export type MatchWord = { id: string; en: string; ru: string };
+/** the words of a finished vocabulary session for the matching game (read-only, not evidence) */
+export const fetchMatchWords = (sessionId: string) => send("GET", `/api/v1/vocabulary-sessions/${encodeURIComponent(sessionId)}/match-words`, typed<{ words: MatchWord[] }>());
+/** the raw result of a played matching game (not Mastery evidence); sent once, a repeat changes nothing */
+export const saveMatchResults = (sessionId: string, mode: "once" | "rush", results: Array<{ lemma: string; matched: number; wrong: number }>) =>
+  send("POST", `/api/v1/vocabulary-sessions/${encodeURIComponent(sessionId)}/match-results`, typed<{ saved: boolean }>(), { mode, results });
 export const vocabularyWordSpeech = (id: string) => speechRequest(`/api/v1/vocabulary-speech/word/${encodeURIComponent(id)}`);
 export const fetchDashboard = () => send("GET", "/api/v1/dashboard", DashboardSchema);
 export type SessionCategory = "grammar" | "vocabulary";
@@ -227,6 +239,24 @@ export const jobAction = (id: string, action: "pause" | "resume" | "retry" | "ca
 
 // ---- TASK_011: voice. Raw PCM goes up once and is dropped; only text comes back. ----
 export const sttStart = (sessionId: string, tabId: string) => send("POST", "/api/v1/stt/start", typed<{ streamId: string; maxSeconds: number; ready: { device: string } }>(), { sessionId, tabId });
+export type ConversationState = { session: { id: string; topic: string; status: string; activeMs: number; answerCount: number }; messages: Array<{ id: string; role: "user" | "assistant"; text: string; analysisStatus: string | null; analysis: string | null }>; vocabulary: string[]; jobs: Array<{ id: string; state: string; errorCode: string | null; action: string; messageId: string | null }> };
+export type ConversationHome = { topics: string[]; topicGroups: Record<string, string>; latest: { id: string; topic: string; updatedAt: string } | null; statistics: { conversations: number; answers: number; activeMs: number } };
+export const conversationHome = () => send("GET", "/api/v1/conversations", typed<ConversationHome>());
+export const conversationStart = (topic: string, tabId: string) => send("POST", "/api/v1/conversations", typed<ConversationState>(), { topic, tabId });
+export const conversationRead = (id: string) => send("GET", `/api/v1/conversations/${encodeURIComponent(id)}`, typed<ConversationState>());
+export const conversationResume = (id: string, tabId: string) => send("POST", `/api/v1/conversations/${encodeURIComponent(id)}/resume`, typed<ConversationState>(), { tabId });
+export const conversationPause = (id: string, tabId: string) => send("POST", `/api/v1/conversations/${encodeURIComponent(id)}/pause`, typed<{ ok: boolean }>(), { tabId });
+export const conversationHeartbeat = (id: string, tabId: string) => send("POST", `/api/v1/conversations/${encodeURIComponent(id)}/heartbeat`, typed<{ ok: boolean }>(), { tabId });
+export const conversationMessage = (id: string, tabId: string, messageId: string, text: string) => send("POST", `/api/v1/conversations/${encodeURIComponent(id)}/messages`, typed<ConversationState>(), { tabId, messageId, text });
+export const conversationSttStart = (id: string, tabId: string) => send("POST", `/api/v1/conversations/${encodeURIComponent(id)}/stt/start`, typed<{ streamId: string; maxSeconds: number; ready: { device: string } }>(), { tabId });
+export const conversationDelete = (id: string) => send("POST", `/api/v1/conversations/${encodeURIComponent(id)}/delete-history`, typed<{ ok: boolean }>(), {});
+export const conversationRetry = (id: string, jobId: string) => send("POST", `/api/v1/conversations/${encodeURIComponent(id)}/retry`, typed<{ ok: boolean }>(), { jobId });
+export async function conversationSpeech(id: string, messageId: string): Promise<Blob> {
+  if (!csrfToken) csrfToken = SessionBootstrapSchema.parse(await (await fetch("/api/v1/session", { headers: { Accept: "application/json" } })).json()).csrfToken;
+  const res = await fetch(`/api/v1/conversations/${encodeURIComponent(id)}/speech`, { method: "POST", headers: { "Content-Type": "application/json", "X-CSRF-Token": csrfToken ?? "" }, body: JSON.stringify({ messageId }) });
+  if (!res.ok) { if (res.status === 403) csrfToken = null; throw new ApiRequestError("SPEECH_UNAVAILABLE", "Voice playback is unavailable.", res.status); }
+  return res.blob();
+}
 export const sttConfirm = (streamId: string, draftId: string, slotId: string, text: string) => send("POST", `/api/v1/stt/${streamId}/confirm`, typed<{ transcriptId: string; edited: boolean }>(), { draftId, slotId, text });
 export const sttStop = (streamId: string) => send("POST", `/api/v1/stt/${streamId}/stop`, typed<{ stopped: boolean }>(), {});
 export async function sttAudio(streamId: string, pcm: Int16Array): Promise<{ draftId: string; text: string }> {
@@ -340,8 +370,16 @@ export interface VocabEntry {
 }
 interface VocabTotals { words: number; learned: number; bankOccurrences: number; displayedOccurrences: number }
 const anyOf = <T>() => ({ parse: (x: unknown) => x as T }) as unknown as ZodType<T>;
-export const fetchVocabulary = (q = "") => send("GET", `/api/v1/vocabulary${q ? `?q=${encodeURIComponent(q)}` : ""}`, anyOf<{ words: VocabEntry[]; totals: VocabTotals }>());
-export const lookupVocabulary = (word: string) => send("GET", `/api/v1/vocabulary/lookup?word=${encodeURIComponent(word)}`, anyOf<{ known: boolean; entry: VocabEntry | null }>());
+export const fetchPracticeActivity = () => send("GET", "/api/v1/journey/practice-activity", anyOf<{ days: Array<{ date: string; grammar: number; vocabulary: number }>; grammarResults: Array<{ date: string; correct: number; scored: number; skills: number }> }>());
+export const fetchVocabulary = (q = "", options?: { limit?: number; notLearned?: boolean }) => {
+  const params = new URLSearchParams();
+  if (q) params.set("q", q);
+  if (options?.limit) params.set("limit", String(options.limit));
+  if (options?.notLearned) params.set("learned", "false");
+  return send("GET", `/api/v1/vocabulary${params.size ? `?${params}` : ""}`, anyOf<{ words: VocabEntry[]; total: number; totals: VocabTotals }>());
+};
+export type WordBankMatch = { lemma: string; translationRu: string; partOfSpeech: string; form?: "past" | "participle" };
+export const lookupVocabulary = (word: string) => send("GET", `/api/v1/vocabulary/lookup?word=${encodeURIComponent(word)}`, anyOf<{ known: boolean; entry: VocabEntry | null; wordBank: WordBankMatch[] }>());
 export const translateSentence = (text: string) => send("POST", "/api/v1/translate", anyOf<{ text: string }>(), { text });
 export const matchVocabulary = (words: string[]) => send("POST", "/api/v1/vocabulary/match", anyOf<{ matches: Array<{ word: string; lemma: string; translationRu: string }> }>(), { words });
 export const addVocabulary = (word: string, selected?: string, slotId?: string) => send("POST", "/api/v1/vocabulary", anyOf<VocabEntry & { created: boolean }>(), { word, ...(selected ? { selected } : {}), ...(slotId ? { slotId } : {}) });
@@ -380,11 +418,11 @@ export type { TypingAnalyticsData, TypingBookStartResponse, TypingOverview, Typi
 export const fetchTypingOverview = () => send("GET", "/api/v1/typing/overview", typed<TypingOverview>());
 export const startTypingWords = () => send("POST", "/api/v1/typing/words/start", typed<TypingWordsStartResponse>(), {});
 export const typingWordAppearances = (sessionId: string, appearances: Array<{ planIndex: number; order: number }>) => send("POST", `/api/v1/typing/words/${encodeURIComponent(sessionId)}/appearances`, typed<{ ok: true }>(), { appearances });
-export const completeTypingWords = (sessionId: string, body: { status: "completed" | "failed"; activeMs: number; charsTyped: number; errors: number; appearances: Array<{ planIndex: number; order: number }>; destroyedPlanIndexes: number[]; wordErrors?: Array<{ planIndex: number; errors: number }>; bestCombo?: number; keyStats?: Array<{ pair: string; count: number; totalMs: number; errors: number }> }) => send("POST", `/api/v1/typing/words/${encodeURIComponent(sessionId)}/complete`, typed<TypingResult>(), body);
+export const completeTypingWords = (sessionId: string, body: { status: "completed" | "failed"; activeMs: number; charsTyped: number; errors: number; appearances: Array<{ planIndex: number; order: number }>; destroyedPlanIndexes: number[]; wordErrors?: Array<{ planIndex: number; errors: number }>; bestCombo?: number; bestCharStreak?: number; keyStats?: Array<{ pair: string; count: number; totalMs: number; errors: number }> }) => send("POST", `/api/v1/typing/words/${encodeURIComponent(sessionId)}/complete`, typed<TypingResult>(), body);
 export const abortTypingWords = (sessionId: string, body: { activeMs?: number; charsTyped?: number; errors?: number }) => send("POST", `/api/v1/typing/words/${encodeURIComponent(sessionId)}/abort`, typed<{ ok: true }>(), body);
 export const startTypingBook = () => send("POST", "/api/v1/typing/books/start", typed<TypingBookStartResponse>(), {});
-export const checkpointTypingBook = (sessionId: string, body: { offset: number; activeMs: number; charsTyped: number; errors: number }) => send("POST", `/api/v1/typing/books/${encodeURIComponent(sessionId)}/checkpoint`, typed<{ ok: true; applied: boolean }>(), body);
-export const completeTypingBook = (sessionId: string, body: { offset: number; activeMs: number; charsTyped: number; errors: number; bestCombo?: number; keyStats?: Array<{ pair: string; count: number; totalMs: number; errors: number }> }) => send("POST", `/api/v1/typing/books/${encodeURIComponent(sessionId)}/complete`, typed<TypingResult>(), body);
+export const checkpointTypingBook = (sessionId: string, body: { offset: number; activeMs: number; charsTyped: number; errors: number; charStreak?: { current: number; best: number } }) => send("POST", `/api/v1/typing/books/${encodeURIComponent(sessionId)}/checkpoint`, typed<{ ok: true; applied: boolean }>(), body);
+export const completeTypingBook = (sessionId: string, body: { offset: number; activeMs: number; charsTyped: number; errors: number; bestCombo?: number; charStreak?: { current: number; best: number }; keyStats?: Array<{ pair: string; count: number; totalMs: number; errors: number }> }) => send("POST", `/api/v1/typing/books/${encodeURIComponent(sessionId)}/complete`, typed<TypingResult>(), body);
 export const abortTypingBook = (sessionId: string, body: { activeMs?: number; charsTyped?: number; errors?: number }) => send("POST", `/api/v1/typing/books/${encodeURIComponent(sessionId)}/abort`, typed<{ ok: true }>(), body);
 export const fetchTypingResult = (sessionId: string) => send("GET", `/api/v1/typing/sessions/${encodeURIComponent(sessionId)}/result`, typed<TypingResult>());
 export type { TypingRecallWord, TypingRecallStartResponse } from "@english-lab/contracts";
@@ -491,8 +529,29 @@ export async function fetchVoiceSample(key: string, lengthScale?: number): Promi
   return { blob: await res.blob(), stats };
 }
 
-export type JourneyMode = "grammar" | "vocabulary" | "words" | "books" | "dictation";
+export type JourneyMode = "grammar" | "vocabulary" | "words" | "books" | "dictation" | "wordLesson" | "conversation";
 export type JourneyData = { version: string; timezone: string; today: string; totals: Record<JourneyMode, number>; todayMs: Record<JourneyMode, number>; activeDays: number; journeyHours: {b2:number;c1:number;c2:number}; dailyMinutes: Record<JourneyMode,number>; dailyOrder: JourneyMode[]; bookMinutes:number };
 export const fetchJourney = () => send("GET", "/api/v1/journey", typed<JourneyData>());
+export type ConversationAnalyticsData = { conversations:number; answers:number; activeMs:number; sentences:number; availableAnswers:number; good:number; suggestions:number; unclassified:number; deletedSessions:number; series:Array<{startedAt:string;answers:number;activeMs:number;good:number;suggestions:number}>; sessions:Array<{topic:string;startedAt:string;updatedAt:string;activeMs:number;answers:number;historyDeleted:number}> };
+export const fetchConversationAnalytics = (days: "7" | "30" | "90" | "all") => send("GET", `/api/v1/analytics/conversation?days=${days}`, typed<ConversationAnalyticsData>());
+export const fetchJourneyDailyTotals = () => send("GET", "/api/v1/journey/daily-totals", typed<{ days: Array<{ date: string; ms: number }> }>());
 export const saveJourneySettings = (body: { journeyHours?: JourneyData["journeyHours"]; dailyMinutes?: JourneyData["dailyMinutes"]; dailyOrder?: JourneyMode[] }) => send("POST", "/api/v1/settings", typed<SettingsView>(), body);
 export const recordTypingInterval = (body: {id:string;sessionId:string;mode:"words"|"books"|"dictation";startMs:number;endMs:number}) => send("POST", "/api/v1/journey/typing-interval", typed<{recorded:boolean}>(), body);
+
+// ---- TASK_031: Single Word Context Practice ----
+export type { WordLessonListResponse, WordLessonRunState, WordLessonStudioStatus };
+export const fetchWordLessons = () => send("GET", "/api/v1/word-lessons", typed<WordLessonListResponse>());
+export const fetchWordLessonStudio = () => send("GET", "/api/v1/word-lessons/studio", typed<WordLessonStudioStatus>());
+export const generateWordLessons = (count: number) => send("POST", "/api/v1/word-lessons/generate", typed<{ created: number; status: WordLessonStudioStatus }>(), { count });
+export const retryWordLessons = () => send("POST", "/api/v1/word-lessons/retry-failed", typed<{ queued: number; status: WordLessonStudioStatus }>(), {});
+export const startWordLessonRun = (lessonId: string, tabId: string) => send("POST", `/api/v1/word-lessons/${encodeURIComponent(lessonId)}/runs`, typed<{ runId: string; resumed: boolean; state: WordLessonRunState }>(), { tabId });
+export const fetchWordLessonRun = (runId: string) => send("GET", `/api/v1/word-lesson-runs/${encodeURIComponent(runId)}`, typed<WordLessonRunState>());
+const lessonRun = (runId: string, tail: string) => `/api/v1/word-lesson-runs/${encodeURIComponent(runId)}/${tail}`;
+export const sendWordLessonEvent = (runId: string, itemKey: string, kind: WordLessonEventKind) => send("POST", lessonRun(runId, "events"), typed<WordLessonRunState>(), { id: crypto.randomUUID(), itemKey, kind });
+export const sendWordLessonAttempt = (runId: string, body: { id: string; itemKey: string; text: string; input: "text" | "voice"; streamId?: string; draftId?: string }) => send("POST", lessonRun(runId, "attempts"), typed<WordLessonRunState>(), body);
+export const disputeWordLessonAttempt = (runId: string, attemptId: string, reason?: string) => send("POST", lessonRun(runId, `attempts/${encodeURIComponent(attemptId)}/dispute`), typed<WordLessonRunState>(), reason ? { reason } : {});
+export const giveUpWordLessonCheck = (runId: string, attemptId: string) => send("POST", lessonRun(runId, `attempts/${encodeURIComponent(attemptId)}/give-up`), typed<WordLessonRunState>(), {});
+export const completeWordLessonRun = (runId: string) => send("POST", lessonRun(runId, "complete"), typed<WordLessonRunState>(), {});
+export const recordWordLessonActivity = (runId: string, body: { id: string; tabId: string; startMs: number; endMs: number }) => send("POST", lessonRun(runId, "activity"), typed<{ recorded: boolean }>(), body);
+/** same shape as `sttStart`, so the voice hook can open a lesson run's stream (a stable module-level function) */
+export const wordLessonSttStart = (runId: string, tabId: string) => send("POST", lessonRun(runId, "stt/start"), typed<{ streamId: string; maxSeconds: number; ready: { device: string } }>(), { tabId });

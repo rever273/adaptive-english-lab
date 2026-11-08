@@ -1,6 +1,8 @@
 import { createHash, randomUUID } from "node:crypto";
 import { MASTERY_V1, canonicalJson } from "@english-lab/learning";
 import type { Db } from "../../db/open.js";
+import { MAX_LESSON_PLAYS } from "@english-lab/contracts";
+import { courseLessons } from "../sessions/course.js";
 import { ApiError } from "../../errors.js";
 import { loadActivity, loadEvidence } from "../analytics/evidence.js";
 import { localDateIn } from "../attempts/canonical.js";
@@ -44,8 +46,9 @@ function progressOf(db: Db): { sessionId: string | null; closed: number; total: 
     total = (db.prepare("SELECT COUNT(*) AS n FROM session_slots WHERE session_id = ?").get(s.id) as { n: number }).n;
     closed = (db.prepare("SELECT COUNT(*) AS n FROM session_slots ss WHERE ss.session_id = ? AND EXISTS (SELECT 1 FROM session_events e WHERE e.slot_id = ss.id AND e.event_type IN ('skip','continue'))").get(s.id) as { n: number }).n;
   }
-  const published = (db.prepare("SELECT COUNT(*) AS n FROM blueprint_revisions br WHERE br.revision = (SELECT MAX(x.revision) FROM blueprint_revisions x WHERE x.blueprint_id = br.blueprint_id) AND br.status IN ('approved','published')").get() as { n: number }).n;
-  const completed = (db.prepare("SELECT COUNT(DISTINCT br.blueprint_id) AS n FROM sessions s JOIN blueprint_revisions br ON br.id = s.blueprint_revision_id WHERE s.status = 'completed' AND s.purpose = 'practice'").get() as { n: number }).n;
+  const lessons = courseLessons(db);
+  const published = lessons.length;
+  const completed = lessons.filter((lesson) => lesson.completed >= MAX_LESSON_PLAYS).length;
   return { sessionId: s?.id ?? null, closed, total, completedBlueprints: completed, publishedBlueprints: published };
 }
 

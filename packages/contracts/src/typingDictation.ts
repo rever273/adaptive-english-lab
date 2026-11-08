@@ -89,7 +89,7 @@ export const DictationAnalyticsSchema = z.object({
     totalChars: z.number().int(), bestScore: z.number().nullable(), avgHints: z.number().nullable(),
     hintUsage: z.object({ none: z.number().int(), level1: z.number().int(), level2: z.number().int(), level3: z.number().int() }).strict(),
   }).strict(),
-  daily: z.array(z.object({ date: z.string(), lessons: z.number().int(), exercises: z.number().int(), activeSeconds: z.number().int() }).strict()),
+  daily: z.array(z.object({ date: z.string(), lessons: z.number().int(), exercises: z.number().int(), activeSeconds: z.number().int(), chars: z.number().int().optional(), cumulativeChars: z.number().int().optional() }).strict()),
   series: z.array(z.object({ at: z.string(), score: z.number(), firstAttemptAccuracy: z.number(), wpm: z.number().nullable(), independent: z.number(), replays: z.number().nullable(), hints: z.number().nullable() }).strict()),
   /** mistakes of the first answers by kind (approximate; no AI, no effect on Mastery) */
   errorTypes: z.array(z.object({ type: z.string(), label: z.string(), count: z.number().int(), share: z.number() }).strict()),

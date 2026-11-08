@@ -3,6 +3,7 @@ import type { SettingsV1, TypingPlanWord, TypingSpeed, TypingWordsStartResponse 
 import { ApiError } from "../../errors.js";
 import { loadSettings } from "../sessions/policy.js";
 import { currentTranslations, VISIBLE } from "../vocabulary/repository.js";
+import { lookupBankTranslation } from "../vocabulary/wordBankLookup.js";
 import { learningFactors } from "../vocabulary/difficulty.js";
 import { hasPair, saveKeyStats, weakPairs, type KeyStat } from "./keyStats.js";
 import { recallTrouble } from "./recall.js";
@@ -126,14 +127,15 @@ function personalCandidates(db: Db, level: number, deps: WordsDeps): PersonalCan
   // a word without a translation is dropped: it cannot be a target with a translation (D77)
   const ids = candidates.map((c) => c.id);
   const translations = currentTranslations(db, ids);
-  return candidates.filter((c) => translations.has(c.id));
+  // the reference bank (with irregular forms: went -> go) stands in for a missing saved translation
+  return candidates.filter((c) => translations.has(c.id) || lookupBankTranslation(db, c.lemma) !== null);
 }
 
 function bankWords(db: Db, level: number): BankWord[] {
   const b = levelBucket(level);
   const maxLen = b.maxLen === Number.POSITIVE_INFINITY ? 32 : b.maxLen;
   const rows = db
-    .prepare("SELECT lemma, part_of_speech, translation_ru, definition_ru, transcription, difficulty, char_count FROM typing_word_bank WHERE difficulty <= ? AND char_count >= 3 AND char_count <= ?")
+    .prepare("SELECT lemma, part_of_speech, translation_ru, definition_ru, transcription, difficulty, char_count FROM typing_word_bank WHERE typing_ok = 1 AND difficulty <= ? AND char_count >= 3 AND char_count <= ?")
     .all(b.difficultyMax, maxLen) as BankWord[];
   if (!b.restrict) return rows;
   const hasAtMostOneRare = (w: string) => (w.match(/[qjzx]/g) ?? []).length <= 1;
@@ -188,6 +190,7 @@ export function buildWordsPlan(db: Db, level: number, settings: SettingsV1, deps
 
   const personal = personalCandidates(db, level, deps);
   const translations = currentTranslations(db, personal.map((p) => p.id));
+  const bankTranslation = (lemma: string): string | null => lookupBankTranslation(db, lemma)?.translationRu ?? null;
   const personalWords: Array<{ lemma: string; source: "vocabulary"; vocabularyEntryId: string }> = personal.slice(0, quota).map((p) => ({
     lemma: p.lemma,
     source: "vocabulary" as const,
@@ -259,11 +262,11 @@ export function buildWordsPlan(db: Db, level: number, settings: SettingsV1, deps
         lemma: w.lemma,
         source: w.source,
         vocabularyEntryId: entryId,
-        translationRu: isVocab && entryId ? (translations.get(entryId) ?? null) : null,
+        translationRu: isVocab && entryId ? (translations.get(entryId) ?? bankTranslation(w.lemma)) : null,
         partOfSpeech: null,
         definitionRu: null,
         transcription: null,
-        unverified: !isVocab,
+        unverified: !isVocab || (entryId !== null && !translations.has(entryId)),
         fallMs: fallMs(w.lemma.length, speed.msPerChar),
       };
     })
@@ -299,7 +302,7 @@ export function buildWordsPlan(db: Db, level: number, settings: SettingsV1, deps
 export function wordsOverview(db: Db): { nextLevel: number; completedLevel: number; activeSessionId: string | null; bankWords: number } {
   const active = db.prepare("SELECT id FROM typing_sessions WHERE mode = 'words' AND status = 'active' LIMIT 1").get() as { id: string } | undefined;
   const completed = db.prepare("SELECT COALESCE(MAX(level_number), 0) AS n FROM typing_sessions WHERE mode = 'words' AND status = 'completed'").get() as { n: number };
-  const bank = db.prepare("SELECT COUNT(*) AS n FROM typing_word_bank").get() as { n: number };
+  const bank = db.prepare("SELECT COUNT(*) AS n FROM typing_word_bank WHERE typing_ok = 1").get() as { n: number };
   return { nextLevel: completed.n + 1, completedLevel: completed.n, activeSessionId: active?.id ?? null, bankWords: bank.n };
 }
 
@@ -360,6 +363,7 @@ export interface WordsCompleteRequest {
   keyStats?: KeyStat[] | undefined;
   /** best run of words without a wrong key */
   bestCombo?: number | undefined;
+  bestCharStreak?: number | undefined;
 }
 
 export function completeWords(db: Db, deps: WordsDeps, sessionId: string, req: WordsCompleteRequest): ReturnType<typeof buildTypingResult> {
@@ -385,6 +389,8 @@ export function completeWords(db: Db, deps: WordsDeps, sessionId: string, req: W
     throw new ApiError(400, "TYPING_COUNTERS_INVALID", "charsTyped minus errors cannot be below charsCorrect");
   }
 
+  if (req.bestCharStreak !== undefined && req.bestCharStreak > req.charsTyped - req.errors) throw new ApiError(400, "TYPING_COUNTERS_INVALID", "Character streak cannot exceed correct keystrokes");
+
   const metrics = computeMetrics({ mode: "words", activeMs: req.activeMs, charsTyped: req.charsTyped, errors: req.errors, charsCorrect, level: row.level_number, completed: req.status === "completed", plannedWords: words.length });
   const errorsByIndex = new Map<number, number>();
   for (const e of req.wordErrors ?? []) {
@@ -403,8 +409,8 @@ export function completeWords(db: Db, deps: WordsDeps, sessionId: string, req: W
     const putErrors = db.prepare("INSERT OR IGNORE INTO typing_word_results(session_id, plan_index, errors) SELECT session_id, plan_index, ? FROM typing_words WHERE session_id = ? AND plan_index = ?");
     for (const [i, n] of errorsByIndex) putErrors.run(n, sessionId, i);
     db.prepare(
-      "UPDATE typing_sessions SET status = ?, ended_at = ?, active_ms = ?, chars_typed = ?, errors = ?, chars_correct = ?, wpm = ?, cpm = ?, accuracy = ?, score = ?, metrics_version = ?, best_combo = ? WHERE id = ?",
-    ).run(req.status, now, req.activeMs, req.charsTyped, req.errors, charsCorrect, metrics.wpm, metrics.cpm, metrics.accuracy, metrics.score, METRICS_VERSION, req.bestCombo ?? null, sessionId);
+      "UPDATE typing_sessions SET status = ?, ended_at = ?, active_ms = ?, chars_typed = ?, errors = ?, chars_correct = ?, wpm = ?, cpm = ?, accuracy = ?, score = ?, metrics_version = ?, best_combo = ?, best_char_streak = ? WHERE id = ?",
+    ).run(req.status, now, req.activeMs, req.charsTyped, req.errors, charsCorrect, metrics.wpm, metrics.cpm, metrics.accuracy, metrics.score, METRICS_VERSION, req.bestCombo ?? null, req.bestCharStreak ?? null, sessionId);
     if (xp > 0) awardTypingXp(db, { id: deps.newId(), sessionId, amount: xp, at: now });
     saveKeyStats(db, deps.newId, sessionId, req.keyStats ?? [], now);
   }).immediate();

@@ -10,6 +10,7 @@ import { runStructured } from "../ai/structured.js";
 import { MAX_OUTPUT_BYTES, schemaVariant, type Validated, type ValidationIssue } from "../ai/validate.js";
 import { bankTexts } from "../vocabulary/forms.js";
 import { TUTOR_PROMPT } from "./repository.js";
+import { runConversation, type ConversationPayload } from "../conversation/runner.js";
 
 export interface TutorPayload {
   messageId: string;
@@ -67,7 +68,7 @@ export interface TutorRunnerOptions {
 }
 
 /** Background tutor answer. Context is the exercise, its approved rule and skill ids; it can only append a DRAFT message and touches no score. */
-export class TutorJobRunner implements JobRunner<TutorPayload> {
+export class TutorJobRunner implements JobRunner<TutorPayload | ConversationPayload> {
   readonly kind = "tutor" as const;
   private modelVersionId: string | null = null;
   constructor(private readonly o: TutorRunnerOptions) {}
@@ -100,9 +101,14 @@ export class TutorJobRunner implements JobRunner<TutorPayload> {
     return this.modelVersionId ? { modelVersionId: this.modelVersionId, configHash: configHashOf(TUTOR_PARAMS) } : null;
   }
 
-  async run(ctx: RunnerContext<TutorPayload>): Promise<RunnerOutput> {
+  async run(ctx: RunnerContext<TutorPayload | ConversationPayload>): Promise<RunnerOutput> {
+    if ("conversation" in ctx.job.payload) {
+      if (await this.o.installedDigest(this.pinned.tag) !== this.pinned.digest) throw new RunnerError("model_digest_mismatch", "The installed model differs from the pinned model", false);
+      return runConversation(this.o.db, this.o.chat, ctx as RunnerContext<ConversationPayload>);
+    }
+    const tutorCtx = ctx as RunnerContext<TutorPayload>;
     const m = this.pinned;
-    const { messageId, slotId, kind, question } = ctx.job.payload;
+    const { messageId, slotId, kind, question } = tutorCtx.job.payload;
     const installed = await this.o.installedDigest(m.tag);
     if (installed !== m.digest) throw new RunnerError("model_digest_mismatch", `installed digest of ${m.tag} differs from the pinned one`, false);
     const row = this.o.db

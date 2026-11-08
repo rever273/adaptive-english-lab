@@ -14,6 +14,8 @@ const isAlnum = (ch: string) => /[A-Za-z0-9]/.test(baseChar(ch));
 
 /** Required punctuation: always typed when it appears. */
 const REQUIRED_PUNCT = ".,?!:;";
+export type BookKeyRulesVersion = 1 | 2 | 3;
+export const BOOK_KEY_RULES_VERSION: BookKeyRulesVersion = 3;
 
 /**
  * The key the user must press for one character, or null when the character is skipped automatically.
@@ -35,10 +37,10 @@ export function requiredKeyOf(ch: string): string | null {
 /**
  * Required keys of a single sentence range `[start, end)`. A range is expected to have no internal sentence boundary
  * (sentence separators are handled by `splitSentences`): within it every space between words is typed, and spaces around
- * skipped symbols collapse into one. A dash without spaces around it (`word—word`) yields one required space. Leading
+ * skipped symbols collapse into one. In legacy rules an unspaced dash yields one required space; version 3 skips it. Leading
  * whitespace and any trailing pending space are dropped.
  */
-export function buildKeys(text: string, start: number, end: number): Array<{ offset: number; key: string }> {
+export function buildKeys(text: string, start: number, end: number, rules: BookKeyRulesVersion = 1): Array<{ offset: number; key: string }> {
   const keys: Array<{ offset: number; key: string }> = [];
   let pendingSpaceOffset = -1;
   const flushSpace = () => {
@@ -68,6 +70,13 @@ export function buildKeys(text: string, start: number, end: number): Array<{ off
       keys.push({ offset: i, key: ch });
       continue;
     }
+    // Apostrophes within a word are typed using the keyboard apostrophe key;
+    // single quotation marks around dialogue remain skipped.
+    if (rules >= 2 && (ch === "'" || ch === "\u2019") && isLetter(text.charAt(i - 1)) && isLetter(text.charAt(i + 1))) {
+      flushSpace();
+      keys.push({ offset: i, key: "'" });
+      continue;
+    }
     if (ch === "-") {
       const prev = i > start ? text.charAt(i - 1) : undefined;
       const next = i + 1 < end ? text.charAt(i + 1) : undefined;
@@ -81,7 +90,7 @@ export function buildKeys(text: string, start: number, end: number): Array<{ off
     if (ch === "—" || ch === "–") {
       const prev = i > start ? text.charAt(i - 1) : undefined;
       const next = i + 1 < end ? text.charAt(i + 1) : undefined;
-      if (prev && next && isAlnum(prev) && isAlnum(next)) {
+      if (rules < 3 && prev && next && isAlnum(prev) && isAlnum(next)) {
         // dash without surrounding spaces implies a single required space
         if (pendingSpaceOffset < 0) pendingSpaceOffset = i;
       }
@@ -99,7 +108,7 @@ export interface TypingToken {
 }
 
 /** A token starts at a word and runs through the trailing required punctuation; skipped quotes/brackets belong to it. */
-export function tokensOf(text: string, sentence: { start: number; end: number }): TypingToken[] {
+export function tokensOf(text: string, sentence: { start: number; end: number }, rules: BookKeyRulesVersion = 1): TypingToken[] {
   const tokens: TypingToken[] = [];
   let i = sentence.start;
   const end = sentence.end;
@@ -125,7 +134,7 @@ export function tokensOf(text: string, sentence: { start: number; end: number })
       }
       break;
     }
-    const keys = buildKeys(text, i, j);
+    const keys = buildKeys(text, i, j, rules);
     if (keys.length > 0) tokens.push({ startOffset: i, endOffset: j, keys });
     i = j;
   }
@@ -165,12 +174,12 @@ function endsWithAbbreviation(text: string, s: { start: number; end: number }): 
 }
 
 /** Number of required keys in `[start, end)`, counting sentence separators correctly (client and server agree by construction). */
-export function countRequired(text: string, start: number, end: number): number {
+export function countRequired(text: string, start: number, end: number, rules: BookKeyRulesVersion = 1): number {
   let total = 0;
   for (const s of splitSentences(text)) {
     if (s.end <= start) continue;
     if (s.start >= end) break;
-    total += buildKeys(text, Math.max(s.start, start), Math.min(s.end, end)).length;
+    total += buildKeys(text, Math.max(s.start, start), Math.min(s.end, end), rules).length;
   }
   return total;
 }

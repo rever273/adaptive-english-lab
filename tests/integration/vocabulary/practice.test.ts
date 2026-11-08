@@ -1,6 +1,8 @@
 import { afterAll, afterEach, describe, expect, it } from "vitest";
 import { randomUUID } from "node:crypto";
 import Fastify from "fastify";
+import { matchWords, registerVocabularyMatchRoutes } from "../../../apps/server/src/routes/vocabularyMatch.js";
+import { learningFactors, matchWeakness } from "../../../apps/server/src/domain/vocabulary/difficulty.js";
 import { registerVocabularySpeechRoutes } from "../../../apps/server/src/routes/vocabularySpeech.js";
 import path from "node:path";
 import { pathToFileURL } from "node:url";
@@ -246,6 +248,36 @@ describe("Vocabulary Practice (vocabulary TZ)", () => {
     const after = vocabularyPracticeStatus(env.db, env.deps.now());
     expect(after.freshAvailable).toBe(items.length - 8);
     expect(after.available).toBeLessThanOrEqual(after.taskCount);
+  });
+
+  it("the matching game: words only after every exercise is closed, results saved once as raw facts, and a weak word comes up a little more often", async () => {
+    env = openSliceCopy();
+    const items = await publishStarter(env);
+    for (const w of ["home", "endeavour", "dog", "great"]) addWord(env.db, env.deps, { word: w });
+    const s = createVocabularySession(env.db, env.deps, { timezone: "Australia/Brisbane" });
+    const app = Fastify();
+    registerVocabularyMatchRoutes(app, env.db, env.deps);
+    const url = `/api/v1/vocabulary-sessions/${s.sessionId}`;
+    expect((await app.inject({ method: "GET", url: `${url}/match-words` })).statusCode).toBe(409); // nothing is answered yet: no answers leak
+    play(env, s.sessionId, items);
+    const words = matchWords(env.db, s.sessionId);
+    expect(words.length).toBeGreaterThanOrEqual(3);
+    expect(new Set(words.map((w) => w.id)).size).toBe(words.length);
+    const body = (mode: string, results: unknown) => ({ method: "POST" as const, url: `${url}/match-results`, payload: { mode, results } });
+    const [weak, ...others] = words;
+    const good = [{ lemma: weak!.id, matched: 1, wrong: 3 }, ...others.map((w) => ({ lemma: w.id, matched: 5, wrong: 0 }))];
+    expect((await app.inject(body("rush", [{ lemma: "nonsense", matched: 1, wrong: 0 }]))).statusCode).toBe(400);
+    expect((await app.inject(body("rush", [{ lemma: weak!.id, matched: 6, wrong: 0 }]))).statusCode).toBe(400); // more than the 5 needed
+    expect((await app.inject(body("once", [{ lemma: weak!.id, matched: 2, wrong: 0 }]))).statusCode).toBe(400);
+    expect(count(env, "SELECT COUNT(*) AS n FROM vocabulary_match_results")).toBe(0);
+    expect((await app.inject(body("rush", good))).statusCode).toBe(201);
+    expect((await app.inject(body("rush", good.map((r) => ({ ...r, matched: 0 }))))).statusCode).toBe(200); // a repeat changes nothing
+    expect(count(env, "SELECT COUNT(*) AS n FROM vocabulary_match_results")).toBe(words.length);
+    expect(() => env!.db.prepare("UPDATE vocabulary_match_results SET matched = 0").run()).toThrow(/append-only/);
+    expect(matchWeakness(env.db).get(weak!.id)).toBe(1);
+    expect(matchWeakness(env.db).get(others[0]!.id)).toBe(0);
+    expect(learningFactors(env.db, new Map(words.map((w) => [w.id, false]))).has(weak!.id)).toBe(true);
+    await app.close();
   });
 
   it("a word is listed as needing another look only after two missed first tries (a miss and an I-don't-know both count)", async () => {

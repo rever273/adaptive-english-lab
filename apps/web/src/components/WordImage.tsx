@@ -2,7 +2,7 @@ import { useEffect, useRef, useState } from "react";
 
 /** whether a picture exists, asked once per word or exercise (a missing picture then costs no failed image request) */
 const known = new Map<string, Promise<boolean>>();
-function hasImage(kind: "slot" | "word", key: string): Promise<boolean> {
+export function hasImage(kind: "slot" | "word", key: string): Promise<boolean> {
   const id = `${kind}:${key}`;
   let p = known.get(id);
   if (!p) {

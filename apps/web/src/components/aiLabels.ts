@@ -4,6 +4,8 @@ export const KIND_LABEL: Record<string, string> = {
   generation: "Write draft exercises",
   dictation: "Audio Dictation",
   expression: "Write an expression draft",
+  word_lesson: "Write a single-word lesson",
+  word_lesson_check: "Check a lesson answer",
   triage: "Quick screen of a draft",
   benchmark: "Model benchmark",
   vocabulary_enrichment: "Translate a saved word",

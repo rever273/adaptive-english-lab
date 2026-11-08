@@ -40,6 +40,7 @@
     "slice:seed": "node scripts/seed-slice.mjs",
     "first10:check": "node scripts/first10-check.mjs",
     "first10:seed": "node scripts/first10-seed.mjs",
+    "lessons:trial": "node scripts/word-lesson-trial.mjs",
     "pack": "node scripts/content-pack.mjs",
     "slice": "node scripts/slice.mjs",
     "verify:gpu": "node scripts/verify-gpu.mjs",

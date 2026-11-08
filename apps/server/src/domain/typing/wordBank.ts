@@ -7,7 +7,11 @@ export interface WordBankDeps {
 
 export interface WordBankImportResult {
   imported: number;
-  skipped: { difficulty1: number; notLowercase: number; badLength: number; noTranslation: number };
+  skipped: { notLetters: number; badLength: number; noTranslation: number; duplicate: number };
+  /** rows kept for lookup only (difficulty 1 or a capitalised word); Typing Words does not use them */
+  lookupOnly: number;
+  /** words that received irregular past / past participle forms */
+  irregularVerbs: number;
 }
 
 const COLUMN_NAMES = {
@@ -27,13 +31,42 @@ function firstCyrillic(value: string): string {
   return "";
 }
 
+/** Written in capitals in the CSV but an ordinary word (the boolean literal), so it stays usable in Typing Words. */
+const ORDINARY_CAPS = new Set(["FALSE"]);
+
 /**
- * One-shot import of the learner's old CSV into the replaceable `typing_word_bank` (D72). Columns are found by header name.
+ * Import of the learner's old CSV into the replaceable `typing_word_bank` (D72). Columns are found by header name.
  * The whole bank is replaced in one transaction (`DELETE` + inserts), so a reseed is idempotent and never touches history.
- * Only words that are exactly `^[a-z]+$` (no case folding, so `China`/`FALSE` are dropped), length 2..32, Difficulty 2..5 and a
- * Cyrillic translation are kept.
+ * Every word is kept for the word panel's translation lookup: the lemma is lower-cased, and only words that are not plain
+ * `a-z` letters (hyphens, accents, "a/b"), have the wrong length or no Cyrillic translation are dropped. Typing Words only uses
+ * rows with `typing_ok = 1`: written in lowercase in the CSV (or in ORDINARY_CAPS) and Difficulty 2..5.
  */
-export function importWordBank(db: Db, csvText: string, sourceSha: string, deps: WordBankDeps): WordBankImportResult {
+/**
+ * Parses the irregular verb list ({ "arise": [{ "2": ["arose"], "3": ["arisen"] }], ... }) into base -> past / participle forms.
+ * Several senses of one verb are merged; only plain a-z forms different from the base are kept (the lookup finds the base word itself).
+ */
+export function parseIrregularVerbs(json: string): Map<string, { past: string[]; participle: string[] }> {
+  const out = new Map<string, { past: string[]; participle: string[] }>();
+  const data = JSON.parse(json) as Record<string, unknown>;
+  const clean = (base: string, v: unknown): string[] =>
+    Array.isArray(v) ? v.filter((f): f is string => typeof f === "string").map((f) => f.trim().toLowerCase()).filter((f) => /^[a-z]+$/.test(f) && f !== base) : [];
+  for (const [rawBase, senses] of Object.entries(data)) {
+    const base = rawBase.trim().toLowerCase();
+    if (!Array.isArray(senses)) continue;
+    const past = new Set<string>();
+    const participle = new Set<string>();
+    for (const sense of senses as Array<Record<string, unknown>>) {
+      clean(base, sense["2"]).forEach((f) => past.add(f));
+      clean(base, sense["3"]).forEach((f) => participle.add(f));
+    }
+    if (past.size > 0 || participle.size > 0) out.set(base, { past: [...past], participle: [...participle] });
+  }
+  return out;
+}
+
+export function importWordBank(db: Db, csvText: string, sourceSha: string, deps: WordBankDeps, irregularJson?: string): WordBankImportResult {
+  const irregular = irregularJson ? parseIrregularVerbs(irregularJson) : new Map<string, { past: string[]; participle: string[] }>();
+  let irregularVerbs = 0;
   const lines = csvText.replace(/^\uFEFF/, "").split(/\r?\n/);
   const header = splitLine(lines[0] ?? "");
   const at = (name: string): number => header.indexOf(name);
@@ -49,14 +82,17 @@ export function importWordBank(db: Db, csvText: string, sourceSha: string, deps:
     throw new Error("CSV is missing one of the required columns: 'English word', 'Difficulty', 'Translations'");
   }
 
-  const skipped = { difficulty1: 0, notLowercase: 0, badLength: 0, noTranslation: 0 };
+  const skipped = { notLetters: 0, badLength: 0, noTranslation: 0, duplicate: 0 };
+  const seen = new Set<string>();
+  let lookupOnly = 0;
   const rows: Array<Record<string, string | number>> = [];
   for (let i = 1; i < lines.length; i++) {
     if (lines[i] === "") continue;
     const r = splitLine(lines[i]!);
-    const word = (r[idx.word] ?? "").trim();
+    const raw = (r[idx.word] ?? "").trim();
+    const word = raw.toLowerCase();
     if (!/^[a-z]+$/.test(word)) {
-      skipped.notLowercase++;
+      skipped.notLetters++;
       continue;
     }
     if (word.length < 2 || word.length > 32) {
@@ -64,15 +100,20 @@ export function importWordBank(db: Db, csvText: string, sourceSha: string, deps:
       continue;
     }
     const difficulty = Number.parseInt((r[idx.difficulty] ?? "").trim(), 10);
-    if (!(difficulty >= 2 && difficulty <= 5)) {
-      skipped.difficulty1++;
-      continue;
-    }
     const translation = firstCyrillic(r[idx.translations] ?? "");
-    if (!translation) {
+    if (!(difficulty >= 1 && difficulty <= 5) || !translation) {
       skipped.noTranslation++;
       continue;
     }
+    if (seen.has(word)) {
+      skipped.duplicate++;
+      continue;
+    }
+    seen.add(word);
+    const typingOk = difficulty >= 2 && (raw === word || ORDINARY_CAPS.has(raw)) ? 1 : 0;
+    if (!typingOk) lookupOnly++;
+    const forms = irregular.get(word);
+    if (forms) irregularVerbs++;
     rows.push({
       lemma: word,
       char_count: word.length,
@@ -84,16 +125,19 @@ export function importWordBank(db: Db, csvText: string, sourceSha: string, deps:
       status: "draft",
       source_sha256: sourceSha,
       imported_at: deps.now().toISOString(),
+      typing_ok: typingOk,
+      past_forms: JSON.stringify(forms?.past ?? []),
+      participle_forms: JSON.stringify(forms?.participle ?? []),
     });
   }
 
   db.transaction(() => {
     db.prepare("DELETE FROM typing_word_bank").run();
     const ins = db.prepare(
-      "INSERT INTO typing_word_bank(lemma, char_count, part_of_speech, translation_ru, definition_ru, transcription, difficulty, status, source_sha256, imported_at) VALUES (@lemma, @char_count, @part_of_speech, @translation_ru, @definition_ru, @transcription, @difficulty, @status, @source_sha256, @imported_at)",
+      "INSERT INTO typing_word_bank(lemma, char_count, part_of_speech, translation_ru, definition_ru, transcription, difficulty, status, source_sha256, imported_at, typing_ok, past_forms, participle_forms) VALUES (@lemma, @char_count, @part_of_speech, @translation_ru, @definition_ru, @transcription, @difficulty, @status, @source_sha256, @imported_at, @typing_ok, @past_forms, @participle_forms)",
     );
     for (const row of rows) ins.run(row);
   }).immediate();
 
-  return { imported: rows.length, skipped };
+  return { imported: rows.length, skipped, lookupOnly, irregularVerbs };
 }

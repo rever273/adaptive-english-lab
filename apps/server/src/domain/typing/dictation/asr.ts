@@ -94,7 +94,7 @@ export class LocalDictationAsr implements DictationAsr {
   private chain: Promise<unknown> = Promise.resolve();
   private idle: NodeJS.Timeout | null = null;
 
-  constructor(private readonly o: { script: string; env?: NodeJS.ProcessEnv; idleMs?: number }) {}
+  constructor(private readonly o: { script: string; env?: NodeJS.ProcessEnv; idleMs?: number; device?: "cpu" | "cuda" }) {}
 
   available(): boolean {
     return existsSync(this.o.script) && findLargeV3(this.o.env) !== null;
@@ -103,7 +103,8 @@ export class LocalDictationAsr implements DictationAsr {
   private start(): Promise<void> {
     const custom = (this.o.env ?? process.env).ENGLISHLAB_PYTHON;
     const [command, ...pre] = custom ? [custom] : process.platform === "win32" ? ["py", "-3.11"] : ["python3.11"];
-    const child = spawn(command!, [...pre, this.o.script], { stdio: ["pipe", "pipe", "pipe"], windowsHide: true, env: { ...process.env, ...this.o.env, HF_HUB_OFFLINE: "1", PYTHONUNBUFFERED: "1" } });
+    const cpuArgs = this.o.device === "cpu" ? ["--device", "cpu", "--compute-type", "int8"] : [];
+    const child = spawn(command!, [...pre, this.o.script, ...cpuArgs], { stdio: ["pipe", "pipe", "pipe"], windowsHide: true, env: { ...process.env, ...this.o.env, HF_HUB_OFFLINE: "1", PYTHONUNBUFFERED: "1" } });
     this.child = child;
     child.stderr.resume();
     return new Promise<void>((resolve, reject) => {
@@ -136,22 +137,26 @@ export class LocalDictationAsr implements DictationAsr {
   transcribe(wav: Buffer, signal: AbortSignal): Promise<{ text: string; model: string }> {
     const run = async (): Promise<{ text: string; model: string }> => {
       if (signal.aborted) throw new DOMException("aborted", "AbortError");
-      this.ready ??= this.start();
-      await this.ready;
-      this.touch();
-      const id = ++this.seq;
-      const answer = new Promise<Record<string, unknown>>((resolve) => this.waiting.set(id, resolve));
-      this.child!.stdin.write(`${JSON.stringify({ id, wav: wav.toString("base64") })}\n`);
-      const onAbort = () => void this.stop();
+      const onAbort = () => { void this.stop().catch(() => undefined); };
       signal.addEventListener("abort", onAbort, { once: true });
+      let id: number | null = null;
       try {
+        this.ready ??= this.start();
+        await this.ready;
+        if (signal.aborted) throw new DOMException("aborted", "AbortError");
+        if (this.idle) clearTimeout(this.idle);
+        this.idle = null;
+        id = ++this.seq;
+        const answer = new Promise<Record<string, unknown>>((resolve) => this.waiting.set(id!, resolve));
+        this.child!.stdin.write(`${JSON.stringify({ id, wav: wav.toString("base64") })}\n`);
         const m = await answer;
         if (signal.aborted) throw new DOMException("aborted", "AbortError");
         if (m.ok !== true) throw new AsrError("asr_failed", String(m.error ?? "the local checker failed"), true);
         return { text: String(m.text ?? ""), model: "faster-whisper-large-v3" };
       } finally {
         signal.removeEventListener("abort", onAbort);
-        this.waiting.delete(id);
+        if (id !== null) this.waiting.delete(id);
+        if (this.child && !signal.aborted) this.touch();
       }
     };
     const next = this.chain.then(run, run);

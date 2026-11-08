@@ -6,6 +6,7 @@ import { runMigrations } from "../../../apps/server/src/db/migrate.js";
 import { openDatabase, type Db } from "../../../apps/server/src/db/open.js";
 import { booksOverview, checkpointBook, completeBook, computeBookEnd, startBook } from "../../../apps/server/src/domain/typing/books.js";
 import { addWord } from "../../../apps/server/src/domain/vocabulary/repository.js";
+import { typingAnalytics } from "../../../apps/server/src/domain/typing/analytics.js";
 import { countRequired } from "../../../packages/contracts/src/typingText.js";
 import { buildTypingResult } from "../../../apps/server/src/domain/typing/result.js";
 import { makeScratchRoot, projectRoot } from "../helpers.js";
@@ -111,6 +112,47 @@ describe("typing books domain", () => {
     expect(again.sessionId).toBe(result.sessionId);
     const xp2 = (d.prepare("SELECT COUNT(*) AS n FROM typing_xp_events WHERE session_id = ?").get(a.sessionId) as { n: number }).n;
     expect(xp2).toBe(1);
+  });
+
+  it("preserves character streak across checkpoints, resumes and completes idempotently", async () => {
+    const d = await setup();
+    const text = "It was a bright cold day in April.\n\nThe clocks were striking thirteen.\n\nWinston walked in.";
+    d.prepare("INSERT INTO typing_books(id, title, author, source, content_sha256, text_length, chapters_json, created_at) VALUES (?,?,?,?,?,?,?,?)")
+      .run("1984", "Book", "Author", "test", requireSha(text), text.length, "[]", new Date().toISOString());
+    const start = startBook(d, deps, booksDir);
+    expect(start.charStreak).toEqual({ current: 0, best: 0 });
+    checkpointBook(d, start.sessionId, { offset: 10, activeMs: 3000, charsTyped: 10, errors: 1, charStreak: { current: 3, best: 7 } });
+    const resumed = startBook(d, deps, booksDir);
+    expect(resumed.charStreak).toEqual({ current: 3, best: 7 });
+    expect(() => checkpointBook(d, start.sessionId, { offset: 11, activeMs: 4000, charsTyped: 11, errors: 1, charStreak: { current: 9, best: 8 } })).toThrow(/streak/i);
+    const end = { offset: start.endOffset, activeMs: 30000, charsTyped: 100, errors: 2, charStreak: { current: 20, best: 35 }, bestCombo: 25 };
+    completeBook(d, deps, booksDir, start.sessionId, end);
+    completeBook(d, deps, booksDir, start.sessionId, end);
+    expect(d.prepare("SELECT best_combo, best_char_streak FROM typing_sessions WHERE id = ?").get(start.sessionId)).toEqual({ best_combo: 25, best_char_streak: 35 });
+    const stats = typingAnalytics(d, { mode: "books", days: 7, timezone: "UTC", now: new Date() });
+    expect(stats.summary.bestCharStreak).toBe(35);
+    expect(stats.series.charStreak).toMatchObject([{ value: 35, status: "completed" }]);
+    expect(() => d.prepare("UPDATE typing_sessions SET best_char_streak=50 WHERE id=?").run(start.sessionId)).toThrow(/never changes/);
+  });
+
+  it("preserves the old rules for a resumed level and uses apostrophes for the next one", async () => {
+    const text = "Winston's book. Don't stop.";
+    const d = await setup(text);
+    d.prepare("INSERT INTO typing_books(id, title, author, source, content_sha256, text_length, chapters_json, created_at) VALUES (?,?,?,?,?,?,?,?)")
+      .run("1984", "Book", "Author", "test", requireSha(text), text.length, JSON.stringify([{ title: "Chapter", startOffset: 0, endOffset: text.length }]), new Date().toISOString());
+    const firstEnd = text.indexOf(".") + 1;
+    d.prepare("INSERT INTO typing_sessions(id, mode, status, level_number, settings_revision, settings_json, started_at, book_id, start_offset, end_offset, current_offset) VALUES (?, 'books', 'active', 1, 1, '{}', ?, '1984', 0, ?, ?)")
+      .run("legacy", new Date().toISOString(), firstEnd, 4);
+    const resumed = startBook(d, deps, booksDir);
+    expect(resumed).toMatchObject({ sessionId: "legacy", currentOffset: 4, keyRulesVersion: 1 });
+    const first = completeBook(d, deps, booksDir, resumed.sessionId, { offset: firstEnd, activeMs: 10000, charsTyped: countRequired(text, 0, firstEnd, 1), errors: 0 });
+    expect(first.metrics.charsCorrect).toBe(countRequired(text, 0, firstEnd, 1));
+    const next = startBook(d, deps, booksDir);
+    expect(next.keyRulesVersion).toBe(3);
+    const result = completeBook(d, deps, booksDir, next.sessionId, { offset: next.endOffset, activeMs: 10000, charsTyped: countRequired(text, next.startOffset, next.endOffset, 2), errors: 0 });
+    expect(result.metrics.charsCorrect).toBe(countRequired(text, next.startOffset, next.endOffset, 2));
+    expect(result.metrics.charsCorrect).toBe(countRequired(text, next.startOffset, next.endOffset, 1) + 1);
+    expect(buildTypingResult(d, d.prepare("SELECT * FROM typing_sessions WHERE id = ?").get("legacy") as never).metrics.charsCorrect).toBe(first.metrics.charsCorrect);
   });
 
   it("records one encounter per occurrence of a saved word when a level is completed, and none twice", async () => {

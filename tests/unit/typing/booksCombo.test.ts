@@ -38,6 +38,19 @@ describe("Precision Combo (Books)", () => {
     expect(s.combo).toBe(1);
   });
 
+  it("counts a corrected character in the new clean-key streak without changing score combo", () => {
+    const s = engine();
+    type(s, "the");
+    handleBookKey(s, "x");
+    handleBookKey(s, "Backspace");
+    handleBookKey(s, " ");
+    expect(s.charStreak).toBe(1);
+    expect(s.combo).toBe(0);
+    type(s, "quick");
+    expect(s.charStreak).toBe(6);
+    expect(s.bestCharStreak).toBe(6);
+  });
+
   it("speed does not matter: no time is involved in the combo", () => {
     const s = engine();
     s.sinceLastKeyMs = 60_000;

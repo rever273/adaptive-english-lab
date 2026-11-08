@@ -1,4 +1,4 @@
-import { mkdirSync, rmSync } from "node:fs";
+import { mkdirSync, readdirSync, rmSync } from "node:fs";
 import { randomUUID } from "node:crypto";
 import net from "node:net";
 import path from "node:path";
@@ -28,3 +28,6 @@ export function freePort(): Promise<number> {
 export function testConfig(dataRoot: string, port: number): AppConfig {
   return loadConfig({ ENGLISHLAB_DATA_ROOT: dataRoot, ENGLISHLAB_PORT: String(port) } as NodeJS.ProcessEnv, projectRoot);
 }
+
+/** The schema version of the current code: the number of migration files (tests must not pin it, every new migration would break them). */
+export const SCHEMA_VERSION = readdirSync(path.join(projectRoot, "migrations")).filter((f) => /^\d{3}_.*\.sql$/.test(f)).length;

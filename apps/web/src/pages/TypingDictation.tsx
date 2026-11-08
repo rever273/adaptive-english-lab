@@ -8,6 +8,7 @@ import { DictationScene } from "../game/dictationScene";
 import { playPracticeSound } from "../practiceSounds";
 import { fmtTotalTime } from "../format";
 import { LAYOUT_HINT, Toast, useToast } from "./typingShared";
+import { checkDailyGoal, DailyGoalCheck } from "../components/DailyGoalNotice";
 
 const MASK = "•••";
 const NEXT_DELAY_MS = 800;
@@ -199,6 +200,7 @@ export function DictationGame({ state, onResult, onExit }: { state: DictationSta
       const r = await api.answerDictation(ex.id, { attemptId: engine.attemptId, text: engine.text, activeMs: Math.round(clock.current.ms), typingMs: Math.round(typing.current.ms), keystrokes: typing.current.keys });
       typing.current = { ms: 0, last: 0, keys: 0 };
       const verdict = applyAnswer(engine, r);
+      checkDailyGoal("dictation");
       if (verdict === "wrong") {
         setMarks({ text: engine.text, segments: markTyped(engine.text, ex.textEn, true) });
         setMessage(engine.notice);
@@ -268,7 +270,7 @@ export function DictationGame({ state, onResult, onExit }: { state: DictationSta
       {ex && (
         <>
           {ex.isRepeat && <p className="muted small dictation-repeat">Repeat: you made mistakes in this sentence before.</p>}
-          <p className="dictation-words" aria-live="polite" aria-label="Revealed words">
+          <p className="dictation-words" aria-live="polite" aria-label="Revealed words" data-word-selection>
             {ex.words.map((w) => <span key={w.index} className={w.text === null ? "dictation-masked" : w.index === focus ? "dictation-shown dictation-focus" : "dictation-shown"}>{w.text ?? MASK}</span>)}
           </p>
           {ex.translationRu !== null && <p className="dictation-translation" lang="ru">{ex.translationRu}</p>}
@@ -280,6 +282,7 @@ export function DictationGame({ state, onResult, onExit }: { state: DictationSta
           <textarea
             ref={inputRef}
             className="dictation-input"
+            data-word-selection
             rows={3}
             autoFocus
             spellCheck={false}
@@ -349,6 +352,7 @@ export function DictationResultView({ result, onNext, onDone, onDailyDone }: { r
   const columns = Math.ceil(stats.length / 2); // exactly two rows, like Words and Books
   return (
     <section className="typing-result card" aria-label="Audio Dictation result">
+      <DailyGoalCheck mode="dictation" />
       <h2>Level {String(result.level).padStart(2, "0")} complete</h2>
       <div className="stat-grid" style={{ gridTemplateColumns: `repeat(${columns}, minmax(0, 1fr))` }}>
         {stats.map(([label, value, tip]) => <div className="stat typing-stat" key={label} tabIndex={0} role="group" aria-label={`${label}: ${value}. ${tip}`} data-tip={tip}><span className="stat-num">{value}</span><span className="stat-label">{label}</span></div>)}

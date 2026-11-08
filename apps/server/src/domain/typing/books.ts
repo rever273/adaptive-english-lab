@@ -2,7 +2,7 @@ import { createHash } from "node:crypto";
 import { existsSync, readFileSync } from "node:fs";
 import path from "node:path";
 import type { Db } from "../../db/open.js";
-import { countRequired, splitSentences, type TypingBookStartResponse } from "@english-lab/contracts";
+import { BOOK_KEY_RULES_VERSION, countRequired, splitSentences, type BookKeyRulesVersion, type TypingBookStartResponse } from "@english-lab/contracts";
 import { ApiError } from "../../errors.js";
 import { loadSettings } from "../sessions/policy.js";
 import { computeMetrics, METRICS_VERSION } from "./metrics.js";
@@ -68,13 +68,13 @@ function completedBooksWpm(db: Db): number {
  * End offset of the next book level: walk the sentences from `start` until about `targetChars` required characters are collected
  * and end at that sentence boundary, so a short level (2 minutes) really is short even when paragraphs are long.
  */
-export function computeBookEnd(text: string, start: number, targetChars: number): number {
+export function computeBookEnd(text: string, start: number, targetChars: number, rules: BookKeyRulesVersion = 1): number {
   if (start >= text.length) return text.length;
   let acc = 0;
   let last = -1;
   for (const s of splitSentences(text)) {
     if (s.end <= start) continue;
-    const count = countRequired(text, Math.max(s.start, start), s.end);
+    const count = countRequired(text, Math.max(s.start, start), s.end, rules);
     if (count === 0) continue;
     acc += count;
     last = s.end;
@@ -125,6 +125,12 @@ export function booksOverview(db: Db, booksDir: string): BooksOverview {
   return { available: true, reason: null, finished: offset >= row.text_length, bookId: row.id, title: row.title, level, chapter, offset, percentRead, activeSessionId: active?.id ?? null };
 }
 
+/** Existing sessions have no rules marker and must finish with their original key set. */
+function keyRulesOf(row: TypingSessionRow): BookKeyRulesVersion {
+  const settings = JSON.parse(row.settings_json) as { bookKeyRulesVersion?: unknown };
+  return settings.bookKeyRulesVersion === 3 ? 3 : settings.bookKeyRulesVersion === 2 ? 2 : 1;
+}
+
 function bookStartResponse(db: Db, s: TypingSessionRow, row: BookRow, booksDir: string): TypingBookStartResponse {
   const text = loadBookTextOrThrow(row, booksDir);
   const start = s.start_offset ?? 0;
@@ -140,6 +146,8 @@ function bookStartResponse(db: Db, s: TypingSessionRow, row: BookRow, booksDir: 
     startOffset: start,
     endOffset: end,
     currentOffset: current,
+    keyRulesVersion: keyRulesOf(s),
+    charStreak: s.best_char_streak === null || s.current_char_streak === null ? null : { current: s.current_char_streak, best: s.best_char_streak },
     text: text.slice(start, end),
     chapters: chaptersOf(row),
     textLength: row.text_length,
@@ -168,14 +176,14 @@ export function startBook(db: Db, deps: BooksDeps, booksDir: string): TypingBook
 
   const wpm = completedBooksWpm(db);
   const targetChars = minutes * wpm * 5;
-  const endOffset = computeBookEnd(text, startOffset, targetChars);
+  const endOffset = computeBookEnd(text, startOffset, targetChars, BOOK_KEY_RULES_VERSION);
   if (endOffset <= startOffset) throw new ApiError(409, "TYPING_BOOK_FINISHED", "You have reached the end of the book.");
 
   const id = deps.newId();
   const level = completed.n + 1;
   db.prepare(
-    "INSERT INTO typing_sessions(id, mode, status, level_number, settings_revision, settings_json, started_at, book_id, start_offset, end_offset, current_offset) VALUES (?, 'books', 'active', ?, ?, ?, ?, ?, ?, ?, ?)",
-  ).run(id, level, settings.revision, JSON.stringify(settings.values), deps.now().toISOString(), row.id, startOffset, endOffset, startOffset);
+    "INSERT INTO typing_sessions(id, mode, status, level_number, settings_revision, settings_json, started_at, book_id, start_offset, end_offset, current_offset, best_char_streak, current_char_streak) VALUES (?, 'books', 'active', ?, ?, ?, ?, ?, ?, ?, ?, 0, 0)",
+  ).run(id, level, settings.revision, JSON.stringify({ ...settings.values, bookKeyRulesVersion: BOOK_KEY_RULES_VERSION }), deps.now().toISOString(), row.id, startOffset, endOffset, startOffset);
 
   return bookStartResponse(db, sessionRow(db, id), row, booksDir);
 }
@@ -189,6 +197,14 @@ export interface BookCheckpoint {
   keyStats?: KeyStat[] | undefined;
   /** longest run of correct characters (Precision Combo) */
   bestCombo?: number | undefined;
+  charStreak?: { current: number; best: number } | undefined;
+}
+
+function checkedStreak(row: TypingSessionRow, req: BookCheckpoint): { current: number; best: number } | null {
+  if (row.best_char_streak === null || !req.charStreak) return null;
+  const { current, best } = req.charStreak;
+  if (current > best || best > req.charsTyped - req.errors || best < row.best_char_streak) throw new ApiError(400, "TYPING_COUNTERS_INVALID", "Invalid character streak");
+  return { current, best };
 }
 
 export function checkpointBook(db: Db, sessionId: string, req: BookCheckpoint): { ok: true; applied: boolean } {
@@ -202,7 +218,8 @@ export function checkpointBook(db: Db, sessionId: string, req: BookCheckpoint): 
     // stale keepalive from before an earlier checkpoint: ignore without tripping the identity trigger
     return { ok: true, applied: false };
   }
-  db.prepare("UPDATE typing_sessions SET current_offset = ?, active_ms = ?, chars_typed = ?, errors = ? WHERE id = ?").run(req.offset, req.activeMs, req.charsTyped, req.errors, sessionId);
+  const streak = checkedStreak(row, req);
+  db.prepare("UPDATE typing_sessions SET current_offset = ?, active_ms = ?, chars_typed = ?, errors = ?, best_char_streak = ?, current_char_streak = ? WHERE id = ?").run(req.offset, req.activeMs, req.charsTyped, req.errors, streak?.best ?? null, streak?.current ?? null, sessionId);
   return { ok: true, applied: true };
 }
 
@@ -219,15 +236,16 @@ export function completeBook(db: Db, deps: BooksDeps, booksDir: string, sessionI
   if (!bRow) throw new ApiError(409, "TYPING_BOOK_UNAVAILABLE", "Book not found");
 
   const text = loadBookTextOrThrow(bRow, booksDir);
-  const charsCorrect = countRequired(text, row.start_offset ?? 0, end);
+  const streak = checkedStreak(row, req);
+  const charsCorrect = countRequired(text, row.start_offset ?? 0, end, keyRulesOf(row));
   const metrics = computeMetrics({ mode: "books", activeMs: req.activeMs, charsTyped: req.charsTyped, errors: req.errors, charsCorrect, level: row.level_number, completed: true });
   const xp = typingXpForBooks(charsCorrect);
   const now = deps.now().toISOString();
 
   db.transaction(() => {
     db.prepare(
-      "UPDATE typing_sessions SET status = 'completed', ended_at = ?, current_offset = ?, active_ms = ?, chars_typed = ?, errors = ?, chars_correct = ?, wpm = ?, cpm = ?, accuracy = ?, score = ?, metrics_version = ?, best_combo = ? WHERE id = ?",
-    ).run(now, end, req.activeMs, req.charsTyped, req.errors, charsCorrect, metrics.wpm, metrics.cpm, metrics.accuracy, metrics.score, METRICS_VERSION, req.bestCombo ?? null, sessionId);
+      "UPDATE typing_sessions SET status = 'completed', ended_at = ?, current_offset = ?, active_ms = ?, chars_typed = ?, errors = ?, chars_correct = ?, wpm = ?, cpm = ?, accuracy = ?, score = ?, metrics_version = ?, best_combo = ?, best_char_streak = ?, current_char_streak = ? WHERE id = ?",
+    ).run(now, end, req.activeMs, req.charsTyped, req.errors, charsCorrect, metrics.wpm, metrics.cpm, metrics.accuracy, metrics.score, METRICS_VERSION, req.bestCombo ?? null, streak?.best ?? null, streak?.current ?? null, sessionId);
     awardTypingXp(db, { id: deps.newId(), sessionId, amount: xp, at: now });
     saveKeyStats(db, deps.newId, sessionId, req.keyStats ?? [], now);
     // the saved words that were in the passage just typed: one encounter per occurrence (re-completing adds nothing)

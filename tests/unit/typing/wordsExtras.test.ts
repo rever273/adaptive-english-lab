@@ -37,6 +37,21 @@ describe("combo", () => {
     expect(s.bestStreak).toBe(3);
   });
 
+  it("tracks correct character runs across words without changing the word combo", () => {
+    const c = config(["cat", "dog", "sun"]), s = createWordsEngine(c);
+    ["cat", "dog", "sun"].forEach((word, i) => spawn(s, word, i));
+    typeWord(s, c, "cat", 0, 10);
+    typeWord(s, c, "do", 30, 10);
+    expect(s.bestCharStreak).toBe(5);
+    handleWordKey(s, c, "x", 50);
+    expect(s.charStreak).toBe(0);
+    typeWord(s, c, "g", 60, 10);
+    typeWord(s, c, "sun", 70, 10);
+    expect(s.charStreak).toBe(4);
+    expect(s.bestCharStreak).toBe(5);
+    expect(s.bestStreak).toBe(1);
+  });
+
   it("a word with a wrong key does not extend the streak even if it is finished", () => {
     const c = config(["ab"]);
     const s = createWordsEngine(c);

@@ -5,9 +5,11 @@ import { splitSentences } from "@english-lab/contracts";
 import * as api from "../api";
 import type { TypingBookStartResponse, TypingResult } from "../api";
 import { TypingKeyboard } from "../components/TypingKeyboard";
-import { createBooksEngine, handleBookKey, type BooksEngineState } from "../game/booksEngine";
+import { DailyGoalCheck } from "../components/DailyGoalNotice";
+import { createBooksEngine, handleBookKey, previousCompletedSentence, type BooksEngineState } from "../game/booksEngine";
 import { firstTranslation, normalizeBookWord } from "../format";
 import { BooksScene } from "../game/booksScene";
+import { BookSpeedSamples, type BookSpeedSample } from "../game/bookSpeedSamples";
 import { playPracticeSound } from "../practiceSounds";
 import { CYRILLIC, LAYOUT_HINT, Toast, useToast } from "./typingShared";
 
@@ -54,11 +56,11 @@ function struggledWords(engine: BooksEngineState, known: Map<string, unknown>): 
   return out.slice(0, 8);
 }
 
-export function BooksGame({ sessionId, data, onResult, onExit }: { sessionId: string; data: TypingBookStartResponse; onResult: (r: TypingResult, struggled: string[]) => void; onExit: () => void }) {
+export function BooksGame({ sessionId, data, onResult, onExit }: { sessionId: string; data: TypingBookStartResponse; onResult: (r: TypingResult, struggled: string[], samples: BookSpeedSample[]) => void; onExit: () => void }) {
   const canvasRef = useRef<HTMLCanvasElement>(null);
   const sceneRef = useRef<BooksScene | null>(null);
   const engineRef = useRef<BooksEngineState | null>(null);
-  useTypingActivity(sessionId, "books", () => engineRef.current?.activeMs ?? 0);
+  const flushActivity = useTypingActivity(sessionId, "books", () => engineRef.current?.activeMs ?? 0);
   const [paused, setPaused] = useState(false);
   const pausedRef = useRef(false);
   const [version, setVersion] = useState(0);
@@ -66,6 +68,9 @@ export function BooksGame({ sessionId, data, onResult, onExit }: { sessionId: st
   const [capitalNotice, showCapitalNotice] = useToast(1800);
   const lastCheckpoint = useRef(0);
   const finishing = useRef(false);
+  const [completion, setCompletion] = useState<{ status: "saving" | "ready" | "error"; result?: TypingResult; samples: BookSpeedSample[]; message?: string } | null>(null);
+  const completionRef = useRef(completion); completionRef.current = completion;
+  const samplesRef = useRef<BookSpeedSamples | null>(null);
   const soundsRef = useRef(true);
   const kbRef = useRef<HTMLDivElement>(null);
   const [heights, setHeights] = useState({ canvas: 220, text: 220 });
@@ -78,7 +83,7 @@ export function BooksGame({ sessionId, data, onResult, onExit }: { sessionId: st
   const [vocabOffsets, setVocabOffsets] = useState<Set<number>>(new Set());
   const glossTimer = useRef<number | undefined>(undefined);
   const glossShown = useRef(new Set<number>());
-  // F3: a quick Russian translation of the sentence being typed, shown on the strip where the ship flies
+  // F3: translate the last completed sentence, shown on the strip where the ship flies
   const sentences = useMemo(() => splitSentences(data.text), [data.text]);
   const [translation, setTranslation] = useState<{ start: number; end: number; status: "loading" | "ready" | "error"; text: string } | null>(null);
   const translationRef = useRef(translation);
@@ -108,10 +113,7 @@ export function BooksGame({ sessionId, data, onResult, onExit }: { sessionId: st
   }, [data.text, sessionId, paragraphOf]);
   /** the sentence before the one being typed (null while the first one is still being typed) */
   const previousSentence = useCallback(() => {
-    const off = engineRef.current?.offset ?? 0;
-    const i = sentences.findIndex((s) => off <= s.end);
-    const current = i < 0 ? sentences.length : i;
-    return current > 0 ? sentences[current - 1]! : null;
+    return previousCompletedSentence(sentences, engineRef.current?.offset ?? 0);
   }, [sentences]);
   const speakPrevious = useCallback(async () => {
     if (speechOff.current) { say("Piper is not available. Run npm run dictation:setup."); return; }
@@ -189,9 +191,12 @@ export function BooksGame({ sessionId, data, onResult, onExit }: { sessionId: st
       initialActiveMs: data.activeMs,
       initialCharsTyped: data.charsTyped,
       initialErrors: data.errors,
+      keyRulesVersion: data.keyRulesVersion ?? 1,
+      charStreak: data.charStreak ?? null,
     });
   }
   const engine = engineRef.current;
+  if (!samplesRef.current) samplesRef.current = new BookSpeedSamples(engine);
 
   useEffect(() => {
     let active = true;
@@ -214,7 +219,7 @@ export function BooksGame({ sessionId, data, onResult, onExit }: { sessionId: st
     return () => window.clearInterval(id);
   }, []);
 
-  const counters = useCallback(() => ({ offset: data.startOffset + engine.offset, activeMs: Math.round(engine.activeMs), charsTyped: engine.charsTyped, errors: engine.errorCount }), [data.startOffset, engine]);
+  const counters = useCallback(() => ({ offset: data.startOffset + engine.offset, activeMs: Math.round(engine.activeMs), charsTyped: engine.charsTyped, errors: engine.errorCount, ...(data.charStreak ? { charStreak: { current: engine.charStreak, best: engine.bestCharStreak } } : {}) }), [data.startOffset, data.charStreak, engine]);
 
   const checkpoint = useCallback((force = false) => {
     const now = performance.now();
@@ -223,20 +228,34 @@ export function BooksGame({ sessionId, data, onResult, onExit }: { sessionId: st
     void api.checkpointTypingBook(sessionId, counters());
   }, [sessionId, counters]);
 
+  const saveCompleted = useCallback((samples: BookSpeedSample[]) => {
+    setCompletion({ status: "saving", samples });
+    void api.completeTypingBook(sessionId, { ...counters(), offset: data.endOffset, bestCombo: engine.bestCombo, keyStats: [...engine.keyStats].map(([pair, f]) => ({ pair, count: f.count, totalMs: f.totalMs, errors: f.errors })).filter((f) => f.count > 0 || f.errors > 0) }).then((result) => {
+      api.announceXp();
+      setCompletion({ status: "ready", result, samples });
+    }).catch((error: unknown) => {
+      setCompletion({ status: "error", samples, message: error instanceof Error ? error.message : "Could not save the result." });
+    });
+  }, [sessionId, counters, data.endOffset, engine]);
   const complete = useCallback(() => {
     if (finishing.current) return;
     finishing.current = true;
-    void api.completeTypingBook(sessionId, { ...counters(), offset: data.endOffset, bestCombo: engine.bestCombo, keyStats: [...engine.keyStats].map(([pair, f]) => ({ pair, count: f.count, totalMs: f.totalMs, errors: f.errors })).filter((f) => f.count > 0 || f.errors > 0) }).then((result) => {
-      api.announceXp();
-      onResult(result, struggledWords(engine, knownRef.current));
-    }).catch(() => onExit());
-  }, [sessionId, counters, data.endOffset, onResult, onExit, engine]);
+    flushActivity();
+    saveCompleted(samplesRef.current!.finish(engine));
+  }, [engine, flushActivity, saveCompleted]);
+  const continueToResult = useCallback(() => {
+    const done = completionRef.current;
+    if (done?.status === "ready" && done.result) onResult(done.result, struggledWords(engine, knownRef.current), done.samples);
+  }, [engine, onResult]);
+
+  // A saved checkpoint may already be at the end if the page closed during completion.
+  useEffect(() => { if (engine.finished) complete(); }, [engine, complete]);
 
   // the scene
   useEffect(() => {
     const canvas = canvasRef.current;
     if (!canvas) return;
-    const scene = new BooksScene(canvas, { engine, level: data.level, paused: () => pausedRef.current });
+    const scene = new BooksScene(canvas, { engine, level: data.level, paused: () => pausedRef.current || finishing.current, onActiveFrame: (dt) => samplesRef.current?.advance(dt, engine) });
     sceneRef.current = scene;
     scene.start();
     const onResize = () => scene.resize();
@@ -254,9 +273,11 @@ export function BooksGame({ sessionId, data, onResult, onExit }: { sessionId: st
       // typing into the "add word" panel or any field is not game input
       const target = e.target as HTMLElement | null;
       if (target?.closest?.("input, textarea, select, [contenteditable=true], .word-panel")) return;
+      if (e.key === "Enter" && finishing.current && completionRef.current?.status !== "error") { e.preventDefault(); if (!e.repeat) continueToResult(); return; }
+      if ((e.key === "Escape" || e.key === "F2") && finishing.current) { e.preventDefault(); return; }
       if (e.key === "Escape" || e.key === "F2") { e.preventDefault(); if (!e.repeat) togglePause(); return; }
-      if (e.key === "F3") { e.preventDefault(); if (!e.repeat && !pausedRef.current) toggleTranslationRef.current(); return; }
-      if (e.key === "F4") { e.preventDefault(); if (!e.repeat && !pausedRef.current) void speakRef.current(); return; }
+      if (e.key === "F3") { e.preventDefault(); if (!e.repeat) toggleTranslationRef.current(); return; }
+      if (e.key === "F4") { e.preventDefault(); if (!e.repeat) void speakRef.current(); return; }
       if (e.key !== "Backspace" && e.key.length !== 1) return;
       e.preventDefault();
       e.stopPropagation();
@@ -275,7 +296,7 @@ export function BooksGame({ sessionId, data, onResult, onExit }: { sessionId: st
       if (fired.wordDone || r.tokenComplete) checkpoint();
       if (r.finished) {
         window.setTimeout(() => sound("complete"), 450);
-        window.setTimeout(() => complete(), 1100);
+        complete();
       }
     };
     const onHide = () => {
@@ -294,12 +315,11 @@ export function BooksGame({ sessionId, data, onResult, onExit }: { sessionId: st
       document.removeEventListener("visibilitychange", onHide);
       window.removeEventListener("pagehide", onPageHide);
     };
-  }, [engine, checkpoint, complete, counters, sessionId, togglePause, showLayoutNotice, showCapitalNotice]);
+  }, [engine, checkpoint, complete, continueToResult, counters, sessionId, togglePause, showLayoutNotice, showCapitalNotice]);
 
   const toggleTranslation = useCallback(() => {
-    const off = engine.offset;
-    const sent = sentences.find((s) => off <= s.end) ?? sentences[sentences.length - 1];
-    if (!sent) return;
+    const sent = previousSentence();
+    if (!sent) { say("Finish the first sentence, then press F3 to translate it."); return; }
     if (translationRef.current?.start === sent.start) { setTranslation(null); return; }
     const cached = translationCache.current.get(sent.start);
     if (cached !== undefined) { setTranslation({ start: sent.start, end: sent.end, status: "ready", text: cached }); return; }
@@ -307,15 +327,16 @@ export function BooksGame({ sessionId, data, onResult, onExit }: { sessionId: st
     void api.translateSentence(engine.text.slice(sent.start, sent.end)).then((r) => {
       translationCache.current.set(sent.start, r.text);
       setTranslation((cur) => (cur?.start === sent.start ? { ...cur, status: "ready", text: r.text } : cur));
-    }).catch(() => {
-      setTranslation((cur) => (cur?.start === sent.start ? { ...cur, status: "error", text: "Translation unavailable right now." } : cur));
+    }).catch((error: unknown) => {
+      const message = error instanceof api.ApiRequestError ? error.message : "Translation unavailable right now.";
+      setTranslation((cur) => (cur?.start === sent.start ? { ...cur, status: "error", text: message } : cur));
     });
-  }, [engine, sentences]);
+  }, [engine, previousSentence, say]);
   const toggleTranslationRef = useRef(toggleTranslation);
   toggleTranslationRef.current = toggleTranslation;
 
   const abort = () => {
-    void api.abortTypingBook(sessionId, { activeMs: Math.round(engine.activeMs), charsTyped: engine.charsTyped, errors: engine.errorCount });
+    if (!finishing.current) void api.abortTypingBook(sessionId, { activeMs: Math.round(engine.activeMs), charsTyped: engine.charsTyped, errors: engine.errorCount });
     onExit();
   };
 
@@ -360,8 +381,8 @@ export function BooksGame({ sessionId, data, onResult, onExit }: { sessionId: st
           <span className="muted small typing-live" title="Your actual speed on this level so far: correct characters / 5 per minute of play. Updates all the time.">Speed: {liveWpm === null ? "—" : Math.round(liveWpm)} WPM</span>
           <span className="actions">
             <button className="btn" onClick={() => void speakPrevious()} title="Hear the previous sentence (F4)">Hear previous (F4)</button>
-            <button className="btn" onClick={() => toggleTranslation()} title="Russian translation of this sentence (F3)">Translate (F3)</button>
-            <button className="btn" onClick={togglePause} title="F2">{paused ? "Resume" : "Pause"} (F2)</button>
+            <button className="btn" onClick={() => toggleTranslation()} title="Russian translation of the previous sentence (F3)">Translate (F3)</button>
+            <button className="btn" disabled={!!completion} onClick={togglePause} title="F2">{paused ? "Resume" : "Pause"} (F2)</button>
             <button className="btn" onClick={abort}>Exit</button>
           </span>
         </div>
@@ -371,8 +392,14 @@ export function BooksGame({ sessionId, data, onResult, onExit }: { sessionId: st
         </div>
         <div className="typing-stage">
           <canvas ref={canvasRef} className="typing-canvas books-canvas" style={{ height: heights.canvas }} aria-label="Books typing game" />
-          {paused && <div className="typing-paused" role="status">Paused — press Resume, F2 or Esc to continue.</div>}
-          {translation && engine.offset <= translation.end && (
+          {completion?.status === "ready" && <DailyGoalCheck mode="books" />}
+          {completion && <div className="typing-paused books-complete" role="status" data-testid="books-complete">
+            <strong>Level {String(data.level).padStart(2, "0")} complete</strong>
+            <p className="small muted">Press F4 to hear the last sentence or F3 to translate it.</p>
+            {completion.status === "error" ? <><p className="small" role="alert">{completion.message}</p><button className="btn btn-primary" onClick={() => saveCompleted(completion.samples)} autoFocus>Retry saving</button></> : <button className="btn btn-primary" disabled={completion.status !== "ready"} onClick={continueToResult} autoFocus data-testid="books-show-result">{completion.status === "saving" ? "Saving..." : "Continue"} {completion.status === "ready" && <kbd>Enter</kbd>}</button>}
+          </div>}
+          {paused && !completion && <div className="typing-paused" role="status">Paused — press Resume, F2 or Esc to continue.</div>}
+          {translation && previousSentence()?.start === translation.start && (
             <div className={`books-translation${translation.status === "error" ? " error" : ""}`} role="status" lang="ru">
               {translation.status === "loading" ? "Translating…" : translation.text}
             </div>
@@ -385,8 +412,8 @@ export function BooksGame({ sessionId, data, onResult, onExit }: { sessionId: st
       <BookText engine={engine} version={version} height={heights.text} vocab={vocabOffsets} />
       {gloss && <div className={`books-gloss${gloss.below ? " below" : ""}`} style={{ left: gloss.x, top: gloss.y }} role="status" data-no-word><strong>{gloss.text}</strong>{gloss.lemma && <span> · {gloss.lemma}</span>}</div>}
       <div ref={kbRef} data-no-word style={{ userSelect: "none" }}>
-        <TypingKeyboard next={paused || engine.errors.length > 0 ? null : hintChar(engine)} />
-        <p className="muted small">Type the text left to right; F3 translates the sentence; F4 reads the previous sentence aloud; select a word with the mouse to save it. Your saved words are tinted. Backspace removes a wrong letter. Quotes, long dashes and other marks in dark blue are skipped for you.</p>
+        <TypingKeyboard next={paused || completion || engine.errors.length > 0 ? null : hintChar(engine)} />
+        <p className="muted small">Type the text left to right; F3 translates the previous sentence; F4 reads it aloud; select a word with the mouse to save it. Your saved words are tinted. Backspace removes a wrong letter. Quotation marks, long dashes and other marks in dark blue are skipped for you.</p>
       </div>
     </div>
   );

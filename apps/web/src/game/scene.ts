@@ -181,7 +181,8 @@ export class WordsScene {
   }
 
   private place(word: WordsWord): { x: number; y: number; r: number } {
-    const laneW = this.w() / this.lanes;
+    // Keep the right-hand portion of the sky clear for the active word's image.
+    const laneW = this.w() * 0.76 / this.lanes;
     return { x: laneW * (Math.max(1, word.lane) - 0.5), y: word.y * this.lineY(), r: Math.max(28, Math.min(48, word.lemma.length * 4.8)) };
   }
 

@@ -23,7 +23,7 @@ import { modelShaOpt } from "../../voices/model.js";
 import { loadSettings } from "../../sessions/policy.js";
 import { buildItems, mulberry32, targetWordsFor, VOCABULARY_SHARE, weakGrammarSkills, type DictationTopic, type PlanItem } from "./planning.js";
 import type { DictationAsr } from "./asr.js";
-import { isCorrect, tokenize, wordDistance } from "./check.js";
+import { isCorrect, rawTokens, tokenize, wordDistance } from "./check.js";
 import { displayWords, revealedSet, stuckWord } from "./hints.js";
 
 /** Everything the dictation mode needs from outside the database. Tests replace the clients with fakes. */
@@ -438,7 +438,7 @@ export function openTranslation(db: Db, deps: Deps, exerciseId: string): { trans
  */
 function writeHint(db: Db, deps: Deps, e: ExerciseRow, typedText: string, source: "manual" | "wrong_answer"): boolean {
   const words = displayWords(e.text_en);
-  let k = stuckWord(words, tokenize(typedText));
+  let k = stuckWord(words, tokenize(typedText), rawTokens(typedText));
   if (k === null) {
     // a hint on an already complete answer is not spent; after a wrong answer this cannot happen, but the last word is revealed rather than nothing
     if (source === "manual") return false;

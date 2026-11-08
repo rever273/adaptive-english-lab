@@ -62,11 +62,12 @@ function setSmallLevel(d: Db): void {
 }
 
 describe("typing words domain", () => {
-  it("imports the word bank, excluding Difficulty=1 and non-lowercase words", async () => {
+  it("imports every word for lookup, but only lowercase Difficulty 2-5 words are usable in Typing Words", async () => {
     const d = await setup();
     const result = importWordBank(d, [HEADER, ...ROWS, '20;China;5;3;x;1;;1;Neutral;Китай;x;x;[x];noun;x;x'].join("\n"), "sha", { now: () => new Date() });
-    expect(result.imported).toBe(18); // 18 valid rows; cat2 (Difficulty=1) and China (uppercase) are dropped
-    const count = (d.prepare("SELECT COUNT(*) AS n FROM typing_word_bank").get() as { n: number }).n;
+    expect(result.imported).toBe(19); // cat2 has a digit and is dropped; the rest are kept for lookup
+    expect(result.lookupOnly).toBe(1); // China (capitalised)
+    const count = (d.prepare("SELECT COUNT(*) AS n FROM typing_word_bank WHERE typing_ok = 1").get() as { n: number }).n;
     expect(count).toBe(18);
   });
 

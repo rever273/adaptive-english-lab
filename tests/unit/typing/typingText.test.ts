@@ -30,6 +30,16 @@ describe("typing text character map", () => {
     expect(keys.join("")).toBe("i dont know, winston said.");
   });
 
+  it("requires apostrophes inside words in version 2 while skipping dialogue quotes", () => {
+    const text = "'Winston's' don't It\u2019s black-moustachio'd.";
+    const keys = buildKeys(text, 0, text.length, 2);
+    expect(keys.map((k) => k.key).join("")).toBe("winston's don't it's black-moustachio'd.");
+    expect(keys.filter((k) => k.key === "'")).toHaveLength(4);
+    expect(buildKeys(text, 0, text.length, 1).filter((k) => k.key === "'")).toHaveLength(0);
+    expect(countRequired(text, 0, text.length, 2) - countRequired(text, 0, text.length, 1)).toBe(4);
+    expect(tokensOf(text, { start: 0, end: text.length }, 2).some((t) => t.keys.some((k) => k.key === "'"))).toBe(true);
+  });
+
   it("counts required characters over a range deterministically", () => {
     const text = "“I don't know,” Winston said.";
     const n = countRequired(text, 0, text.length);
@@ -49,6 +59,12 @@ describe("typing text character map", () => {
     const s = splitSentences(text)[0]!;
     const keys = buildKeys(text, s.start, s.end).map((k) => k.key);
     expect(keys).toEqual(["w", "o", "r", "d", " ", "w", "o", "r", "d"]);
+  });
+
+  it("skips unspaced dashes in version 3 without changing hyphens or real spaces", () => {
+    const text = "live—did well-known — yes–indeed";
+    expect(buildKeys(text, 0, text.length, 3).map((k) => k.key).join("")).toBe("livedid well-known yesindeed");
+    expect(buildKeys(text, 0, text.length, 2).map((k) => k.key).join("")).toBe("live did well-known yes indeed");
   });
 
   it("builds tokens from a sentence (a leading quote is skipped, trailing punctuation belongs to the token)", () => {

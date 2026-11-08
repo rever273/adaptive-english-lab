@@ -23,15 +23,34 @@ The app interface is in English; harder explanations and translations are intend
 
 ## Screenshots
 
-Real screenshots of the running app (dark theme), taken on the small non-release demo profile (`npm run slice`) with fictional, hand-written sentences. No personal data is shown.
+Real screenshots of the running app (dark theme), taken on the small non-release demo profile (`npm run slice`), so the progress counters are empty and no personal data is shown.
 
-| Start page | Exercise | Feedback with an optional retry |
+| Daily Practice | Practice (grammar) | Vocabulary |
 |---|---|---|
-| ![Start page with lesson path](documentation/images/dashboard.png) | ![Choose-the-form exercise](documentation/images/practice-choose-form.png) | ![Feedback after a wrong answer](documentation/images/practice-feedback.png) |
+| ![Daily plan with time goals](documentation/images/app-daily.png) | ![Grammar lesson path and diagnostic](documentation/images/app-practice.png) | ![Vocabulary practice and single-word lessons](documentation/images/app-vocabulary.png) |
 
-| Session summary | Analytics |
-|---|---|
-| ![Session summary with answers and AI check](documentation/images/session-summary.png) | ![Analytics from raw attempts](documentation/images/analytics.png) |
+| Typing | Analytics | Content Studio | Settings |
+|---|---|---|---|
+| ![Words, Books and Audio Dictation](documentation/images/app-typing.png) | ![Analytics and Journey](documentation/images/app-analytics.png) | ![Batches for new exercises](documentation/images/app-studio.png) | ![Daily goals and journey hours](documentation/images/app-settings.png) |
+
+## Sections of the app
+
+The top menu has three groups of tabs (Alt+1 … Alt+0 switch between them):
+
+| Group | Tab | What it is for |
+|---|---|---|
+| Plan | **Daily Practice** | A flexible plan for today: a time goal per practice, total time practised today (turns green once the planned total is reached) and a one-click start. |
+| Practise | **Practice** | Grammar: optional diagnostic, a path of lessons, sessions of short exercises with feedback, voice input and a session summary. |
+| Practise | **Vocabulary** | Your saved words and expressions; short sessions with them in new sentences (a matching game closes each session); "Single Word" lessons in five steps. |
+| Practise | **Typing** | **Words** (arcade), **Books** (calm typing of a classic) and **Audio Dictation** (listen and type). |
+| Practise | **Conversation** | Short local conversations with tentative suggestions (experimental). |
+| Tools | **Tutor** | Explains an answered task; prepares a task for an external coding agent. |
+| Tools | **Analytics** | Grammar, Vocabulary, Typing and Conversation reports from raw attempts, and **Journey**: total practice time, a chart of practice per day, the share of each practice and the route B1 → C2. |
+| Tools | **Content Studio** | Batches of new grammar and vocabulary exercises, stock warnings, and the task for the reviewing agent. |
+| Tools | **AI Tasks** | The queue of local AI jobs and what the GPU is doing. |
+| Tools | **Settings & Status** | Daily goals, journey hours, session settings, backups and the health of every optional component. |
+
+The header also shows three activity tracks (Grammar, Vocabulary, Typing XP) and a Journey progress bar.
 
 ## Key features
 
@@ -52,8 +71,9 @@ Legend: **Working** = implemented and covered by automated tests · **Partial** 
 | Vocabulary | Working | Save a word from any exercise; the local model drafts a translation and a CEFR level, your own edits are never overwritten. No flashcards. |
 | Vocabulary Practice | Working | Optional short sessions (5–10 tasks, default 8) with your saved words in new sentences: word in context, recall from a clue, collocations. Graded by code; kept apart from grammar Mastery. |
 | Typing Practice | Working | A third practice kind: **Words** (arcade: type words to destroy falling meteors) and **Books** (calm typing of a classic novel, no way to lose), with its own Typing XP, speed/accuracy analytics and local settings. |
-| Keyboard | Working | Enter answers and continues, 1–9 pick an option, I / H / A / S act, hold M to speak (release to transcribe), Alt+1…8 switch tabs. The key is shown on a small badge on each button. |
+| Keyboard | Working | Enter answers and continues, 1–9 pick an option, I / H / A / S act, hold M to speak (release to transcribe), Alt+1…0 switch tabs. The key is shown on a small badge on each button. |
 | Audio Dictation | Working (needs setup) | A third Typing mode: listen to an Australian English sentence (local Piper voices) and type it. Hints follow where you stopped; every sentence was heard back by Whisper before it reached a lesson. |
+| Conversation | Experimental | Short local Gemma conversations with optional speech-to-text and separate tentative suggestions. Conversation text is saved locally for resuming and can be deleted while keeping aggregate counts. Suggestions do not affect Mastery. |
 | Levels and XP | Working | Three independent tracks in the header — Grammar, Vocabulary and Typing. Grammar and Vocabulary: 10 XP per finished task; Typing: XP per completed typing level. A level every 100 XP, tier badges. Activity, not a grade. |
 | Tutor | Working | Explains an answered task (approved rule first, AI drafts labelled as drafts); "Copy Agent Task" for an external coding agent. |
 | Content Studio | Working, reviewed | Grammar and dictionary-based vocabulary batches (default 50), stock warnings, and one copied agent task to review, repair and publish. Every final revision needs an individual review; corrections need an independent reviewer. |
@@ -77,9 +97,13 @@ Legend: **Working** = implemented and covered by automated tests · **Partial** 
 | Language | TypeScript (Node.js 22) | Shared across backend, frontend and contracts. |
 | Backend | Fastify 5, Zod, Ajv | Local HTTP API on `127.0.0.1`, validation, job queue and scheduler. |
 | Database | SQLite via `better-sqlite3` | Raw attempts, exercise revisions, analytics versions, AI annotations, jobs. |
-| Frontend | React 19, Vite | Single-page UI served by the backend. |
-| Local LLM | [Ollama](https://ollama.com) with `gemma4:12b` | The single local model: tentative answer checks, drafts, vocabulary cards, tutor drafts. |
-| Speech recognition | Groq `whisper-large-v3` (when `GROQ_API_KEY` is set), else `faster-whisper` (Python 3.11, CUDA) | Setting `GROQ_API_KEY` in the environment or the git-ignored `.env` sends audio to Groq; otherwise the local worker is used. |
+| Frontend | React 19, Vite, PrimeIcons | Single-page UI served by the backend. |
+| Local LLM | [Ollama](https://ollama.com) with `gemma4:12b` | The single local model: tentative answer checks, drafts, vocabulary cards, tutor and conversation. |
+| Speech recognition | Groq `whisper-large-v3` (when `GROQ_API_KEY` is set), else `faster-whisper` (Python 3.11, CUDA) | A key sends audio to Groq; otherwise the local worker is used. |
+| Dictation voice | [Piper](https://github.com/rhasspy/piper) (`en_AU-librivox-medium`) | Local text-to-speech for Audio Dictation. |
+| Word pronunciation (optional) | ElevenLabs | Voices for words and the matching game when `ELEVENLABS_API_KEY` is set. |
+| Translation (optional) | DeepL, else MyMemory | Sentence translation in Books (F3). |
+| Content review | An external coding agent (for example Claude Code) | Reviews, repairs and publishes batches through the app's own validation; never edits the database directly. |
 | Tests | Vitest, Playwright (core) | Unit, integration and end-to-end tests. |
 
 The repository is an npm workspace: `apps/server`, `apps/web`, `packages/contracts` (shared types), `packages/learning` (Mastery, priorities, selection), plus `migrations/`, `content/`, `scripts/` and `tests/`.
@@ -154,7 +178,19 @@ The agent never edits the database directly; all changes go through the same val
 
 ### Configuration
 
-No `.env` file is required. Optional environment variables:
+No `.env` file is required: without one the app works with typing and local models only. To enable the optional online services, copy [`.env.example`](.env.example) to `.env` in the project folder (git-ignored) and fill in only what you use:
+
+| `.env` variable | Needed for | Notes |
+|---|---|---|
+| `GROQ_API_KEY` | Speech recognition (Groq `whisper-large-v3`) | Audio is sent to Groq. Without it the local `faster-whisper` is used. |
+| `ELEVENLABS_API_KEY` | Pronunciation of words and in the matching game | Optional; the app works silently without it. |
+| `ELEVENLABS_VOICE_ID`, `ELEVENLABS_VOICE_ID_2` … `_6` | Which ElevenLabs voices to use | Several voices are used with equal weight. |
+| `DEEPL_API_KEY` | Books F3 translation (DeepL API Developer or Free key) | The previous completed sentence is sent on request. Without a key the app uses MyMemory. See [DeepL API plans](https://support.deepl.com/hc/en-us/articles/360021200939-DeepL-API-plans). |
+| `MYMEMORY_EMAIL` | Higher MyMemory limits | Optional; read by the server but not listed in `.env.example`. |
+
+The names are read in upper case; the lower-case spelling used in `.env.example` (`groq_api_key`, `elevenlabs_api_key`, …) is accepted too. Never commit `.env`.
+
+Other optional environment variables:
 
 | Variable | Default | Purpose |
 |---|---|---|
@@ -188,7 +224,7 @@ Run results are kept in the project's evidence notes, which are not part of this
 - The backend accepts connections from the local machine only, and the data directory is restricted to the project or the user's local application-data folder.
 - Attempts, answers, exercise history and statistics are stored in a local SQLite database under `var/`, which is excluded from version control.
 - The app has no login, payment flow or telemetry. Optional Groq speech recognition requires a Groq account and sends audio to that service.
-- The AI components are local (Ollama). No request is sent to an external AI service.
+- The AI components are local (Ollama). The only data that can leave the machine is what you enable with a key: audio to Groq, single words to ElevenLabs, and a completed sentence to DeepL or MyMemory.
 - Speech recognition runs locally by default. If a Groq API key is configured, audio is sent to Groq for transcription. The app does not write audio to disk; you can edit the transcript before submitting your answer. Groq retention is governed by its data controls.
 - The database, backups and logs are git-ignored. Please keep it that way if you fork the project.
 

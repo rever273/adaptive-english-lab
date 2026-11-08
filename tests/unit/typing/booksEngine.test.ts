@@ -1,9 +1,25 @@
 import { describe, expect, it } from "vitest";
-import { createBooksEngine, handleBookKey, nextKey, tickBooks } from "../../../apps/web/src/game/booksEngine.js";
+import { splitSentences } from "@english-lab/contracts";
+import { createBooksEngine, handleBookKey, nextKey, tickBooks, previousCompletedSentence } from "../../../apps/web/src/game/booksEngine.js";
 
 const cfg = (text: string, initialOffset = 0) => ({ text, startOffset: 0, initialOffset, initialActiveMs: 0, initialCharsTyped: 0, initialErrors: 0 });
 
 describe("books engine", () => {
+  it("selects only the last completed sentence at the next typing offset", () => {
+    const text = 'Mr. Smith arrived. Then he left. Finally, silence.';
+    const spans = splitSentences(text);
+    const sentence = (offset: number) => { const prev = previousCompletedSentence(spans, offset); return prev ? text.slice(prev.start, prev.end) : null; };
+    expect(sentence(0)).toBeNull();
+    expect(sentence(spans[0]!.end - 1)).toBeNull();
+    expect(sentence(spans[0]!.end)).toBe('Mr. Smith arrived.');
+    expect(sentence(spans[1]!.start)).toBe('Mr. Smith arrived.');
+    expect(sentence(spans[1]!.end)).toBe('Then he left.');
+    expect(sentence(text.length)).toBe('Finally, silence.');
+    const game = createBooksEngine(cfg(text));
+    while (game.remaining[0] && game.remaining[0].offset < spans[1]!.start) handleBookKey(game, game.remaining[0].key);
+    expect(sentence(game.offset)).toBe('Mr. Smith arrived.');
+  });
+
   it("types a sentence left to right and finishes at the end", () => {
     const text = "Hello world.";
     const s = createBooksEngine(cfg(text));
@@ -22,6 +38,31 @@ describe("books engine", () => {
     const s = createBooksEngine(cfg(text));
     for (const ch of "i dont know,") handleBookKey(s, ch);
     expect(s.finished).toBe(true);
+  });
+
+  it("requires the apostrophe key within words on new levels, including curly apostrophes", () => {
+    const text = "'Winston\u2019s' cat.";
+    const game = createBooksEngine({ ...cfg(text), keyRulesVersion: 2 });
+    for (const ch of "Winston") expect(handleBookKey(game, ch).kind).toBe("ok");
+    expect(nextKey(game)).toBe("'");
+    expect(handleBookKey(game, "s").kind).toBe("error");
+    handleBookKey(game, "Backspace");
+    expect(handleBookKey(game, "'").kind).toBe("ok");
+    for (const ch of "s cat.") handleBookKey(game, ch);
+    expect(game.finished).toBe(true);
+    const legacy = createBooksEngine({ ...cfg(text), keyRulesVersion: 1 });
+    for (const ch of "winstons cat.") handleBookKey(legacy, ch);
+    expect(legacy.finished).toBe(true);
+  });
+
+  it("continues typing immediately after an unspaced dash with version 3", () => {
+    const text = "live—did.";
+    const game = createBooksEngine({ ...cfg(text), keyRulesVersion: 3 });
+    for (const ch of "livedid.") expect(handleBookKey(game, ch).kind).toBe("ok");
+    expect(game.finished).toBe(true);
+    const legacy = createBooksEngine({ ...cfg(text), keyRulesVersion: 2 });
+    for (const ch of "live") handleBookKey(legacy, ch);
+    expect(nextKey(legacy)).toBe(" ");
   });
 
   it("requires Backspace to clear a wrong character before advancing", () => {

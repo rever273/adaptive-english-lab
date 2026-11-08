@@ -1,8 +1,10 @@
 import { useCallback, useEffect, useRef, useState, type ReactNode } from "react";
 import { createPortal } from "react-dom";
-import { ApiRequestError, addVocabulary, createVocabSession, fetchVocabPractice, fetchVocabulary, patchVocabulary, removeVocabulary, vocabularyWordSpeech, type VocabEntry, type VocabPracticeStatus } from "../api";
+import { ApiRequestError, addVocabulary, createVocabSession, fetchVocabPractice, fetchVocabulary, fetchWordLessons, patchVocabulary, removeVocabulary, vocabularyWordSpeech, type VocabEntry, type VocabPracticeStatus, type WordLessonListResponse } from "../api";
 import { WordImage } from "../components/WordImage";
 import { Practice } from "./Practice";
+import { WordLesson } from "./WordLesson";
+import { WordPicker } from "../components/WordPicker";
 import { VocabularyExpressions } from "./VocabularyExpressions";
 import { Kbd, isTextField, useKeys } from "../components/hotkeys";
 
@@ -218,16 +220,13 @@ function PracticeBlock({ status, onStart, onStudio, error }: { status: VocabPrac
   if (!status) return null;
   const short = status.shortage;
   return (
-    <div className="vocab-practice" data-testid="vocab-practice">
+    <div className="vocab-practice vocab-practice-layout" data-testid="vocab-practice">
+      <div className="vocab-practice-content">
       <div className="vocab-practice-main">
         <div>
           <h3><i className="pi pi-bolt" aria-hidden="true" /> Vocabulary Practice</h3>
           <p className="muted small">Short tasks with your words in new sentences: choose the word, type it, or pick its natural partner. No timer; “I don’t know” and Skip are always there.</p>
         </div>
-        <button className="btn btn-primary btn-big has-kbd" disabled={status.available === 0} onClick={() => onStart(short ? status.available : undefined)} data-testid="start-vocab">
-          <Kbd k="P" />
-          <i className="pi pi-play" aria-hidden="true" /> {short && status.available > 0 ? `Practise ${status.available} task${status.available === 1 ? "" : "s"}` : `Practise vocabulary · ${status.taskCount} tasks`}
-        </button>
       </div>
       <div className="mini-stats" role="list">
         <span role="listitem" title="Approved exercises for your words whose sentences you have never seen"><strong>{status.freshAvailable ?? status.available}</strong> new exercises</span>
@@ -245,11 +244,48 @@ function PracticeBlock({ status, onStart, onStudio, error }: { status: VocabPrac
         </p>
       )}
       {error && <p className="notice notice-error small" role="alert">{error}</p>}
+      </div>
+      <button className="btn btn-primary btn-big has-kbd" disabled={status.available === 0} onClick={() => onStart(short ? status.available : undefined)} data-testid="start-vocab">
+        <Kbd k="P" />
+        <i className="pi pi-play" aria-hidden="true" /> {short && status.available > 0 ? `Practise ${status.available} task${status.available === 1 ? "" : "s"}` : `Practise vocabulary · ${status.taskCount} tasks`}
+      </button>
     </div>
   );
 }
 
-export function Vocabulary({ onNavigate, dailyStart = false, onDailyDone }: { onNavigate?: (page: "vocabulary" | "analytics" | "studio") => void; dailyStart?: boolean; onDailyDone?: () => void } = {}) {
+const loadShowCompleted = (): boolean => {
+  try {
+    return localStorage.getItem("vocab.wl.showCompleted") === "1";
+  } catch {
+    return false;
+  }
+};
+
+/** Single Word Practice: one word from the dictionary, five short steps in its own ready-made lesson. Lessons are made ahead of time in Content Studio. */
+function SingleWordBlock({ data, showCompleted, onShowCompleted, onPick, onStudio, inputRef }: { data: WordLessonListResponse | null; showCompleted: boolean; onShowCompleted: (v: boolean) => void; onPick: (lessonId: string) => void; onStudio: () => void; inputRef: React.RefObject<HTMLInputElement | null> }) {
+  return (
+    <div className="vocab-practice wl-block" id="single-word-practice" data-testid="word-lesson-block">
+      <div className="vocab-practice-main">
+        <div>
+          <h3><i className="pi pi-star" aria-hidden="true" /> Single Word Practice</h3>
+          <p className="muted small">Take one word and use it in five short steps: read examples, recall it, rewrite sentences, build a sentence from an idea, then write your own. Hints are always there; nothing can be failed. Do it again any time.</p>
+        </div>
+      </div>
+      <div className="wl-pick-row">
+        <WordPicker lessons={data?.lessons ?? []} showCompleted={showCompleted} onPick={(l) => onPick(l.lessonId)} inputRef={inputRef} />
+        <label className="inline toggle"><input type="checkbox" checked={showCompleted} onChange={(e) => onShowCompleted(e.target.checked)} data-testid="wl-show-completed" /> Show completed words</label>
+      </div>
+      {data && (
+        <p className="muted small" data-testid="wl-coverage">
+          <strong>{data.coverage.ready} / {data.coverage.eligible}</strong> words have a lesson.{" "}
+          {data.lessons.length === 0 && <>No lessons yet: <button className="link" onClick={onStudio}>prepare them in Content Studio → Vocabulary</button>.</>}
+        </p>
+      )}
+    </div>
+  );
+}
+
+export function Vocabulary({ onNavigate, dailyStart = false, wordLessonFocus = false, onDailyDone }: { onNavigate?: (page: "vocabulary" | "analytics" | "studio") => void; dailyStart?: boolean; wordLessonFocus?: boolean; onDailyDone?: () => void } = {}) {
   const [words, setWords] = useState<VocabEntry[] | null>(null);
   const [practice, setPractice] = useState<VocabPracticeStatus | null>(null);
   const [practising, setPractising] = useState(false);
@@ -260,8 +296,45 @@ export function Vocabulary({ onNavigate, dailyStart = false, onDailyDone }: { on
   const [newWord, setNewWord] = useState("");
   const [error, setError] = useState<string | null>(null);
   const [notLearned, setNotLearned] = useState(loadPref);
+  const [visibleCount, setVisibleCount] = useState(50);
+  const [matchingTotal, setMatchingTotal] = useState(0);
+  const moreRef = useRef<HTMLDivElement>(null);
+  const loadGeneration = useRef(0);
   // the dictionary has two parts: words (the practice mode and everything below) and expressions (phrases of several words)
   const [part, setPart] = useState<"words" | "expressions">("words");
+  // Single Word Practice: the ready lessons, the lesson being played, and the filter for finished ones
+  const [lessons, setLessons] = useState<WordLessonListResponse | null>(null);
+  const [lesson, setLesson] = useState<string | null>(null);
+  const [showCompleted, setShowCompleted] = useState(loadShowCompleted);
+  const pickerBox = useRef<HTMLInputElement>(null);
+  const loadLessons = useCallback(async () => {
+    try {
+      setLessons(await fetchWordLessons());
+    } catch {
+      /* the dictionary works without it */
+    }
+  }, []);
+  useEffect(() => {
+    void loadLessons();
+  }, [loadLessons]);
+  useEffect(() => {
+    try {
+      localStorage.setItem("vocab.wl.showCompleted", showCompleted ? "1" : "0");
+    } catch {
+      /* a convenience only */
+    }
+  }, [showCompleted]);
+  // the Daily Practice button opens this page at the block, which is the only place a word is chosen
+  const focused = useRef(false);
+  useEffect(() => {
+    if (!wordLessonFocus || focused.current || !lessons || lesson || practising) return;
+    focused.current = true;
+    setPart("words");
+    requestAnimationFrame(() => {
+      document.getElementById("single-word-practice")?.scrollIntoView({ block: "start", behavior: "smooth" });
+      pickerBox.current?.focus({ preventScroll: true });
+    });
+  }, [wordLessonFocus, lessons, lesson, practising]);
 
   const loadPractice = useCallback(async () => {
     try {
@@ -297,13 +370,16 @@ export function Vocabulary({ onNavigate, dailyStart = false, onDailyDone }: { on
 
   const load = useCallback(async () => {
     try {
-      const r = await fetchVocabulary(q);
+      const generation = ++loadGeneration.current;
+      const r = await fetchVocabulary(q, { limit: visibleCount, notLearned });
+      if (generation !== loadGeneration.current) return;
+      setMatchingTotal(r.total);
       setWords(r.words);
       setTotals(r.totals);
     } catch (e) {
       setError(e instanceof ApiRequestError ? e.message : "Cannot load the vocabulary.");
     }
-  }, [q]);
+  }, [q, visibleCount, notLearned]);
   useEffect(() => {
     void load();
     const t = setInterval(() => void load(), 6000); // picks up AI drafts as they arrive
@@ -329,9 +405,17 @@ export function Vocabulary({ onNavigate, dailyStart = false, onDailyDone }: { on
   };
 
   const shown = (words ?? []).filter((w) => !notLearned || !w.learned);
+  useEffect(() => { setVisibleCount(50); }, [q, notLearned]);
+  useEffect(() => {
+    const el = moreRef.current;
+    if (!el || shown.length < visibleCount || shown.length >= matchingTotal) return;
+    const observer = new IntersectionObserver((entries) => { if (entries.some((e) => e.isIntersecting)) setVisibleCount((n) => n + 50); }, { rootMargin: '300px' });
+    observer.observe(el);
+    return () => observer.disconnect();
+  }, [visibleCount, shown.length, matchingTotal]);
   // keys: P starts a practice session, / jumps to the search box (never while typing)
   useKeys((e) => {
-    if (practising || e.repeat || e.ctrlKey || e.metaKey || e.altKey || isTextField(e.target)) return;
+    if (practising || lesson || e.repeat || e.ctrlKey || e.metaKey || e.altKey || isTextField(e.target)) return;
     if (e.key === "/") {
       e.preventDefault();
       searchBox.current?.focus();
@@ -340,6 +424,18 @@ export function Vocabulary({ onNavigate, dailyStart = false, onDailyDone }: { on
       void start(practice.shortage ? practice.available : undefined);
     }
   });
+  if (lesson) {
+    return (
+      <WordLesson
+        lessonId={lesson}
+        {...(wordLessonFocus && onDailyDone ? { onFinished: () => { setLesson(null); onDailyDone(); } } : {})}
+        onExit={() => {
+          setLesson(null);
+          void loadLessons();
+        }}
+      />
+    );
+  }
   if (practising) {
     return (
       <Practice
@@ -365,6 +461,7 @@ export function Vocabulary({ onNavigate, dailyStart = false, onDailyDone }: { on
       <p className="lede">Words you saved while practising. Saving is instant; the local AI adds a translation in the background (shown in <span className="ai-text">blue</span>), and anything you write yourself is never replaced. The dotted line under a word shows its level, from green (A1) to red (C2) — hover to see it.</p>
       {error && <p className="notice notice-error" role="alert">{error}</p>}
       <PracticeBlock status={practice} onStart={(c) => void start(c)} onStudio={() => onNavigate?.("studio")} error={startError} />
+      <SingleWordBlock data={lessons} showCompleted={showCompleted} onShowCompleted={setShowCompleted} onPick={setLesson} onStudio={() => onNavigate?.("studio")} inputRef={pickerBox} />
       <div className="toolbar">
         <div className="field-add">
           <input value={newWord} onChange={(e) => setNewWord(e.target.value)} onKeyDown={(e) => e.key === "Enter" && newWord.trim() && void add()} placeholder="Add a word or a short phrase" aria-label="Add a word" data-testid="new-word" />
@@ -389,8 +486,8 @@ export function Vocabulary({ onNavigate, dailyStart = false, onDailyDone }: { on
       ) : shown.length === 0 ? (
         <p className="muted">Every word here is marked learned. Untick the filter to see them.</p>
       ) : (
-        <div className="table-wrap">
-          <table className="data-table" data-testid="vocab-table">
+        <div className="table-wrap vocab-dictionary-wrap">
+          <table className="data-table vocab-dictionary-table" data-testid="vocab-table">
             <thead>
               <tr>
                 <th className="narrow" title="Learned"><i className="pi pi-check-square" aria-hidden="true" /><span className="visually-hidden">Learned</span></th>
@@ -407,8 +504,9 @@ export function Vocabulary({ onNavigate, dailyStart = false, onDailyDone }: { on
                 <th className="narrow" title="Times you were actually shown the word">Seen</th>
               </tr>
             </thead>
-            <tbody>{shown.map((w) => <Row key={`${w.id}:${w.userRevision}:${w.translation.text}`} w={w} onChanged={() => void load()} />)}</tbody>
+            <tbody>{shown.slice(0, visibleCount).map((w) => <Row key={`${w.id}:${w.userRevision}:${w.translation.text}`} w={w} onChanged={() => void load()} />)}</tbody>
           </table>
+          {shown.length < matchingTotal && <div ref={moreRef} role="status" className="small muted">Loading more words...</div>}
         </div>
       )}
       <p className="muted small">Newest shown first. Marking a word learned does not change any score.</p>
