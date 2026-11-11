@@ -44,3 +44,18 @@ export function useKeys(onDown: (e: KeyboardEvent) => void, onUp?: (e: KeyboardE
     };
   }, []);
 }
+
+/**
+ * The function keys mean the same thing on every practice screen (Words, Books, Dictation, Grammar cloze, Word lesson, Memory check).
+ * A screen uses only the ones it has; nothing else may bind these keys. Change a key here and every screen, label and hint follows.
+ *   F2 pause / resume · F3 Russian translation · F4 listen again · F5 hint · F6 show the answer
+ */
+export const HOTKEYS = { pause: "F2", translate: "F3", listen: "F4", hint: "F5", showAnswer: "F6" } as const;
+export type HotkeyAction = keyof typeof HOTKEYS;
+
+/** the action of a plain function-key press (no modifiers, not held down), else null */
+export function hotkeyAction(e: KeyboardEvent): HotkeyAction | null {
+  if (e.repeat || e.ctrlKey || e.metaKey || e.altKey || e.shiftKey || e.isComposing) return null;
+  for (const a of Object.keys(HOTKEYS) as HotkeyAction[]) if (HOTKEYS[a] === e.key) return a;
+  return null;
+}

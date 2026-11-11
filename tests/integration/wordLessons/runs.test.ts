@@ -234,6 +234,7 @@ describe("word lesson run", () => {
     const { db, lessonId, content } = await readyLesson();
     const done = await perfectRun(db, lessonId, content);
     expect(completeRun(db, deps, done.runId).score).toBe(done.score);
+    expect(db.prepare("SELECT track, amount FROM mode_xp_events WHERE source='wordLesson'").all()).toEqual([{ track: 'vocabulary', amount: 50 }]); // once, however often it is completed
     fails(() => answer(db, done.runId, "s2", "overlook"), 409, "WORD_LESSON_RUN_COMPLETED");
     const { runId } = startRun(db, deps, lessonId, "t");
     const id = randomUUID();

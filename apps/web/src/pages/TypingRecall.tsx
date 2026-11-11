@@ -1,3 +1,4 @@
+import { HOTKEYS } from "../components/hotkeys";
 import { useCallback, useEffect, useReducer, useRef, useState } from "react";
 import * as api from "../api";
 import type { TypingRecallWord } from "../api";
@@ -73,8 +74,8 @@ export function TypingRecall({ sessionId, words, onDone }: { sessionId: string; 
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => {
       if (e.ctrlKey || e.metaKey || e.altKey || e.isComposing || saved) return;
-      if (e.key === "F4") { e.preventDefault(); if (!e.repeat) afterKey(recallHint(stateRef.current)); return; }
-      if (e.key === "F5") { e.preventDefault(); if (!e.repeat) afterKey(recallReveal(stateRef.current)); return; }
+      if (e.key === HOTKEYS.hint) { e.preventDefault(); if (!e.repeat) afterKey(recallHint(stateRef.current)); return; }
+      if (e.key === HOTKEYS.showAnswer) { e.preventDefault(); if (!e.repeat) afterKey(recallReveal(stateRef.current)); return; }
       if (e.key.length !== 1) return;
       e.preventDefault();
       e.stopPropagation();
@@ -111,7 +112,7 @@ export function TypingRecall({ sessionId, words, onDone }: { sessionId: string; 
         ))}
         {layoutNotice && <Toast text={LAYOUT_HINT} />}
       </div>
-      <p className="muted small">F4: the next letter (costs points) · F5: show the word (no points). Wrong keys only cost a little; you can try as long as you like.</p>
+      <p className="muted small">{HOTKEYS.hint}: the next letter (costs points) · {HOTKEYS.showAnswer}: show the word (no points). Wrong keys only cost a little; you can try as long as you like.</p>
       {saved && (
         <div className="recall-done" role="status">
           <strong>Bonus: +{saved.points} points</strong>

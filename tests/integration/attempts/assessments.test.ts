@@ -6,7 +6,7 @@ import { recordAttempt } from "../../../apps/server/src/domain/attempts/attempts
 import { effectiveFindingVerdict, reviewFinding } from "../../../apps/server/src/domain/attempts/findings.js";
 import { recordSessionEvent } from "../../../apps/server/src/domain/attempts/sessionEvents.js";
 import { ApiError } from "../../../apps/server/src/errors.js";
-import { SKILL_B, TARGET, exactSetAssessor, makeEnv, one, revealedSlot, rows, type Env } from "./fixtures.js";
+import { addEvent, SKILL_B, TARGET, exactSetAssessor, makeEnv, one, revealedSlot, rows, type Env } from "./fixtures.js";
 
 let env: Env;
 beforeEach(async () => {
@@ -37,6 +37,18 @@ const human = (verdict: "correct" | "incorrect", rationale = "reviewed by hand")
 });
 
 describe("human correction / re-assessment", () => {
+  it("XP is paid for a right first try only: a mistake earns nothing, and a later correct verdict pays once", () => {
+    const { sessionId, slotId } = revealedSlot(env);
+    const a = recordAttempt(env.db, env.deps, submit(slotId, ["b"]));
+    expect(a.body.assessment.verdict).toBe("incorrect");
+    addEvent(env, sessionId, slotId, "continue");
+    expect(one(env.db, "SELECT COUNT(*) AS n FROM activity_xp_events")).toEqual({ n: 0 });
+    appendAssessmentRevision(env.db, env.deps, { attemptId: a.body.attemptId, expectedSequence: 1, decision: human("correct") });
+    expect(one(env.db, "SELECT COUNT(*) AS n FROM activity_xp_events")).toEqual({ n: 1 });
+    appendAssessmentRevision(env.db, env.deps, { attemptId: a.body.attemptId, expectedSequence: 2, decision: human("correct", "confirmed again") });
+    expect(one(env.db, "SELECT COUNT(*) AS n FROM activity_xp_events")).toEqual({ n: 1 });
+  });
+
   it("appends a revision, keeps the original attempt bytes and the old evidence, and moves the projection", () => {
     const { slotId } = revealedSlot(env);
     const a = recordAttempt(env.db, env.deps, submit(slotId, ["b"]));

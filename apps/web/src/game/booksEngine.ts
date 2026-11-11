@@ -144,7 +144,8 @@ function recordGap(s: BooksEngineState): void {
 
 const isUpper = (ch: string): boolean => ch !== ch.toLowerCase() && ch === ch.toUpperCase();
 
-export function handleBookKey(s: BooksEngineState, key: string): BookKeyResult {
+/** `showMistakes` false: a wrong key is counted (errors, combo, statistics) but no wrong letter is put on the screen, so there is nothing to delete */
+export function handleBookKey(s: BooksEngineState, key: string, showMistakes = true): BookKeyResult {
   if (s.finished) return { finished: true, tokenComplete: false, kind: "ignored" };
 
   if (key === "Backspace") {
@@ -185,9 +186,9 @@ export function handleBookKey(s: BooksEngineState, key: string): BookKeyResult {
     s.combo = 0;
     s.charStreak = 0;
     const wp = pairAt(s.offset);
-    if (wp && s.errors.length === 0) facts(wp).errors++; // the first wrong key of an expected letter counts against its pair
+    if (wp && (showMistakes ? s.errors.length === 0 : !s.slipped.has(s.offset))) facts(wp).errors++; // the first wrong key of an expected letter counts against its pair
 
-    if (s.errors.length < 3) s.errors.push(key.length === 1 ? key : k);
+    if (showMistakes && s.errors.length < 3) s.errors.push(key.length === 1 ? key : k);
     s.slipped.add(s.offset);
     s.errorCount += 1;
     return { finished: false, tokenComplete: false, kind: "error" };

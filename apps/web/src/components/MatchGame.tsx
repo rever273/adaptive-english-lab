@@ -5,6 +5,9 @@ import { clearWrong, createMatch, matchResults, pickCell, replacePair, type Cell
 import { playPracticeSound } from '../practiceSounds';
 import { Kbd, isTextField, useKeys } from './hotkeys';
 
+/** in the single round matched pairs leave the table and the rest move up, so the number keys always reach the rows still open */
+const visible = (cells: Array<Cell | null>, mode: MatchMode): Array<Cell | null> => (mode === 'once' ? cells.filter((c) => c && !c.matched) : cells);
+
 const WRONG_MS = 550;
 const REPLACE_MS = 450;
 const FINISH_MS = 1100;
@@ -94,7 +97,7 @@ export function MatchGame({ words, mode, soundsEnabled, speechEnabled, onDone }:
         e.preventDefault();
         const s = ref.current;
         const side: Side = s.selected ? (s.selected.side === 'left' ? 'right' : 'left') : e.altKey ? 'right' : 'left';
-        const cell = (side === 'left' ? s.left : s.right)[Number(m[1]) - 1];
+        const cell = visible(side === 'left' ? s.left : s.right, s.mode)[Number(m[1]) - 1];
         if (cell) click(side, cell);
     });
 
@@ -144,8 +147,8 @@ export function MatchGame({ words, mode, soundsEnabled, speechEnabled, onDone }:
             <p className="muted small">{look.hint}</p>
             <p className="muted small">Keys: a number picks the word in that row on the left, the next number picks its translation on the right. Alt + number starts from the right column.</p>
             <div className="match-cols">
-                {column('left', state.left)}
-                {column('right', state.right)}
+                {column('left', visible(state.left, state.mode))}
+                {column('right', visible(state.right, state.mode))}
             </div>
             {state.done ? (
                 <p role="status" className="match-done">

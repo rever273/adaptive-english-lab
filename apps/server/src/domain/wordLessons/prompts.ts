@@ -1,6 +1,6 @@
 /** Prompts and JSON shapes of Single Word Context Practice (TASK_031). Pure text: no imports, so the prompt registry can use it. */
 
-export const WORD_LESSON_PROMPT = "word-lesson-v12";
+export const WORD_LESSON_PROMPT = "word-lesson-v13";
 export const WORD_LESSON_REVIEW_PROMPT = "word-lesson-review-v5";
 export const WORD_LESSON_PAIRS_PROMPT = "word-lesson-pairs-v3";
 export const WORD_LESSON_SENSE_PROMPT = "word-lesson-sense-v1";

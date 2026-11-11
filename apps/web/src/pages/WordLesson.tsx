@@ -6,6 +6,7 @@ import { Kbd, isPressable, isTextField, useKeys } from "../components/hotkeys";
 import { AI_CHECK_WAIT_S } from "../practiceFlow";
 import { useVoice } from "../voice";
 import { useWordLessonActivity } from "../wordLessonActivity";
+import { PauseButton, PauseOverlay, useAutoPause, usePauseKeys } from "../components/Pause";
 import { DailyGoalCheck } from "../components/DailyGoalNotice";
 
 const errorText = (e: unknown) => (e instanceof api.ApiRequestError ? e.message : "Something went wrong.");
@@ -39,6 +40,41 @@ function Steps({ stage, sub }: { stage: number; sub: string | null }) {
   );
 }
 
+/**
+ * Says the word aloud (ElevenLabs, through the app's stored files: a word already spoken anywhere in the app costs nothing) each time a new stage
+ * begins, stage 1 included. It follows the "pronunciation" switch of the dictionary and stays silent while the lesson is paused or the browser
+ * blocks autoplay; the sound never changes the lesson or its scoring.
+ */
+function useSpeakWordPerStage(lemma: string | null, stage: number | null, allowed: boolean): void {
+  const spoken = useRef<number | null>(null);
+  const enabled = useRef<boolean | null>(null);
+  const url = useRef<{ lemma: string; clip: Promise<string | null> } | null>(null);
+  const audio = useRef<HTMLAudioElement | null>(null);
+  useEffect(() => {
+    if (!lemma || stage === null || !allowed || spoken.current === stage) return;
+    spoken.current = stage;
+    let cancelled = false;
+    void (async () => {
+      try {
+        if (enabled.current === null) enabled.current = (await api.fetchVocabularySpeech()).enabled;
+        if (!enabled.current || cancelled) return;
+        if (url.current?.lemma !== lemma) url.current = { lemma, clip: api.vocabularyTextSpeech(lemma).then((b) => (b ? URL.createObjectURL(b) : null)).catch(() => null) };
+        const src = await url.current.clip;
+        if (!src || cancelled) return;
+        audio.current?.pause();
+        audio.current = new Audio(src);
+        await audio.current.play();
+      } catch { /* silent: no key, no limit left, or autoplay blocked */ }
+    })();
+    return () => { cancelled = true; };
+  }, [lemma, stage, allowed]);
+  useEffect(() => () => {
+    audio.current?.pause();
+    const u = url.current;
+    if (u) void u.clip.then((x) => { if (x) URL.revokeObjectURL(x); });
+  }, []);
+}
+
 /** Single Word Context Practice: one saved word, five fixed stages, no way to fail or skip. The lesson is ready-made; only the checking asks the model. */
 export function WordLesson({ lessonId, onExit, onFinished }: { lessonId: string; onExit: () => void; onFinished?: () => void }) {
   const tab = useRef(crypto.randomUUID());
@@ -70,7 +106,10 @@ export function WordLesson({ lessonId, onExit, onFinished }: { lessonId: string;
       setDraftId(vs.draftId);
     }
   }, [vs]);
-  useWordLessonActivity(run?.runId ?? null, tab.current, !!run && run.status === "active");
+  const [paused, setPaused] = useState(false);
+  usePauseKeys(paused, setPaused, !!run && run.status === "active");
+  const auto = useAutoPause(!!run && run.status === "active" && !paused);
+  useWordLessonActivity(run?.runId ?? null, tab.current, !!run && run.status === "active" && !paused && !auto.reason);
 
   const take = useCallback((s: WordLessonRunState, follow = false) => {
     setRun(s);
@@ -96,6 +135,7 @@ export function WordLesson({ lessonId, onExit, onFinished }: { lessonId: string;
   const last: WordLessonAttemptView | undefined = attempts.at(-1);
   const feedbackShown = !!last && attempts.length > (dismissed[key] ?? 0);
   const task = tasks[key] ?? (run?.task?.key === key ? run.task : undefined);
+  useSpeakWordPerStage(run?.lemma ?? null, run?.status === "active" ? stageOf(key) : null, !paused && !auto.reason);
 
   async function call(fn: () => Promise<WordLessonRunState>, follow = false): Promise<WordLessonRunState | null> {
     setBusy(true);
@@ -183,6 +223,7 @@ export function WordLesson({ lessonId, onExit, onFinished }: { lessonId: string;
     if (!run) return;
     if (run.currentKey === null) {
       await call(() => api.completeWordLessonRun(run.runId));
+      api.announceXp();
       return;
     }
     setViewKey(run.currentKey);
@@ -261,8 +302,11 @@ export function WordLesson({ lessonId, onExit, onFinished }: { lessonId: string;
     <section className="card wl-lesson" aria-labelledby="wl-h" data-testid="wl-lesson">
       <div className="session-header">
         <h2 id="wl-h"><i className="pi pi-star" aria-hidden="true" /> {run.lemma || "One word, five steps"}</h2>
+        <PauseButton paused={paused} onToggle={() => setPaused(!paused)} />
         <button className="btn btn-small" onClick={onExit} title="Leave the lesson; you can come back to it">Leave</button>
       </div>
+      {paused && <PauseOverlay onResume={() => setPaused(false)} />}
+      {!paused && auto.reason && <PauseOverlay auto={auto.reason} onResume={auto.resume} />}
       <Steps stage={stage} sub={sub} />
       {error && <p className="notice notice-error" role="alert">{error}</p>}
 

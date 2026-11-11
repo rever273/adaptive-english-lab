@@ -3,6 +3,9 @@ import { useCallback, useEffect, useState } from 'react';
 import { VocabularyAnalytics } from './VocabularyAnalytics';
 import { TypingAnalytics } from './TypingAnalytics';
 import { ConversationAnalytics } from './ConversationAnalytics';
+import { GrammarClozeAnalytics } from './GrammarClozeAnalytics';
+import { GrammarTrends } from '../components/GrammarTrends';
+import { skillName, skillNameRu } from '../stats';
 import { Chart } from '../components/Chart';
 import { PracticeActivityChart } from '../components/PracticeActivityChart';
 import {
@@ -238,6 +241,7 @@ function GrammarAnalytics({ days }: { days: '7' | '30' | '90' | 'all' }) {
                         <div className="stat"><span className="stat-num">{m.sessionProgress.closed}/{m.sessionProgress.total}</span><span className="stat-label">latest session slots done</span></div>
                     </div>
                     <section className="card"><h2>Practice activity</h2><PracticeActivityChart mode="grammar" days={days} /><Chart ariaLabel="Grammar answers per day" bars={{ color: '#6ab7ff', format: (v) => `${Math.round(v)}` }} points={(days === 'all' ? r.activity : r.activity.filter((a) => a.date >= new Date(Date.now() - (Number(days) - 1) * 86400000).toLocaleDateString('en-CA'))).map((a) => ({ key: a.date, label: a.date.slice(5), bar: a.attempts, tip: [a.date, `Answers: ${a.attempts}`] }))} legend="Answers recorded per day for the selected report series." /></section>
+                    <GrammarTrends days={days} />
                     <section className="card"><h2>Three kinds of evidence</h2><div className="rate-grid">
                       {(['recognition', 'correction', 'production'] as const).map((kind) => <div className="rate-row" key={kind}><div className="rate-head"><strong>{{ recognition: 'Recognise', correction: 'Correct', production: 'Produce' }[kind]}</strong><span>{pct(r.byDimension[kind].rate)}</span></div><span className="bar rate-bar" aria-hidden="true"><span style={{ width: `${(r.byDimension[kind].rate ?? 0) * 100}%` }} /></span><span className="small muted">{frac(r.byDimension[kind])}{r.byDimension[kind].lowN ? ' - few answers' : ''}</span></div>)}
                     </div></section>
@@ -300,7 +304,7 @@ function GrammarAnalytics({ days }: { days: '7' | '30' | '90' | 'all' }) {
                                     .map((s) => (
                                         <tr key={s.skillId}>
                                             <td>
-                                                <code>{s.skillId}</code>
+                                                {skillName(s.skillId)}{skillNameRu(s.skillId) && <span lang="ru" className="muted small"> ({skillNameRu(s.skillId)})</span>}
                                             </td>
                                             <td>{s.failures}</td>
                                             <td>
@@ -323,7 +327,7 @@ function GrammarAnalytics({ days }: { days: '7' | '30' | '90' | 'all' }) {
                                 <ul data-testid="recurring">
                                     {r.recurring.map((x) => (
                                         <li key={x.skillId}>
-                                            <code>{x.skillId}</code>: {x.failuresAfterFirst} more slip{x.failuresAfterFirst === 1 ? '' : 's'} in{' '}
+                                            <strong>{skillName(x.skillId)}</strong>: {x.failuresAfterFirst} more slip{x.failuresAfterFirst === 1 ? '' : 's'} in{' '}
                                             {x.opportunitiesAfterFirst} later chances; first {x.firstFailure}, latest {x.lastFailure} ({x.contexts} different
                                             contexts).
                                         </li>
@@ -411,6 +415,8 @@ function GrammarAnalytics({ days }: { days: '7' | '30' | '90' | 'all' }) {
 export function Analytics({ initialView = 'grammar' }: { initialView?: 'grammar' | 'vocabulary' | 'journey' } = {}) {
     const [view, setView] = useState<'grammar' | 'vocabulary' | 'typing' | 'conversation' | 'journey'>(initialView);
     const [days, setDays] = useState<'7' | '30' | '90' | 'all'>('30');
+    const [grammarKind, setGrammarKind] = useState<'classic' | 'cloze'>(() => { try { return localStorage.getItem('el_analytics_grammar') === 'cloze' ? 'cloze' : 'classic'; } catch { return 'classic'; } });
+    const pickGrammar = (k: 'classic' | 'cloze') => { setGrammarKind(k); try { localStorage.setItem('el_analytics_grammar', k); } catch { /* storage unavailable */ } };
     return (
         <>
             <div className="segmented page-switch" role="radiogroup" aria-label="Which analytics">
@@ -443,7 +449,13 @@ export function Analytics({ initialView = 'grammar' }: { initialView?: 'grammar'
             {view !== 'journey' && <div className="analytics-period"><div className="segmented" role="radiogroup" aria-label="Period">{(['7', '30', '90', 'all'] as const).map((d) => <label key={d} className={days === d ? 'on' : ''}><input type="radio" name="analytics-days" checked={days === d} onChange={() => setDays(d)} /> {d === 'all' ? 'All time' : `${d} days`}</label>)}</div></div>}
 
             {view === 'grammar' ? (
-                <GrammarAnalytics days={days} />
+                <>
+                    <div className="segmented" role="radiogroup" aria-label="Which grammar practice" style={{ marginBottom: '0.75rem' }}>
+                        <label className={grammarKind === 'classic' ? 'on' : ''}><input type="radio" name="an-grammar" checked={grammarKind === 'classic'} onChange={() => pickGrammar('classic')} data-testid="analytics-grammar-classic" /> Grammar Practice</label>
+                        <label className={grammarKind === 'cloze' ? 'on' : ''}><input type="radio" name="an-grammar" checked={grammarKind === 'cloze'} onChange={() => pickGrammar('cloze')} data-testid="analytics-grammar-cloze" /> Grammar Cloze</label>
+                    </div>
+                    {grammarKind === 'cloze' ? <GrammarClozeAnalytics days={days} /> : <GrammarAnalytics days={days} />}
+                </>
             ) : view === 'vocabulary' ? (
                 <VocabularyAnalytics days={days} />
             ) : view === 'typing' ? (

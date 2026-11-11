@@ -48,7 +48,10 @@
     "verify:backup-restore": "node scripts/verify-windows.mjs --backup-restore",
     "benchmark:ai": "node scripts/benchmark-ai.mjs",
     "slice:stop": "node scripts/slice-stop.mjs",
-    "test:e2e": "vitest --config vitest.e2e.config.ts"
+    "test:e2e": "vitest --config vitest.e2e.config.ts",
+    "skills:labels": "node scripts/skill-labels-sync.mjs",
+    "cloze:prepare": "node scripts/grammar-cloze-prepare.mjs",
+    "cloze:import": "node scripts/grammar-cloze-import.mjs"
   },
   "devDependencies": {
     "@types/better-sqlite3": "9.6.0",

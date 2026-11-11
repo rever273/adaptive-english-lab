@@ -17,7 +17,10 @@ describe("assembleExercise: the server builds Exercise-v1 and refuses sloppy mod
   it("the worked example itself is refused as a copy; a reworded version of every format assembles into a valid, server-stamped draft", () => {
     for (const type of ["choose_form", "choose_missing_fragment", "detect_error", "guided_short_answer", "russian_to_english_short", "context_reading"] as const) {
       expect(codes(assembleExercise(ex(type), plan(type), ctx)), `${type} copy`).toContain("COPIED_EXAMPLE");
-      const r = assembleExercise(fresh(ex(type)), plan(type), ctx);
+      const reworded = fresh(ex(type)) as Record<string, unknown>;
+      // gap options stay as they are: rewording them would repeat the inserted word in the sentence (echo rule)
+      if (type === "choose_form" || type === "choose_missing_fragment") reworded.options = ex(type).options;
+      const r = assembleExercise(reworded, plan(type), ctx);
       expect(codes(r), type).toEqual([]);
       if (r.ok) expect(r.exercise).toMatchObject({ status: "draft", bank_role: "practice", difficulty: "B2", revision: 1, id: ctx.exerciseId, provenance: { origin: "qwen", model_tag: "qwen3:8b", prompt_version: "generation-v2" } });
     }
@@ -29,6 +32,9 @@ describe("assembleExercise: the server builds Exercise-v1 and refuses sloppy mod
     expect(codes(assembleExercise({ ...base, sentence: "The ___ council ___ the timetable." }, plan("choose_form"), ctx))).toContain("GAP_COUNT");
     expect(codes(assembleExercise({ ...base, options: ["published", "Published", "publish"] }, plan("choose_form"), ctx))).toContain("OPTIONS_NOT_DISTINCT");
     expect(codes(assembleExercise({ ...base, correct_index: 3 }, plan("choose_form"), ctx))).toContain("KEY_OUT_OF_RANGE");
+    const echo = { ...base, sentence: "The university ___ provides students with access.", options: ["usually", "usually provides", "provides usually"], correct_index: 0 };
+    expect(codes(assembleExercise(echo, plan("choose_form"), ctx))).toContain("OPTION_REPEATS_SENTENCE_WORD");
+    expect(codes(assembleExercise({ ...echo, options: ["usually", "rarely", "never"] }, plan("choose_form"), ctx))).not.toContain("OPTION_REPEATS_SENTENCE_WORD");
     expect(codes(assembleExercise({ ...base, options: ["published", "опубликовал", "publish"] }, plan("choose_form"), ctx))).toContain("NOT_ENGLISH");
   });
 

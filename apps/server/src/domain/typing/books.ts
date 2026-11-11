@@ -1,8 +1,8 @@
 import { createHash } from "node:crypto";
-import { existsSync, readFileSync } from "node:fs";
+import { existsSync, readFileSync, statSync } from "node:fs";
 import path from "node:path";
 import type { Db } from "../../db/open.js";
-import { BOOK_KEY_RULES_VERSION, countRequired, splitSentences, type BookKeyRulesVersion, type TypingBookStartResponse } from "@english-lab/contracts";
+import { BOOK_KEY_RULES_VERSION, countRequired, splitSentences, tokensOf, type BookKeyRulesVersion, type TypingBookStartResponse } from "@english-lab/contracts";
 import { ApiError } from "../../errors.js";
 import { loadSettings } from "../sessions/policy.js";
 import { computeMetrics, METRICS_VERSION } from "./metrics.js";
@@ -34,16 +34,20 @@ interface Chapter {
 
 const sha256 = (s: string): string => createHash("sha256").update(s).digest("hex");
 
-/** File contents are cached per book id for the lifetime of the process (the hash is checked once). */
-const fileCache = new Map<string, string>();
+/**
+ * File contents are cached by file path, size and modification time: a replaced or re-prepared file (or another books folder) is read
+ * again instead of serving stale text that would then fail the hash check.
+ */
+const fileCache = new Map<string, { size: number; mtimeMs: number; text: string }>();
 
 function readBookText(booksDir: string, id: string): { text: string } | { error: "file_missing" } {
-  const cached = fileCache.get(id);
-  if (cached !== undefined) return { text: cached };
   const file = path.join(booksDir, `${id}.txt`);
   if (!existsSync(file)) return { error: "file_missing" };
+  const { size, mtimeMs } = statSync(file);
+  const cached = fileCache.get(file);
+  if (cached && cached.size === size && cached.mtimeMs === mtimeMs) return { text: cached.text };
   const text = readFileSync(file, "utf8");
-  fileCache.set(id, text);
+  fileCache.set(file, { size, mtimeMs, text });
   return { text };
 }
 
@@ -155,7 +159,15 @@ function bookStartResponse(db: Db, s: TypingSessionRow, row: BookRow, booksDir: 
     activeMs: s.active_ms,
     charsTyped: s.chars_typed,
     errors: s.errors,
+    bookWordTracking: bookWordTracking(db, s.id),
   };
+}
+
+function bookWordTracking(db: Db, id: string): { fromOffset:number; errorOffsets:number[]; reliable:boolean } | null {
+  const row = db.prepare("SELECT tracked_from AS start,reliable FROM typing_book_word_tracking WHERE session_id=?").get(id) as {start:number;reliable:number}|undefined;
+  if (!row) return null;
+  const errors = db.prepare("SELECT token_offset AS offset FROM typing_book_word_mistakes WHERE session_id=? ORDER BY token_offset").all(id) as Array<{offset:number}>;
+  return {fromOffset:row.start,errorOffsets:errors.map(e=>e.offset),reliable:!!row.reliable};
 }
 
 export function startBook(db: Db, deps: BooksDeps, booksDir: string): TypingBookStartResponse {
@@ -198,6 +210,30 @@ export interface BookCheckpoint {
   /** longest run of correct characters (Precision Combo) */
   bestCombo?: number | undefined;
   charStreak?: { current: number; best: number } | undefined;
+  wordObservations?: { errorOffsets: number[] } | undefined;
+}
+
+/** Record distinct mistaken word positions and recompute the covered passage from the verified book. */
+function saveBookWordTracking(db: Db, row: TypingSessionRow, req: BookCheckpoint, booksDir?: string): void {
+  const previous = db.prepare("SELECT tracked_from AS start,reliable FROM typing_book_word_tracking WHERE session_id=?").get(row.id) as {start:number;reliable:number}|undefined;
+  if (!req.wordObservations) {
+    if (previous && (req.offset !== row.current_offset || req.errors > row.errors)) db.prepare("UPDATE typing_book_word_tracking SET reliable=0 WHERE session_id=?").run(row.id);
+    return;
+  }
+  if (!booksDir || !row.book_id) throw new ApiError(400,"BOOK_WORD_TRACKING_INVALID","Book text is unavailable for word tracking");
+  const book = db.prepare("SELECT * FROM typing_books WHERE id=?").get(row.book_id) as BookRow | undefined;
+  if (!book) throw new ApiError(409,"TYPING_BOOK_UNAVAILABLE","Book not found");
+  const full = loadBookTextOrThrow(book,booksDir), start = row.start_offset ?? 0, end = row.end_offset ?? start;
+  const text = full.slice(start,end), tokens = splitSentences(text).flatMap(s => tokensOf(text,s,keyRulesOf(row))).map(t => ({start:start+t.startOffset,end:start+t.endOffset}));
+  const valid = new Set(tokens.map(t=>t.start));
+  if (req.wordObservations.errorOffsets.some(offset => !valid.has(offset)) || new Set(req.wordObservations.errorOffsets).size > req.errors) throw new ApiError(400,"BOOK_WORD_TRACKING_INVALID","Invalid word position");
+  const from = previous?.start ?? row.current_offset ?? start;
+  const put = db.prepare("INSERT OR IGNORE INTO typing_book_word_mistakes(session_id,token_offset) VALUES (?,?)");
+  for (const offset of req.wordObservations.errorOffsets) put.run(row.id,offset);
+  const mistakes = new Set((db.prepare("SELECT token_offset AS offset FROM typing_book_word_mistakes WHERE session_id=?").all(row.id) as Array<{offset:number}>).map(x=>x.offset));
+  const covered = tokens.filter(t=>t.start >= from && t.end <= req.offset);
+  const wrong = covered.filter(t=>mistakes.has(t.start)).length;
+  db.prepare("INSERT INTO typing_book_word_tracking(session_id,tracked_from,through_offset,completed_words,error_words,reliable) VALUES (?,?,?,?,?,?) ON CONFLICT(session_id) DO UPDATE SET through_offset=excluded.through_offset,completed_words=excluded.completed_words,error_words=excluded.error_words,reliable=excluded.reliable").run(row.id,from,req.offset,covered.length,wrong,previous?.reliable ?? 1);
 }
 
 function checkedStreak(row: TypingSessionRow, req: BookCheckpoint): { current: number; best: number } | null {
@@ -207,7 +243,7 @@ function checkedStreak(row: TypingSessionRow, req: BookCheckpoint): { current: n
   return { current, best };
 }
 
-export function checkpointBook(db: Db, sessionId: string, req: BookCheckpoint): { ok: true; applied: boolean } {
+export function checkpointBook(db: Db, sessionId: string, req: BookCheckpoint, booksDir?: string): { ok: true; applied: boolean } {
   const row = sessionRow(db, sessionId);
   if (row.mode !== "books") throw new ApiError(409, "TYPING_SESSION_WRONG_MODE", "Not a books session");
   if (row.status !== "active") return { ok: true, applied: false };
@@ -219,7 +255,7 @@ export function checkpointBook(db: Db, sessionId: string, req: BookCheckpoint): 
     return { ok: true, applied: false };
   }
   const streak = checkedStreak(row, req);
-  db.prepare("UPDATE typing_sessions SET current_offset = ?, active_ms = ?, chars_typed = ?, errors = ?, best_char_streak = ?, current_char_streak = ? WHERE id = ?").run(req.offset, req.activeMs, req.charsTyped, req.errors, streak?.best ?? null, streak?.current ?? null, sessionId);
+  db.transaction(() => { saveBookWordTracking(db,row,req,booksDir); db.prepare("UPDATE typing_sessions SET current_offset = ?, active_ms = ?, chars_typed = ?, errors = ?, best_char_streak = ?, current_char_streak = ? WHERE id = ?").run(req.offset, req.activeMs, req.charsTyped, req.errors, streak?.best ?? null, streak?.current ?? null, sessionId); }).immediate();
   return { ok: true, applied: true };
 }
 
@@ -243,6 +279,7 @@ export function completeBook(db: Db, deps: BooksDeps, booksDir: string, sessionI
   const now = deps.now().toISOString();
 
   db.transaction(() => {
+    saveBookWordTracking(db,row,req,booksDir);
     db.prepare(
       "UPDATE typing_sessions SET status = 'completed', ended_at = ?, current_offset = ?, active_ms = ?, chars_typed = ?, errors = ?, chars_correct = ?, wpm = ?, cpm = ?, accuracy = ?, score = ?, metrics_version = ?, best_combo = ?, best_char_streak = ?, current_char_streak = ? WHERE id = ?",
     ).run(now, end, req.activeMs, req.charsTyped, req.errors, charsCorrect, metrics.wpm, metrics.cpm, metrics.accuracy, metrics.score, METRICS_VERSION, req.bestCombo ?? null, streak?.best ?? null, streak?.current ?? null, sessionId);

@@ -96,6 +96,7 @@ export class ActiveClock {
   input(now: number): void {
     this.lastInput = now;
   }
+  pause(now: number): void { this.last = now; this.lastInput = Number.NEGATIVE_INFINITY; }
   tick(now: number, o: { visible: boolean; playing: boolean }): void {
     if (this.last !== null && o.visible && (o.playing || now - this.lastInput <= IDLE_LIMIT_MS)) this.ms += Math.max(0, now - this.last);
     this.last = now;

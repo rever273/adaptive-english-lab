@@ -10,6 +10,7 @@ export const KIND_LABEL: Record<string, string> = {
   benchmark: "Model benchmark",
   vocabulary_enrichment: "Translate a saved word",
   tutor: "Tutor answer",
+  grammar_cloze_analysis: "Analyse a Grammar Cloze sentence",
 };
 
 export const GPU_WAIT: Record<string, string> = {

@@ -34,6 +34,34 @@ async function setup(bookText = "It was a bright cold day in April.\n\nThe clock
 }
 
 describe("typing books domain", () => {
+  it("saves word mistakes once across checkpoints and resume, and derives the chart without changing XP", async () => {
+    const text = "One two three.", d = await setup(text);
+    writeFileSync(path.join(booksDir, "tracking-book.txt"), text, "utf8");
+    d.prepare("INSERT INTO typing_books(id,title,author,source,content_sha256,text_length,chapters_json,created_at) VALUES ('tracking-book','Book','Author','test',?,?, '[]',?)").run(requireSha(text),text.length,new Date().toISOString());
+    const s = startBook(d,deps,booksDir);
+    expect(checkpointBook(d,s.sessionId,{offset:4,activeMs:1000,charsTyped:4,errors:1,wordObservations:{errorOffsets:[0]}},booksDir).applied).toBe(true);
+    const resumed = startBook(d,deps,booksDir);
+    expect(resumed.bookWordTracking).toEqual({fromOffset:0,errorOffsets:[0],reliable:true});
+    expect(checkpointBook(d,s.sessionId,{offset:0,activeMs:500,charsTyped:1,errors:0,wordObservations:{errorOffsets:[]}},booksDir).applied).toBe(false);
+    expect(() => checkpointBook(d,s.sessionId,{offset:5,activeMs:2000,charsTyped:5,errors:1,wordObservations:{errorOffsets:[1]}},booksDir)).toThrow(/word position/i);
+    const payload = {offset:s.endOffset,activeMs:6000,charsTyped:15,errors:2,wordObservations:{errorOffsets:[0,4]}};
+    const result = completeBook(d,deps,booksDir,s.sessionId,payload);
+    expect(result.bookWords).toEqual({completed:3,withErrors:2,partial:false});
+    expect(completeBook(d,deps,booksDir,s.sessionId,payload).bookWords).toEqual(result.bookWords);
+    expect((d.prepare("SELECT COUNT(*) AS n FROM typing_book_word_mistakes").get() as {n:number}).n).toBe(2);
+    expect((d.prepare("SELECT COUNT(*) AS n FROM typing_xp_events WHERE session_id=?").get(s.sessionId) as {n:number}).n).toBe(1);
+    expect(typingAnalytics(d,{mode:"books",days:7,timezone:"UTC",now:new Date()}).series.bookWordAccuracy).toMatchObject([{completed:3,withErrors:2,partial:false}]);
+    expect(() => d.prepare("DELETE FROM typing_book_word_mistakes").run()).toThrow(/immutable/);
+  });
+  it("marks resumed legacy passage as partial and never invents old word errors", async () => {
+    const text = "One two three.", d = await setup(text);
+    writeFileSync(path.join(booksDir, "legacy-tracking-book.txt"), text, "utf8");
+    d.prepare("INSERT INTO typing_books(id,title,author,source,content_sha256,text_length,chapters_json,created_at) VALUES ('legacy-tracking-book','Book','Author','test',?,?, '[]',?)").run(requireSha(text),text.length,new Date().toISOString());
+    const s=startBook(d,deps,booksDir);
+    checkpointBook(d,s.sessionId,{offset:4,activeMs:1000,charsTyped:4,errors:1});
+    const result=completeBook(d,deps,booksDir,s.sessionId,{offset:s.endOffset,activeMs:6000,charsTyped:15,errors:2,wordObservations:{errorOffsets:[4]}});
+    expect(result.bookWords).toEqual({completed:2,withErrors:1,partial:true});
+  });
   it("tiles the book without losing text when a long paragraph is cut at a sentence boundary", () => {
     const para = "One two three four five. Six seven eight nine ten. Eleven twelve thirteen fourteen fifteen.";
     const text = para + "\n\n" + "Next paragraph here.";

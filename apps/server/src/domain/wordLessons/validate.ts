@@ -18,7 +18,8 @@ export function lessonWord(lemma: string, surfaceForms: readonly string[], irreg
   const base = normalizeWord(lemma);
   const set = new Set<string>(matchForms(base, surfaceForms));
   const parts = base.split(" ");
-  const irregular = irregularForms.map(normalizeWord).filter((f) => /^[a-z'-]+$/.test(f));
+  // a phrasal verb lists its irregular forms whole ("ran into", "came up with"); a one-word list entry may also be the bare verb ("ran")
+  const irregular = irregularForms.map(normalizeWord).filter((f) => /^[a-z'-]+(?: [a-z'-]+)*$/.test(f));
   if (base.includes("-")) {
     // "trade-off": written with the hyphen, with a space or in one word, and the plural (the regular endings would inflect only the last part)
     for (const v of [base, base.replace(/-/g, " "), base.replace(/-/g, "")]) {
@@ -31,7 +32,8 @@ export function lessonWord(lemma: string, surfaceForms: readonly string[], irreg
   } else {
     // "give up": the verb inflects, the particle stays (matchForms alone would inflect the last word)
     const rest = parts.slice(1).join(" ");
-    for (const f of [...regularForms(parts[0]!), ...irregular]) set.add(`${f} ${rest}`);
+    for (const f of regularForms(parts[0]!)) set.add(`${f} ${rest}`);
+    for (const f of irregular) set.add(f.includes(" ") ? f : `${f} ${rest}`);
   }
   return { lemma: base, forms: [...set].filter(Boolean).sort((a, b) => b.length - a.length || a.localeCompare(b)) };
 }

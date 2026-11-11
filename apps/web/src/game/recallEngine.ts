@@ -1,7 +1,7 @@
 /**
  * The memory check after a Words level: up to three saved words, each shown only by its Russian translation (on a star). The learner types
- * any of them; the first letter picks the word, then it is typed to the end. Wrong keys cost nothing but are counted; F4 fills the next
- * letter, F5 shows the whole word (no points). Pure logic, no DOM.
+ * any of them; the first letter picks the word, then it is typed to the end. Wrong keys cost nothing but are counted; F5 fills the next
+ * letter, F6 shows the whole word (no points). Pure logic, no DOM.
  */
 export interface RecallWordState {
   entryId: string;
@@ -11,7 +11,7 @@ export interface RecallWordState {
   sentence: string | null;
   /** letters filled so far (typed, hinted or revealed) */
   filled: number;
-  /** how each filled letter got there: typed from memory, or given by F4 / F5 */
+  /** how each filled letter got there: typed from memory, or given by F5 / F6 */
   kinds: Array<"typed" | "hinted">;
   /** letters typed correctly by the learner */
   typedLetters: number;
@@ -72,7 +72,7 @@ export function recallKey(s: RecallState, key: string): RecallKeyResult {
 
 const target = (s: RecallState): number | null => s.active ?? (s.words.findIndex((w) => !w.done) >= 0 ? s.words.findIndex((w) => !w.done) : null);
 
-/** F4: the next letter of the word being typed (or of the first unsolved word) appears by itself; it costs points */
+/** F5: the next letter of the word being typed (or of the first unsolved word) appears by itself; it costs points */
 export function recallHint(s: RecallState): RecallKeyResult {
   const i = target(s);
   if (i === null) return ignored;
@@ -84,7 +84,7 @@ export function recallHint(s: RecallState): RecallKeyResult {
   return { kind: "ok", word: i, finishedWord: complete(s, i) };
 }
 
-/** F5: the whole word; no points for it */
+/** F6: the whole word; no points for it */
 export function recallReveal(s: RecallState): RecallKeyResult {
   const i = target(s);
   if (i === null) return ignored;

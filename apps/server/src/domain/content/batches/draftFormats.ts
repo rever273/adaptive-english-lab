@@ -8,6 +8,7 @@ import type { ItemPlan } from "./plan.js";
 import { articleMismatch, australianDeep } from "./languageChecks.js";
 import { mayHaveNoDistractor, spellsFrom } from "../blocks.js";
 import { itContext } from "./itContext.js";
+import { canonicalCards } from "../../skills/cards.js";
 
 /**
  * generation-v2 (D48). The Trial of generation-v1 (a small model asked for a whole Exercise-v1 document) produced 0 usable drafts out of 24.
@@ -25,21 +26,25 @@ export interface SkillCard {
   wrong: string;
 }
 let cards: Record<string, SkillCard> | null = null;
+let cardsV10: Record<string, SkillCard> | null = null;
+/** FROZEN snapshots (D140): only their raw text feeds the generation prompt hash; the cards themselves come from skill-cards.json. */
 let cardsText = "";
-let extraCards: Record<string, SkillCard> | null = null;
 let extraCardsText = "";
-/** content/taxonomy/skill-cards-v1.json: what each skill MEANS, written for the generator (D50). Part of the generation prompt version. */
+function snapshotTexts(): void {
+  if (cardsText) return;
+  const dir = path.join(detectProjectRoot(), "content", "taxonomy");
+  cardsText = readFileSync(path.join(dir, "skill-cards-v1.json"), "utf8");
+  extraCardsText = readFileSync(path.join(dir, "skill-cards-v2-extra.json"), "utf8");
+}
+/** content/taxonomy/skill-cards.json: what each skill MEANS, written for the generator (D50). Grammar generation sees exactly the skills of the frozen v1 (and v2-extra for generation-v10) snapshots. */
 export function skillCards(version = "generation-v10"): Record<string, SkillCard> {
   if (!cards) {
-    cardsText = readFileSync(path.join(detectProjectRoot(), "content", "taxonomy", "skill-cards-v1.json"), "utf8");
-    cards = (JSON.parse(cardsText) as { cards: Record<string, SkillCard> }).cards;
+    const all = canonicalCards().skills;
+    const pick = (since: string[]) => Object.fromEntries(Object.entries(all).filter(([, s]) => since.includes(s.since)).map(([id, s]) => [id, { rule: s.rule, good: s.good, wrong: s.wrong }]));
+    cards = pick(["taxonomy-v1"]);
+    cardsV10 = pick(["taxonomy-v1", "taxonomy-v2"]);
   }
-  if (version !== "generation-v10") return cards;
-  if (!extraCards) {
-    extraCardsText = readFileSync(path.join(detectProjectRoot(), "content", "taxonomy", "skill-cards-v2-extra.json"), "utf8");
-    extraCards = (JSON.parse(extraCardsText) as { cards: Record<string, SkillCard> }).cards;
-  }
-  return { ...cards, ...extraCards };
+  return version === "generation-v10" ? cardsV10! : cards;
 }
 const CYRILLIC = /[Ѐ-ӿ]/;
 /** an option that is only an article or a determiner (such an item is capped at three options) */
@@ -93,7 +98,7 @@ export function draftFormat(type: AnyExerciseType, count: number, version = "", 
 
 /** Hash input of the prompt version: all schemas + the examples (so changing any of them needs a new version id). */
 export function draftFormatsText(version = ""): string {
-  skillCards(version);
+  snapshotTexts();
   return JSON.stringify({ formats: Object.fromEntries((Object.keys(DRAFT_PROPS) as ExerciseType[]).map((t) => [t, draftFormat(t, 2, version)])), examples: EXAMPLES, cards: version === "generation-v10" ? cardsText + extraCardsText : cardsText });
 }
 
@@ -198,6 +203,14 @@ const issue = (code: string, path: string, message: string): ValidationIssue => 
 const words = (s: string): number => s.trim().split(/\s+/).filter(Boolean).length;
 const norm = (s: string): string => s.toLowerCase().replace(/[^a-z0-9' ]+/g, " ").replace(/\s+/g, " ").trim();
 const GAP = /_{2,}/g;
+/** short function words that may legitimately appear both around and inside a gap ("has been", "more ... than") */
+const ECHO_IGNORED = new Set(["have", "been", "that", "with", "this", "from", "than", "were", "will", "would", "could", "should", "they", "them", "there", "their", "which", "what", "when", "more", "most", "very", "does", "into", "being", "also", "only", "just", "much", "many", "some", "such"]);
+/** first content word (4+ letters) of an option that is already written in the sentence outside the gap, else null */
+export function echoedWord(sentence: string, options: string[]): string | null {
+  const around = new Set(norm(sentence.replace(GAP, " ")).split(" ").filter((w) => w.length >= 4 && !ECHO_IGNORED.has(w)));
+  for (const o of options) for (const w of norm(o).split(" ")) if (around.has(w)) return w;
+  return null;
+}
 const ids = ["a", "b", "c", "d"];
 
 /** A draft must be new text: no sentence of the worked example or of the skill card may come back verbatim. */
@@ -277,6 +290,8 @@ export function assembleExercise(raw: unknown, plan: ItemPlan, ctx: { exerciseId
       const article = articleMismatch(sentence.split(GAP)[0] ?? "", options);
       if (article) issues.push(issue("ARTICLE_GIVES_ANSWER", "/sentence", `the article "${article}" before the gap must fit every option, otherwise it gives the answer away`));
       if (options.length > 3 && options.every((o) => DETERMINER_OPTION.test(norm(o)))) issues.push(issue("ARTICLE_OPTIONS_MAX3", "/options", "an article or determiner item offers at most three options"));
+      const echoed = echoedWord(sentence, options);
+      if (echoed) issues.push(issue("OPTION_REPEATS_SENTENCE_WORD", "/options", `an option repeats "${echoed}", which is already in the sentence outside the gap; options must fill only the gap`));
       promptEn = sentence.replace(GAP, "___");
       payload = { options: options.map((text, i) => ({ id: ids[i]!, text })), accepted_option_ids: [ids[ci] ?? "a"], multiple: false };
       break;

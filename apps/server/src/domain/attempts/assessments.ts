@@ -3,6 +3,7 @@ import { ApiError } from "../../errors.js";
 import { isIndependent } from "./canonical.js";
 import { loadSlotContext, resolveTargetSkillKey, skillRevisionId, type SlotContext } from "./context.js";
 import { isRepeatSlot } from "../sessions/repeats.js";
+import { awardXpIfEarned } from "../sessions/xp.js";
 import type { AssessmentDecision, AttemptDeps, Confirmation, FindingInput } from "./ports.js";
 
 export interface AttemptRow {
@@ -135,6 +136,9 @@ export function writeAssessmentRevision(
     deps.now().toISOString(),
     decision.aiAnnotationId ?? null,
   );
+
+  // a right first try pays its XP once the learner has continued; a verdict that arrives after "continue" pays here
+  awardXpIfEarned(db, deps, ctx.slotId);
 
   // Vocabulary assessments share the immutable assessment ledger but are not grammar evidence.
   const vocabulary = db.prepare("SELECT 1 FROM vocabulary_sessions WHERE session_id = ?").get(ctx.sessionId) !== undefined;

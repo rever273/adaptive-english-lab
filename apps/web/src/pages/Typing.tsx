@@ -1,7 +1,7 @@
 import { useTypingActivity } from "../typingActivity";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import * as api from "../api";
-import type { DictationResult, DictationState, TypingRecallWord, TypingBookStartResponse, TypingOverview, TypingResult, TypingWordsStartResponse } from "../api";
+import type { DictationResult, DictationState, TypingRecallWord, TypingBookStartResponse, TypingDrillsStartResponse, TypingOverview, TypingResult, TypingWordsStartResponse } from "../api";
 import { TypingKeyboard } from "../components/TypingKeyboard";
 import { WordsTargetImage } from "../components/WordsTargetImage";
 import { checkDailyGoal, DailyGoalCheck } from "../components/DailyGoalNotice";
@@ -10,13 +10,16 @@ import type { BookSpeedSample } from "../game/bookSpeedSamples";
 import { WordsScene } from "../game/scene";
 import { firstTranslation } from "../format";
 import { playPracticeSound } from "../practiceSounds";
+import { HOTKEYS } from "../components/hotkeys";
 import { BooksGame } from "./TypingBooks";
 import { DictationGame, DictationResultView } from "./TypingDictation";
 import { TypingRecall } from "./TypingRecall";
+import { DrillsGame } from "./TypingDrills";
 import { LAYOUT_HINT, Toast, useToast } from "./typingShared";
 import { comboMultiplier, createWordsEngine, exportKeyStats, revealTranslation, type WordsEngineState, type WordsEvent } from "../game/wordsEngine";
+import { wordAccuracy } from "../typingWordAccuracy";
 
-type Screen = { kind: "overview" } | { kind: "words"; sessionId: string; level: number; plan: TypingWordsStartResponse; paused: boolean } | { kind: "books"; sessionId: string; data: TypingBookStartResponse; paused: boolean } | { kind: "result"; result: TypingResult; struggled?: string[]; bonus?: { points: number }; bookSamples?: BookSpeedSample[] } | { kind: "recall"; result: TypingResult; struggled?: string[]; words: TypingRecallWord[] } | { kind: "dictation"; state: DictationState } | { kind: "dictationResult"; result: DictationResult };
+type Screen = { kind: "overview" } | { kind: "words"; sessionId: string; level: number; plan: TypingWordsStartResponse; paused: boolean } | { kind: "drills"; plan: TypingDrillsStartResponse } | { kind: "books"; sessionId: string; data: TypingBookStartResponse; paused: boolean } | { kind: "result"; result: TypingResult; struggled?: string[]; bonus?: { points: number }; bookSamples?: BookSpeedSample[] } | { kind: "recall"; result: TypingResult; struggled?: string[]; words: TypingRecallWord[] } | { kind: "dictation"; state: DictationState } | { kind: "dictationResult"; result: DictationResult };
 
 const clamp = (n: number, lo: number, hi: number) => Math.min(hi, Math.max(lo, n));
 const fallMs = (len: number, msPerChar: number) => Math.round(clamp(3 * len * msPerChar + 2500, 5000, 22000));
@@ -36,7 +39,8 @@ export function Typing({ onNavigate, dailyStart, onDailyDone }: { onNavigate?: (
   const [dailyDictation, setDailyDictation] = useState<"preparing" | "error" | "done">(dailyStart === "dictation" ? "preparing" : "done");
   const dailyDictationBusy = useRef(false);
   const dailyDictationCancelled = useRef(false);
-  useEffect(() => { dailyDictationCancelled.current = false; return () => { dailyDictationCancelled.current = true; }; }, []);
+  const dailyDictationToken = useRef(0);
+  useEffect(() => { dailyDictationCancelled.current = false; return () => { dailyDictationCancelled.current = true; dailyDictationToken.current++; }; }, []);
   // while dictation tracks are being made (a lesson or prepared ones) the card follows the progress
   const generating = overview?.dictation.lesson?.status === "generating" || (overview?.dictation.pool.generating ?? 0) > 0;
   useEffect(() => {
@@ -47,10 +51,9 @@ export function Typing({ onNavigate, dailyStart, onDailyDone }: { onNavigate?: (
 
   const dailyStarted = useRef(false);
   useEffect(() => {
-    if (!dailyStart || dailyStart === "dictation" || !overview || dailyStarted.current) return;
+    if (dailyStart !== "books" || !overview || dailyStarted.current) return;
     dailyStarted.current = true;
-    if (dailyStart === "words" && overview.words.bankWords > 0) void startWords(setScreen, setError);
-    else if (dailyStart === "books" && overview.books.available && !overview.books.finished) void startBook(setScreen, setError);
+    if (overview.books.available && !overview.books.finished) void startBook(setScreen, setError);
   }, [dailyStart, overview, load]);
 
   // A requested dictation may need to be created or finish generating before it can start.
@@ -64,22 +67,41 @@ export function Typing({ onNavigate, dailyStart, onDailyDone }: { onNavigate?: (
       return;
     }
     dailyDictationBusy.current = true;
+    const token = dailyDictationToken.current;
+    const current = () => !dailyDictationCancelled.current && dailyDictationToken.current === token;
     const start = async () => {
       try {
         if (!d.lesson) {
           await api.createDictationLesson();
           const fresh = await api.fetchTypingOverview();
-          if (!dailyDictationCancelled.current) setOverview(fresh);
+          if (current()) setOverview(fresh);
         } else {
           const state = await api.startDictationLesson(d.lesson.id);
-          if (!dailyDictationCancelled.current) { setDailyDictation("done"); setScreen({ kind: "dictation", state }); }
+          if (current()) { setDailyDictation("done"); setScreen({ kind: "dictation", state }); }
         }
       } catch (e) {
-        if (!dailyDictationCancelled.current) { setDictNote(e instanceof Error ? e.message : String(e)); setDailyDictation("error"); }
-      } finally { dailyDictationBusy.current = false; }
+        if (current()) { setDictNote(e instanceof Error ? e.message : String(e)); setDailyDictation("error"); }
+      } finally { dailyDictationBusy.current = false; if (!dailyDictationCancelled.current && dailyDictationToken.current !== token) load(); }
     };
     void start();
   }, [dailyStart, dailyDictation, overview, screen.kind, load]);
+
+  const beginDictation = async (currentOverview = overview) => {
+    const token = ++dailyDictationToken.current;
+    dailyDictationCancelled.current = false;
+    setDictNote(null);
+    try {
+      if (currentOverview?.dictation.lesson?.status === "failed") {
+        await api.retryDictationLesson(currentOverview.dictation.lesson.id);
+        const fresh = await api.fetchTypingOverview();
+        if (dailyDictationCancelled.current || dailyDictationToken.current !== token) return;
+        setOverview(fresh);
+      }
+      if (!dailyDictationCancelled.current && dailyDictationToken.current === token) setDailyDictation("preparing");
+    } catch (e) {
+      if (!dailyDictationCancelled.current && dailyDictationToken.current === token) { setDictNote(e instanceof Error ? e.message : String(e)); setDailyDictation("error"); }
+    }
+  };
 
   if (error && screen.kind === "overview") return <p role="alert">{error}</p>;
   if (!overview) return <p className="muted">Loading typing practice…</p>;
@@ -87,17 +109,13 @@ export function Typing({ onNavigate, dailyStart, onDailyDone }: { onNavigate?: (
   if (dailyDictation !== "done" && screen.kind === "overview") {
     const lesson = overview.dictation.lesson;
     const retry = async () => {
-      setDictNote(null);
-      try {
-        if (lesson?.status === "failed") await api.retryDictationLesson(lesson.id);
-        setOverview(await api.fetchTypingOverview());
-        setDailyDictation("preparing");
-      } catch (e) { setDictNote(e instanceof Error ? e.message : String(e)); }
+      try { const fresh = await api.fetchTypingOverview(); setOverview(fresh); await beginDictation(fresh); }
+      catch (e) { setDictNote(e instanceof Error ? e.message : String(e)); }
     };
     return <section className="card" aria-label="Preparing Audio Dictation">
       <h2><i className="pi pi-volume-up" aria-hidden="true" /> Audio Dictation</h2>
       {dailyDictation === "preparing" ? <p role="status">{lesson?.status === "generating" ? `Preparing the lesson: ${lesson.ready} / ${lesson.total} ready…` : "Opening your lesson…"}</p> : <><p className="notice notice-warning" role="alert">{dictNote ?? "Could not prepare the lesson."}</p><button className="btn btn-primary" onClick={() => void retry()}>Retry</button></>}
-      <button className="btn" onClick={() => { dailyDictationCancelled.current = true; setDailyDictation("done"); }}>Back to Typing</button>
+      <button className="btn" onClick={() => { dailyDictationCancelled.current = true; dailyDictationToken.current++; setDailyDictation("done"); }}>Back to Typing</button>
     </section>;
   }
 
@@ -106,6 +124,7 @@ export function Typing({ onNavigate, dailyStart, onDailyDone }: { onNavigate?: (
     const toOverview = () => { load(); setScreen({ kind: "overview" }); };
     return <DictationResultView result={screen.result} onDailyDone={onDailyDone} onDone={toOverview} onNext={() => {
       dailyDictationCancelled.current = false;
+      dailyDictationToken.current++;
       setDictNote(null);
       setError(null);
       setOverview(null);
@@ -124,7 +143,7 @@ export function Typing({ onNavigate, dailyStart, onDailyDone }: { onNavigate?: (
     const toOverview = () => { load(); setScreen({ kind: "overview" }); };
     // Continue goes straight into the next level / next book passage; if that cannot start, fall back to the overview
     const next = async () => {
-      const started = mode === "words" ? await startWords(setScreen, setError) : await startBook(setScreen, setError);
+      const started = mode === "words" ? await (screen.result.variant === "drills" ? startDrills(setScreen, setError) : startWords(setScreen, setError)) : await startBook(setScreen, setError);
       if (!started) toOverview();
     };
     return <><DailyGoalCheck mode={mode === "words" ? "words" : "books"} /><WordsResult onDailyDone={onDailyDone} result={screen.result} struggled={screen.struggled} bonus={screen.bonus} bookSamples={screen.bookSamples} onContinue={() => void next()} onDone={toOverview} /></>;
@@ -134,20 +153,21 @@ export function Typing({ onNavigate, dailyStart, onDailyDone }: { onNavigate?: (
     <section className="typing-page" aria-label="Typing practice">
       {screen.kind === "overview" && (
         <>
-          <h2 id="typing-h"><i className="pi pi-bullseye" aria-hidden="true" /> Typing practice</h2>
+          <h2 id="typing-h"><i className="pi pi-bullseye" aria-hidden="true" /> {dailyStart === "words" ? "Choose your Words practice" : "Typing practice"}</h2>
           <div className="typing-cards">
             <ModeCard
               image="/typing/words.jpg"
               icon="pi-bolt"
               title="Words"
-              desc="Arcade training: type words to destroy falling meteors with your ship."
-              action={overview.words.activeSessionId ? "Continue" : "Start Practice"}
+              desc="Meteor Rain: type words to destroy falling meteors. Finger Drills: a few comfortable words many times, so your fingers learn them."
+              action="Meteor Rain"
               level={overview.words.nextLevel}
               disabled={overview.words.bankWords === 0}
               disabledNote={overview.words.bankWords === 0 ? "The word bank is empty. Run the typing seed first." : null}
               onStart={() => void startWords(setScreen, setError)}
+              second={{ action: "Finger Drills", level: overview.words.drills.nextLevel, note: `Stage ${overview.words.drills.stage} · ${overview.words.drills.learned} learned`, onStart: () => void startDrills(setScreen, setError) }}
             />
-            <ModeCard
+            {dailyStart !== "words" && <><ModeCard
               image="/typing/books.jpg"
               icon="pi-book"
               title="Books"
@@ -166,10 +186,10 @@ export function Typing({ onNavigate, dailyStart, onDailyDone }: { onNavigate?: (
               desc="Listen to an Australian English sentence and type it. Nothing is shown until you ask for a hint."
               action={dictationAction(overview.dictation)}
               level={overview.dictation.nextLevel}
-              disabled={!overview.dictation.available && !overview.dictation.lesson || overview.dictation.lesson?.status === "generating"}
+              disabled={!overview.dictation.available && !overview.dictation.lesson}
               disabledNote={dictNote ?? dictationNote(overview.dictation)}
-              onStart={() => void runDictation(overview.dictation, setScreen, setDictNote, load)}
-            />
+              onStart={() => void beginDictation()}
+            /></>}
           </div>
           {/* {onNavigate && (
             <p className="actions page-actions">
@@ -178,6 +198,7 @@ export function Typing({ onNavigate, dailyStart, onDailyDone }: { onNavigate?: (
           )} */}
         </>
       )}
+      {screen.kind === "drills" && <DrillsGame plan={screen.plan} onResult={(result) => setScreen({ kind: "result", result })} onExit={() => { load(); setScreen({ kind: "overview" }); }} />}
       {screen.kind === "words" && <WordsGame screen={screen} setScreen={setScreen} onExit={() => setScreen({ kind: "overview" })} />}
       {screen.kind === "books" && <BooksGame sessionId={screen.sessionId} data={screen.data} onResult={(result, struggled, bookSamples) => setScreen({ kind: "result", result, struggled, bookSamples })} onExit={() => setScreen({ kind: "overview" })} />}
     </section>
@@ -199,26 +220,13 @@ function dictationNote(d: TypingOverview["dictation"]): string | null {
   return "Piper is not installed. Run `npm run dictation:setup`.";
 }
 
-async function runDictation(d: TypingOverview["dictation"], setScreen: (s: Screen) => void, setNote: (n: string | null) => void, reload: () => void): Promise<void> {
-  setNote(null);
-  try {
-    const l = d.lesson;
-    if (!l) await api.createDictationLesson();
-    else if (l.status === "failed") await api.retryDictationLesson(l.id);
-    else if (l.status === "ready") { setScreen({ kind: "dictation", state: await api.startDictationLesson(l.id) }); return; }
-  } catch (e) {
-    setNote(e instanceof Error ? e.message : String(e));
-  }
-  reload();
-}
-
 function bookReason(reason: string | null): string {
   if (reason === "file_missing" || reason === "file_changed") return "The book file is missing or changed. Run `npm run typing:prepare-book`.";
   if (reason === "no_book") return "No book is prepared yet. Run `npm run typing:prepare-book`.";
   return "The book is not available.";
 }
 
-function ModeCard({ image, icon, title, desc, action, level, subtitle, disabled, disabledNote, onStart, children }: { image: string; icon: string; title: string; desc: string; action: string; level: number; subtitle?: string; disabled: boolean; disabledNote: string | null; onStart: () => void; children?: React.ReactNode }) {
+function ModeCard({ image, icon, title, desc, action, level, subtitle, disabled, disabledNote, onStart, second, children }: { image: string; icon: string; title: string; desc: string; action: string; level: number; subtitle?: string; disabled: boolean; disabledNote: string | null; onStart: () => void; second?: { action: string; level: number; note: string; onStart: () => void }; children?: React.ReactNode }) {
   return (
     <div className={`card typing-mode-card${disabled ? " disabled" : ""}`}>
       <img className="typing-card-image" src={image} alt="" loading="lazy" />
@@ -226,9 +234,17 @@ function ModeCard({ image, icon, title, desc, action, level, subtitle, disabled,
       <p className="muted small">{desc}</p>
       {subtitle && <p className="muted small">Book: {subtitle}</p>}
       <p className="typing-level">{action} <span className="muted">(Level {String(level).padStart(2, "0")})</span></p>
+      {second && <p className="typing-level">{second.action} <span className="muted">(Level {String(second.level).padStart(2, "0")} · {second.note})</span></p>}
       {disabledNote && <p className="notice notice-warning small" role="status">{disabledNote}</p>}
       {children}
-      <button className="btn btn-primary typing-card-action" disabled={disabled} onClick={onStart} data-testid={`typing-${title.toLowerCase()}-start`}>{action}</button>
+      {second ? (
+        <div className="typing-card-actions">
+          <button className="btn btn-primary" disabled={disabled} onClick={onStart} data-testid={`typing-${title.toLowerCase()}-start`}>{action}</button>
+          <button className="btn btn-primary" disabled={disabled} onClick={second.onStart} data-testid="typing-drills-start">{second.action}</button>
+        </div>
+      ) : (
+        <button className="btn btn-primary typing-card-action" disabled={disabled} onClick={onStart} data-testid={`typing-${title.toLowerCase()}-start`}>{action}</button>
+      )}
     </div>
   );
 }
@@ -237,6 +253,17 @@ async function startWords(setScreen: (s: Screen) => void, setError: (e: string |
   try {
     const plan = await api.startTypingWords();
     setScreen({ kind: "words", sessionId: plan.sessionId, level: plan.level, plan, paused: false });
+    return true;
+  } catch (e) {
+    setError(e instanceof Error ? e.message : String(e));
+    return false;
+  }
+}
+
+async function startDrills(setScreen: (s: Screen) => void, setError: (e: string | null) => void): Promise<boolean> {
+  try {
+    const plan = await api.startTypingDrills();
+    setScreen({ kind: "drills", plan });
     return true;
   } catch (e) {
     setError(e instanceof Error ? e.message : String(e));
@@ -421,9 +448,9 @@ function WordsGame({ screen, setScreen, onExit }: { screen: Extract<Screen, { ki
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => {
       if (e.ctrlKey || e.metaKey || e.altKey || e.getModifierState("AltGraph") || e.isComposing) return;
-      if (e.key === "Escape" || e.key === "F2") { e.preventDefault(); if (!e.repeat) togglePause(); return; }
+      if (e.key === "Escape" || e.key === HOTKEYS.pause) { e.preventDefault(); if (!e.repeat) togglePause(); return; }
       // F3: the Russian translation of the word being typed (or the most urgent one), also for general words
-      if (e.key === "F3") { e.preventDefault(); if (!e.repeat && !pausedRef.current) { const eng = engineRef.current; if (eng) revealTranslation(eng); } return; }
+      if (e.key === HOTKEYS.translate) { e.preventDefault(); if (!e.repeat && !pausedRef.current) { const eng = engineRef.current; if (eng) revealTranslation(eng); } return; }
       if (e.key === "Backspace") { e.preventDefault(); e.stopPropagation(); return; } // wrong letters are never shown, nothing to delete
       if (e.key.length !== 1) return;
       e.preventDefault();
@@ -546,36 +573,64 @@ function TroubleWords({ words }: { words: string[] }) {
 
 function WordsResult({ result, struggled, bonus, bookSamples, onContinue, onDone, onDailyDone }: { result: TypingResult; struggled?: string[]; bonus?: { points: number } | undefined; bookSamples?: BookSpeedSample[]; onContinue: () => void; onDone: () => void; onDailyDone?: () => void }) {
   const m = result.metrics;
+  const wordStats = wordAccuracy(result);
   const stats: Array<{ label: string; value: string; tip: string }> = [
     { label: "Score", value: String(m.score), tip: STAT_TIPS.score },
     { label: "Best score", value: result.best.score === null ? "—" : String(result.best.score), tip: STAT_TIPS.bestScore },
     { label: "WPM", value: String(Math.round(m.wpm)), tip: STAT_TIPS.wpm },
     { label: "Best WPM", value: result.best.wpm === null ? "—" : String(Math.round(result.best.wpm)), tip: STAT_TIPS.bestWpm },
     { label: "CPM", value: String(Math.round(m.cpm)), tip: STAT_TIPS.cpm },
-    { label: "Accuracy", value: m.accuracy === null ? "—" : `${Math.round(m.accuracy)}%`, tip: STAT_TIPS.accuracy },
-    { label: "Errors", value: String(m.errors), tip: STAT_TIPS.errors },
+    ...(wordStats ? [{ label: "Word accuracy", value: wordStats.accuracy === null ? "—" : `${Math.round(wordStats.accuracy)}%`, tip: "Completed words typed without any wrong keys, divided by all completed words. Missing per-word records are not counted as clean.\nДоля завершённых слов без ошибок." }, { label: "Words with errors", value: `${wordStats.withErrors} / ${wordStats.shown - wordStats.unknown}`, tip: "Words with at least one wrong key after selecting the word, out of words with recorded error details. Mistakes before selecting a word are separate.\nСлова хотя бы с одной ошибкой после выбора слова." }, { label: "Not completed", value: `${wordStats.unfinished} / ${wordStats.shown}`, tip: "Words shown but not destroyed before the session ended.\nПоказанные, но не завершённые слова." }] : []),
+    ...(result.mode === "books" && result.bookWords ? [{label:"Word accuracy",value:result.bookWords.completed ? `${Math.round((result.bookWords.completed-result.bookWords.withErrors)/result.bookWords.completed*100)}%` : "—",tip:"Completed words without a wrong key, among the words covered by tracking. Punctuation and spaces are not words."},{label:"Words with errors",value:`${result.bookWords.withErrors} / ${result.bookWords.completed}`,tip:"Completed word occurrences with at least one wrong key. Repeated occurrences count separately."}] : []),
+    { label: result.mode === "words" ? "Key accuracy" : "Accuracy", value: m.accuracy === null ? "—" : `${Math.round(m.accuracy)}%`, tip: STAT_TIPS.accuracy },
+    { label: result.mode === "words" ? "Wrong keys" : "Errors", value: String(m.errors), tip: STAT_TIPS.errors },
     ...(result.wordsShown !== undefined ? [{ label: "Words shown", value: String(result.wordsShown), tip: STAT_TIPS.shown }] : []),
     ...(result.wordsDestroyed !== undefined ? [{ label: "Destroyed", value: String(result.wordsDestroyed), tip: STAT_TIPS.destroyed }] : []),
     { label: "Time", value: fmtDuration(m.activeMs), tip: STAT_TIPS.time },
   ];
   const columns = Math.ceil(stats.length / 2); // exactly two rows
   const bookFinished = result.mode === "books" && result.book?.finished === true;
+  const drills = result.variant === "drills";
+  // Drills repeat a few words many times: the list groups the showings of each word
+  const drillWords = drills && result.words ? [...result.words.reduce((m, w) => {
+    const cur = m.get(w.lemma) ?? { lemma: w.lemma, translationRu: w.translationRu, typed: 0, withErrors: 0 };
+    if (w.destroyed) cur.typed++;
+    if (w.errors) cur.withErrors++;
+    return m.set(w.lemma, cur);
+  }, new Map<string, { lemma: string; translationRu: string | null; typed: number; withErrors: number }>()).values()] : null;
   return (
     <div className="card typing-result">
-      <h3>{result.mode === "words" ? "Words" : "Books"} — {result.status === "completed" ? "Complete" : result.status === "failed" ? "Failed" : "Interrupted"}</h3>
-      {result.mode === "words" && <p className="muted small">Level {String(result.level).padStart(2, "0")}</p>}
+      <h3>{result.mode === "words" ? (drills ? "Finger Drills" : "Meteor Rain") : "Books"} — {result.status === "completed" ? "Complete" : result.status === "failed" ? "Failed" : "Interrupted"}</h3>
+      {result.mode === "words" && <p className="muted small">Level {String(result.level).padStart(2, "0")}{result.drills ? ` · Stage ${result.drills.stage} · ${result.drills.learned} words learned` : ""}</p>}
+      {result.drills && result.drills.newlyLearned.length > 0 && <p className="small typing-compare faster" data-testid="drills-newly-learned">Learned on this level: {result.drills.newlyLearned.join(", ")}</p>}
       {result.book && <p className="muted small">{result.book.title} · {result.book.chapter ?? "—"} · {result.book.percentRead}% read</p>}
       <div className="stat-grid" style={{ gridTemplateColumns: `repeat(${columns}, minmax(0, 1fr))` }}>
         {stats.map((st) => <Stat key={st.label} label={st.label} value={st.value} tip={st.tip} />)}
       </div>
       {result.comparison && <p className={`small typing-compare ${result.comparison.faster ? "faster" : "slower"}`}>{result.comparison.percent}% {result.comparison.faster ? "faster" : "slower"} than last time</p>}
+      {wordStats && <p className="muted small">{wordStats.unknown > 0 ? "At least " : ""}{wordStats.clean} of {wordStats.completed} completed words were typed without errors.{wordStats.unknown > 0 && ` Error details are unavailable for ${wordStats.unknown} shown ${wordStats.unknown === 1 ? "word" : "words"}.`}{wordStats.unassigned !== null && wordStats.unassigned > 0 && ` ${wordStats.unassigned} wrong ${wordStats.unassigned === 1 ? "key was" : "keys were"} pressed without a selected word.`}</p>}
+      {result.mode === "books" && (result.bookWords ? <p className="muted small">{result.bookWords.partial ? "Partial word tracking: earlier typing was not recorded. " : ""}Words are counted by occurrence; mistakes on spaces are counted only as wrong keys.</p> : <p className="muted small">Word-level error tracking was not available for this session.</p>)}
       {result.wordErrorBands && (
         <p className="small" data-testid="typing-error-bands">
           Words by mistakes: <span className="typing-compare faster">{result.wordErrorBands.clean} clean</span> · {result.wordErrorBands.one} with 1 error · <span className={result.wordErrorBands.many > 0 ? "typing-compare slower" : undefined}>{result.wordErrorBands.many} with 2+ errors</span>
         </p>
       )}
       <p className="small">Skill: <strong>{result.skill}</strong> · {result.xpAwarded} XP{bonus ? ` · memory check +${bonus.points} points` : ""}</p>
-      {result.words && result.words.length > 0 && (
+      {drillWords && drillWords.length > 0 && (
+        <details>
+          <summary>Words in this level ({drillWords.length})</summary>
+          <ul className="typing-word-list">
+            {drillWords.map((w) => (
+              <li key={w.lemma}>
+                <strong>{w.lemma}</strong>
+                {w.translationRu && <span className="muted"> — {firstTranslation(w.translationRu)}</span>}
+                <span className="muted small"> · typed {w.typed}×{w.withErrors ? ` · ${w.withErrors} with errors` : " · all clean"}</span>
+              </li>
+            ))}
+          </ul>
+        </details>
+      )}
+      {!drills && result.words && result.words.length > 0 && (
         <details>
           <summary>Words in this session ({result.words.length})</summary>
           <ul className="typing-word-list">
@@ -595,7 +650,7 @@ function WordsResult({ result, struggled, bonus, bookSamples, onContinue, onDone
       </div>}
       {struggled && struggled.length > 0 && <TroubleWords words={struggled} />}
       <div className="actions">
-        {!bookFinished && <button className="btn btn-primary" onClick={onContinue} data-testid="typing-continue" autoFocus>{result.mode === "words" ? (result.status === "completed" ? `Continue to level ${String(result.level + 1).padStart(2, "0")}` : `Try level ${String(result.level).padStart(2, "0")} again`) : "Continue reading"}</button>}
+        {!bookFinished && <button className="btn btn-primary" onClick={onContinue} data-testid="typing-continue" autoFocus>{result.mode === "words" ? (result.status === "completed" ? `${drills ? "Next drill: level" : "Continue to level"} ${String(result.level + 1).padStart(2, "0")}` : `Try level ${String(result.level).padStart(2, "0")} again`) : "Continue reading"}</button>}
         {onDailyDone && <button className="btn btn-primary" onClick={onDailyDone}>Continue Daily Practice</button>}
         <button className="btn" onClick={onDone} data-testid="typing-done">Back to Typing</button>
       </div>

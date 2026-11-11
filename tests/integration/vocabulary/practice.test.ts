@@ -225,18 +225,18 @@ describe("Vocabulary Practice (vocabulary TZ)", () => {
     expect(getFeedback(env.db, env.deps, s.sessionId, slots[0]!.id).vocabulary).toMatchObject({ translationRu: "моё слово", translationSource: "user" });
 
     expect(count(env, "SELECT COUNT(*) AS n FROM skill_opportunities")).toBe(grammarOpps); // Grammar Mastery untouched
-    expect(activityProgress(env.db, "vocabulary").total).toBe(70); // 7 finished tasks x 10, the skip earns nothing, replays add nothing
+    expect(activityProgress(env.db, "vocabulary").total).toBe(50); // only the 5 right first tries earn 10 each: a mistake, "I don't know" and the skip earn nothing, replays add nothing
     expect(activityProgress(env.db, "grammar").total).toBe(0);
 
     const summary = finishSession(env.db, env.deps, s.sessionId, "completed");
-    expect(summary).toMatchObject({ category: "vocabulary", xpEarned: 70, counts: { correct: 5, incorrect: 1, idk: 1, skipped: 1 } });
+    expect(summary).toMatchObject({ category: "vocabulary", xpEarned: 50, counts: { correct: 5, incorrect: 1, idk: 1, skipped: 1 } });
     expect(summary.practiseAgain?.length).toBeGreaterThan(0);
 
     const a = vocabularyAnalytics(env.db, { days: null, now: env.deps.now(), timezone: "Australia/Brisbane" });
     expect(a.overall).toMatchObject({ correct: 5, total: 7, skipped: 1 }); // IDK is a miss; the skip is not in the denominator
     const fam = a.families;
     expect(fam.recognition.total + fam.guided_recall.total + fam.collocation.total).toBe(7);
-    expect(a.xp.total).toBe(70);
+    expect(a.xp.total).toBe(50);
     // a plain count of answered tasks per word (first tries)
     expect(listWords(env.db).words.reduce((n, w) => n + w.practised, 0)).toBe(7);
     expect(a.weak.every((w) => w.misses >= 2)).toBe(true); // a word is listed only after two missed first tries

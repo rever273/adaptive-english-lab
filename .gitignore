@@ -27,6 +27,7 @@ documentation/*
 AGENTS.md
 CLAUDE.md
 dictionary/
+data/
 
 # personal corrections of published exercises (never public)
 content/packs/fix-*/

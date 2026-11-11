@@ -27,7 +27,7 @@ export function recordLessonActivity(db: Db, deps: RunDeps, runId: string, b: Le
       if (b.endMs <= b.startMs || b.endMs - b.startMs > 15000 || b.startMs < Date.parse(run.startedAt) || b.endMs > now + 2000 || (run.completedAt && b.endMs > Date.parse(run.completedAt) + 2000)) throw new ApiError(400, "ACTIVITY_INVALID", "Invalid activity interval");
       if (run.status === "active" && run.tabId !== b.tabId) throw new ApiError(409, "LEASE_REQUIRED", "This tab is not the one practising this lesson");
       const overlap = (table: string) => db.prepare(`SELECT 1 FROM ${table} WHERE start_ms < ? AND end_ms > ? LIMIT 1`).get(b.endMs, b.startMs);
-      if (overlap("word_lesson_activity_intervals") || overlap("practice_activity_intervals") || overlap("journey_typing_intervals") || overlap("conversation_activity_intervals")) throw new ApiError(409, "ACTIVITY_OVERLAP", "Activity interval overlaps a recorded interval");
+      if (overlap("word_lesson_activity_intervals") || overlap("practice_activity_intervals") || overlap("journey_typing_intervals") || overlap("conversation_activity_intervals") || overlap("grammar_cloze_activity_intervals")) throw new ApiError(409, "ACTIVITY_OVERLAP", "Activity interval overlaps a recorded interval");
       db.prepare("INSERT INTO word_lesson_activity_intervals(id, run_id, tab_id, start_ms, end_ms, recorded_at) VALUES (?,?,?,?,?,?)").run(b.id, runId, b.tabId, b.startMs, b.endMs, deps.now().toISOString());
       return { recorded: true };
     })

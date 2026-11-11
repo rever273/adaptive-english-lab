@@ -9,16 +9,19 @@ import { playPracticeSound } from "../practiceSounds";
 import { fmtTotalTime } from "../format";
 import { LAYOUT_HINT, Toast, useToast } from "./typingShared";
 import { checkDailyGoal, DailyGoalCheck } from "../components/DailyGoalNotice";
+import { HOTKEYS, hotkeyAction } from "../components/hotkeys";
+import { PauseButton, PauseOverlay, useAutoPause } from "../components/Pause";
 
 const MASK = "•••";
-const NEXT_DELAY_MS = 800;
 
 /** One audio controller per screen: Blob URLs cached per sentence, the previous sound is stopped before the next one starts. */
 function useDictationAudio(lessonId: string) {
   const urls = useRef(new Map<string, Promise<string>>());
   const audio = useRef<HTMLAudioElement | null>(null);
+  const generation = useRef(0);
   const [playing, setPlaying] = useState(false);
   const stop = useCallback(() => {
+    generation.current++;
     audio.current?.pause();
     if (audio.current) audio.current.currentTime = 0;
     setPlaying(false);
@@ -33,17 +36,20 @@ function useDictationAudio(lessonId: string) {
     return p;
   }, []);
   /** resolves true when the browser really started the sound (an autoplay block after a reload is not an error) */
-  const play = useCallback(async (exerciseId: string, source: "auto" | "manual" | "wrong_answer"): Promise<boolean> => {
+  const play = useCallback(async (exerciseId: string, source: "auto" | "manual" | "wrong_answer", record: () => boolean): Promise<boolean> => {
+    const request = ++generation.current;
     try {
       const url = await load(exerciseId);
+      if (request !== generation.current) return false;
       audio.current?.pause();
       const a = new Audio(url);
       audio.current = a;
       a.onended = () => setPlaying(false);
       a.onpause = () => setPlaying(false);
       await a.play();
+      if (request !== generation.current) { a.pause(); return false; }
       setPlaying(true);
-      void api.sendDictationPlay(exerciseId, source).catch(() => {});
+      if (record()) void api.sendDictationPlay(exerciseId, source).catch(() => {});
       return true;
     } catch {
       setPlaying(false);
@@ -56,7 +62,7 @@ function useDictationAudio(lessonId: string) {
     const map = urls.current;
     return () => {
       document.removeEventListener("visibilitychange", hide);
-      audio.current?.pause();
+      stop();
       for (const p of map.values()) void p.then((u) => URL.revokeObjectURL(u)).catch(() => {});
       map.clear();
     };
@@ -78,11 +84,18 @@ export function DictationGame({ state, onResult, onExit }: { state: DictationSta
   const playingRef = useRef(false);
   /** sentences played to the end of a start in this session: only a sentence you have heard can be marked */
   const heardRef = useRef(new Set<string>());
+  const [paused, setPaused] = useState(false);
+  const pausedRef = useRef(false);
+  pausedRef.current = paused;
+  const auto = useAutoPause(!paused && engine.phase !== "complete");
+  const autoRef = useRef(false);
+  autoRef.current = auto.reason !== null;
   playingRef.current = audio.playing;
   const [layoutNotice, showLayoutNotice] = useToast();
   const [message, setMessage] = useState<string | null>(null);
   const timers = useRef<number[]>([]);
   const busyRef = useRef(false);
+  const nextRef = useRef<{ lessonCompleted: boolean; nextOrdinal: number | null } | null>(null);
   // wrong words are shown only after Enter or Hint, for exactly the text that was checked; any edit clears them
   const [marks, setMarks] = useState<{ text: string; segments: MarkedSegment[] } | null>(null);
   // typing time of the current attempt (gaps over 5 s between keys do not count) and keys pressed; sent with every answer
@@ -110,7 +123,7 @@ export function DictationGame({ state, onResult, onExit }: { state: DictationSta
   useEffect(() => {
     let lastSent = clock.current.ms;
     const path = `/api/v1/typing/dictation/lessons/${encodeURIComponent(state.lessonId)}/time`;
-    const tick = window.setInterval(() => clock.current.tick(performance.now(), { visible: !document.hidden, playing: playingRef.current }), 250);
+    const tick = window.setInterval(() => clock.current.tick(performance.now(), { visible: !document.hidden && engine.phase !== "confirmed" && !pausedRef.current && !autoRef.current, playing: playingRef.current }), 250);
     const send = window.setInterval(() => {
       if (clock.current.ms > lastSent) { lastSent = clock.current.ms; void api.sendDictationTime(state.lessonId, Math.round(lastSent)).catch(() => {}); }
     }, 15000);
@@ -119,13 +132,14 @@ export function DictationGame({ state, onResult, onExit }: { state: DictationSta
     document.addEventListener("visibilitychange", onVis);
     window.addEventListener("pagehide", flush);
     return () => { window.clearInterval(tick); window.clearInterval(send); document.removeEventListener("visibilitychange", onVis); window.removeEventListener("pagehide", flush); flush(); };
-  }, [state.lessonId]);
+  }, [engine, state.lessonId]);
 
   const play = useCallback(async (source: "auto" | "manual" | "wrong_answer") => {
+    if (engine.phase === "checking" || engine.phase === "complete") return;
     const ex = currentExercise(engine);
     if (!ex) return;
-    const ok = await audio.play(ex.id, source);
-    if (!ok && source === "auto") setMessage("Press F2 or Play to hear the sentence.");
+    const ok = await audio.play(ex.id, source, () => engine.phase === "listening" && currentExercise(engine)?.id === ex.id);
+    if (!ok && source === "auto") setMessage(`Press ${HOTKEYS.listen} or Play to hear the sentence.`);
     else if (ok) { setMessage(null); heardRef.current.add(ex.id); }
     const next = engine.exercises[(engine.current ?? 0) + 1];
     if (next) void audio.load(next.id).catch(() => {});
@@ -211,26 +225,16 @@ export function DictationGame({ state, onResult, onExit }: { state: DictationSta
         return;
       }
       audio.stop();
+      clock.current.pause(performance.now());
       const index = engine.current!;
       sceneRef.current?.destroy(index);
       playPracticeSound("shoot", soundsRef.current);
       timers.current.push(window.setTimeout(() => playPracticeSound("explode", soundsRef.current), 150));
       if (r.xpAwarded > 0) api.announceXp();
       bump();
-      timers.current.push(window.setTimeout(async () => {
-        busyRef.current = false;
-        if (r.lessonCompleted || r.nextOrdinal === null) {
-          api.announceXp();
-          try { onResult(await api.fetchDictationResult(state.lessonId)); } catch { onExit(); }
-          return;
-        }
-        advance(engine, r.nextOrdinal);
-        setMarks(null);
-        setMessage(null);
-        bump();
-        inputRef.current?.focus();
-        void play("auto");
-      }, NEXT_DELAY_MS));
+      nextRef.current = { lessonCompleted: r.lessonCompleted, nextOrdinal: r.nextOrdinal };
+      busyRef.current = false;
+      bump();
     } catch (e) {
       engine.phase = "listening";
       busyRef.current = false;
@@ -239,21 +243,56 @@ export function DictationGame({ state, onResult, onExit }: { state: DictationSta
     }
   }, [audio, engine, onExit, onResult, play, showLayoutNotice, state.lessonId]);
 
-  // F2 / F3 / F4 work while the answer field has the focus (the Words and Books handlers ignore fields, so they are not reused)
+  const continueAfterAnswer = useCallback(async () => {
+    const next = nextRef.current;
+    if (!next || busyRef.current || engine.phase !== "confirmed") return;
+    busyRef.current = true; nextRef.current = null; audio.stop();
+    if (next.lessonCompleted || next.nextOrdinal === null) {
+      api.announceXp();
+      try { onResult(await api.fetchDictationResult(state.lessonId)); } catch { onExit(); }
+      return;
+    }
+    advance(engine, next.nextOrdinal); clock.current.pause(performance.now());
+    setMarks(null); setMessage(null); busyRef.current = false; bump();
+    inputRef.current?.focus(); void play("auto");
+  }, [audio, engine, onExit, onResult, play, state.lessonId]);
+
+  const togglePause = useCallback(() => {
+    if (engine.phase === "complete") return;
+    setPaused((p) => {
+      if (!p) audio.stop();
+      return !p;
+    });
+  }, [audio, engine]);
+
+  // the shared function keys (see HOTKEYS) work while the answer field has the focus; nothing but Pause works while paused
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => {
       if (e.ctrlKey || e.metaKey || e.altKey || e.isComposing) return;
-      if (e.key === "F2") { e.preventDefault(); if (!e.repeat) void play("manual"); return; }
-      if (e.key === "F3") { e.preventDefault(); if (!e.repeat) void showTranslation(); return; }
-      if (e.key === "F4") { e.preventDefault(); if (!e.repeat) void hint(); return; }
-      if (e.key === "F5") { e.preventDefault(); if (!e.repeat) void reveal(); return; }
+      if (autoRef.current) return; // the automatic pause overlay takes the first key itself
+      const action = hotkeyAction(e);
+      if (action === "pause" || (e.key === "Escape" && pausedRef.current)) { e.preventDefault(); if (!e.repeat) { if (action === "pause" || pausedRef.current) togglePause(); } return; }
+      if (pausedRef.current) return;
+      if (e.key === "Enter" && engine.phase === "confirmed") { e.preventDefault(); if (!e.repeat) void continueAfterAnswer(); return; }
+      if (!action) return;
+      e.preventDefault();
+      if (action === "listen") void play("manual");
+      else if (action === "translate") void showTranslation();
+      else if (action === "hint") void hint();
+      else if (action === "showAnswer") void reveal();
     };
     window.addEventListener("keydown", onKey, { capture: true });
     return () => window.removeEventListener("keydown", onKey, { capture: true });
-  }, [hint, play, reveal, showTranslation]);
+  }, [continueAfterAnswer, engine, hint, play, reveal, showTranslation, togglePause]);
+
+  // focus follows the game: after Continue (or a wrong answer, or Resume) the field is enabled again only on the next render, so focus it then
+  useEffect(() => {
+    if (engine.phase === "listening" && !paused && !auto.reason) inputRef.current?.focus();
+  }, [engine.phase, engine.current, paused, auto.reason]);
 
   const ex = currentExercise(engine);
   const busy = engine.phase !== "listening";
+  const reviewing = engine.phase === "confirmed";
   const focus = ex && !ex.done && ex.hintLevel > 0 ? hintFocus(ex.words) : null;
   const marked = marks && marks.text === engine.text ? marks.segments : cyrillicOnly(engine.text);
   return (
@@ -261,12 +300,16 @@ export function DictationGame({ state, onResult, onExit }: { state: DictationSta
       <div className="typing-hud">
         <strong>Audio Dictation · Level {String(state.level).padStart(2, "0")}</strong>
         <span className="muted">{engine.exercises.filter((e) => e.done).length} / {engine.exercises.length} sentences</span>
+        <PauseButton paused={paused} onToggle={togglePause} />
         <button className="btn" onClick={onExit}>Leave (progress is kept)</button>
       </div>
       <div className="dictation-stage">
         <canvas ref={canvasRef} className="typing-canvas dictation-canvas" aria-label="Audio Dictation game" />
+        {reviewing && <div className="typing-paused books-complete" role="status"><strong>Sentence complete</strong><p className="small muted">Review the sentence, play it again or show its translation.</p><button className="btn btn-primary" onClick={() => void continueAfterAnswer()} autoFocus>Continue <kbd>Enter</kbd></button></div>}
         {layoutNotice && <Toast text={LAYOUT_HINT} />}
       </div>
+      {paused && <PauseOverlay onResume={() => setPaused(false)} />}
+      {!paused && auto.reason && <PauseOverlay auto={auto.reason} onResume={auto.resume} />}
       {ex && (
         <>
           {ex.isRepeat && <p className="muted small dictation-repeat">Repeat: you made mistakes in this sentence before.</p>}
@@ -292,7 +335,7 @@ export function DictationGame({ state, onResult, onExit }: { state: DictationSta
             placeholder="Type what you hear"
             aria-label="Type the sentence you hear"
             value={engine.text}
-            disabled={busy && engine.phase === "checking"}
+            disabled={busy}
             onChange={(e) => {
               clock.current.input(performance.now());
               // a Russian layout is only a reminder (as in Words): the letters turn red and a notice asks to switch
@@ -315,10 +358,10 @@ export function DictationGame({ state, onResult, onExit }: { state: DictationSta
           </div>
           <p className="dictation-message muted small" role="status">{message ?? engine.notice ?? " "}</p>
           <div className="actions">
-            <button className="btn" onClick={() => { void play("manual"); inputRef.current?.focus(); }} disabled={busy}><i className="pi pi-volume-up" aria-hidden="true" /> Play (F2)</button>
-            <button className="btn" onClick={() => void showTranslation()} disabled={busy || ex.translationRu !== null} title="Counts as help: the sentence is then worth at most half">Show Russian Translation (F3)</button>
-            <button className="btn" onClick={() => void hint()} disabled={busy} title="Shows the sentence up to the first word you got wrong. A hint costs a little of the credit.">Hint (F4)</button>
-            <button className="btn" onClick={() => void reveal()} disabled={busy} title="Shows the whole sentence; you still type it, but it earns no credit">Show answer (F5)</button>
+            <button className="btn" onClick={() => { void play("manual"); inputRef.current?.focus(); }} disabled={busy && !reviewing}><i className="pi pi-volume-up" aria-hidden="true" /> Play ({HOTKEYS.listen})</button>
+            <button className="btn" onClick={() => void showTranslation()} disabled={(busy && !reviewing) || ex.translationRu !== null} title={reviewing ? "Review translation without changing credit" : "Counts as help: the sentence is then worth at most half"}>Show Russian Translation ({HOTKEYS.translate})</button>
+            <button className="btn" onClick={() => void hint()} disabled={busy} title="Shows the sentence up to the first word you got wrong. A hint costs a little of the credit.">Hint ({HOTKEYS.hint})</button>
+            <button className="btn" onClick={() => void reveal()} disabled={busy} title="Shows the whole sentence; you still type it, but it earns no credit">Show answer ({HOTKEYS.showAnswer})</button>
             <button className="btn" onClick={() => void toggleSoundFlag()} disabled={busy || (ex.plays === 0 && !heardRef.current.has(ex.id))} aria-pressed={ex.soundFlagged} title="Tell us this voice sounded unclear or unpleasant here. It lowers how often this voice is used.">{ex.soundFlagged ? "Marked as bad sound — undo" : "Sounds bad"}</button>
             <button className="btn btn-primary" onClick={() => void submit()} disabled={busy}>Check (Enter)</button>
           </div>
@@ -338,14 +381,14 @@ function stuckNote(text: string, words: Array<{ text: string | null }>): string 
 
 export function DictationResultView({ result, onNext, onDone, onDailyDone }: { result: DictationResult; onNext: () => void; onDone: () => void; onDailyDone?: () => void }) {
   const stats: Array<[string, string, string]> = [
-    ["Score", String(result.score), "Average credit of the sentences, 0 to 100. Each mistake costs part of a sentence; a hint costs half a mistake; the translation caps a sentence at half; showing the answer (F5) removes it."],
+    ["Score", String(result.score), "Average credit of the sentences, 0 to 100. Each mistake costs part of a sentence; a hint costs half a mistake; the translation caps a sentence at half; showing the answer (F6) removes it."],
     ["XP", String(result.xpAwarded), "Typing XP: up to 6 per sentence, in proportion to its credit."],
     ["WPM", result.wpm === null ? "—" : String(Math.round(result.wpm)), "Words per minute while typing: correct characters / 5 per minute of typing. Time spent listening is not counted."],
     ["CPM", result.cpm === null ? "—" : String(result.cpm), "Characters per minute of typing (WPM × 5)."],
     ["Right first time", `${result.firstAttemptCorrect} / ${result.sentences}`, "Sentences typed correctly on the first try."],
     ["No help", `${result.noHelp} / ${result.sentences}`, "Sentences with full credit: no mistakes, no hints, no translation."],
     ["Wrong answers", String(result.wrongSubmissions), "Answers you submitted that were not correct."],
-    ["Replays", String(result.manualReplays), "Replays you pressed yourself (F2 or Play); automatic repeats are not counted."],
+    ["Replays", String(result.manualReplays), "Replays you pressed yourself (F4 or Play); automatic repeats are not counted."],
     ["Plays per sentence", String(result.avgPlaysPerSentence), "All playbacks of a sentence, automatic ones included."],
     ["Time", fmtTotalTime(result.activeMs / 1000), "Active time: listening and typing, not pauses."],
   ];

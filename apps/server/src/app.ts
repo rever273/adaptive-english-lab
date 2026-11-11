@@ -28,6 +28,7 @@ import { registerGroqStatusRoute } from "./routes/groqStatus.js";
 import { registerVocabularyImageRoutes } from "./routes/vocabularyImages.js";
 import { registerVocabularyPracticeRoutes } from "./routes/vocabularyPractice.js";
 import { registerWordLessonRoutes } from "./routes/wordLessons.js";
+import { registerGrammarClozeRoutes } from "./routes/grammarCloze.js";
 import { registerUiRoutes } from "./routes/ui.js";
 import { registerTutorRoutes } from "./routes/tutor.js";
 import { registerAttemptRoutes } from "./routes/attempts.js";
@@ -135,6 +136,7 @@ export async function buildApp(deps: AppDeps): Promise<FastifyInstance> {
   registerSessionRoutes(app, db, base, { ...(deps.sessions ?? {}), onLease: () => deps.scheduler?.kick(), onSessionEnd: (id) => void deps.stt?.stopForSession(id), onVoiceDone: async (id) => { deps.scheduler?.releaseVoiceHold(id); await deps.stt?.stopForSession(id); deps.scheduler?.kick(); } });
   registerVocabularyPracticeRoutes(app, db, base);
   registerWordLessonRoutes(app, db, base, { onQueued: () => deps.scheduler?.kick(), stt: deps.stt });
+  registerGrammarClozeRoutes(app, db, base, { onQueued: () => deps.scheduler?.kick() });
   const dictation = deps.dictation ?? createDictationEnv(config, deps.groqKey);
   // Chat verification runs outside the GPU queue: cloud Whisper, or a dedicated CPU worker when no Groq key exists.
   const conversationAsr = deps.conversationAsr ?? (deps.groqKey ? dictation.asr : new LocalDictationAsr({ script: path.join(config.projectRoot, "workers", "dictation_asr", "check.py"), device: "cpu" }));
@@ -212,7 +214,8 @@ export async function buildApp(deps: AppDeps): Promise<FastifyInstance> {
   });
 
   if (uiBuilt) {
-    await app.register(fastifyStatic, { root: config.webDist, wildcard: false, index: ["index.html"] });
+    // wildcard: true looks files up on every request; with false the file list is read once at start, so a rebuild of the web app (new hashed file names) left a running server answering 404 for its own scripts
+    await app.register(fastifyStatic, { root: config.webDist, wildcard: true, index: ["index.html"] });
   }
 
   app.setNotFoundHandler((req, reply) => {

@@ -1,0 +1,523 @@
+/* Journey and Daily Practice */
+.journey-header {
+    width: 112px;
+    flex: 0 0 auto;
+    display: flex;
+    flex-direction: column;
+    align-items: stretch;
+    gap: 0.35rem;
+    padding: 0.55rem 0.8rem;
+    color: #d8d2ff;
+    border: 1px solid #625e91;
+    border-radius: 1.2rem;
+    background: linear-gradient(135deg, #20273b, #292039);
+    font-weight: 700;
+    cursor: pointer;
+}
+.journey-header:hover {
+    border-color: #afa6ff;
+}
+.journey-header-track,
+.daily-progress {
+    display: block;
+    height: 5px;
+    overflow: hidden;
+    border-radius: 9px;
+    background: #394150;
+}
+.journey-header-track span,
+.daily-progress span {
+    display: block;
+    height: 100%;
+    border-radius: inherit;
+    background: linear-gradient(90deg, #6ea8fe, #ad83f2, #66d7b7);
+}
+.journey-tab {
+    margin-left: 1rem;
+    border-radius: 9px;
+    border: 1px solid #515e9f;
+    padding: 0.45rem;
+    cursor: pointer;
+}
+.journey-page,
+.daily-page {
+    max-width: 2100px;
+    margin: 0 auto;
+}
+.journey-hero {
+    border: 1px solid #414765;
+    border-radius: 1rem;
+    margin-top: 1em;
+    padding: 2rem;
+    background: radial-gradient(ellipse at 80% 0%, #36335e 0%, transparent 48%), linear-gradient(125deg, #1a2538, #1e2030 65%, #1a3034);
+}
+.journey-eyebrow {
+    color: #ada8fa;
+    font-size: 0.72rem;
+    font-weight: 800;
+    letter-spacing: 0.13em;
+}
+.journey-hero h2,
+.daily-heading h2 {
+    margin: 0.5rem 0;
+    font-size: clamp(1.5rem, 3vw, 2.15rem);
+    letter-spacing: -0.035em;
+}
+.journey-metrics {
+    display: flex;
+    gap: 3rem;
+    flex-wrap: wrap;
+    margin: 1.75rem 0 0.5rem;
+}
+.journey-metrics div,
+.daily-count,
+.journey-week {
+    display: flex;
+    flex-direction: column;
+}
+.journey-metrics strong {
+    font-size: 1.6rem;
+    color: #f2f3ff;
+}
+.journey-metrics span,
+.journey-week span {
+    color: #aab5c7;
+    font-size: 0.8rem;
+}
+.journey-map {
+    padding: 1rem 0 0;
+    overflow: auto;
+}
+.journey-map svg {
+    width: 100%;
+    min-width: 520px;
+    display: block;
+    overflow: visible;
+}
+.journey-map text {
+    fill: #dde5f4;
+    font-size: 17px;
+    font-weight: 700;
+}
+.journey-map .journey-small {
+    fill: #9ca9bb;
+    font-size: 14px;
+    font-weight: 400;
+}
+.journey-rail {
+    stroke: #495469;
+    stroke-width: 8;
+    stroke-linecap: round;
+}
+.journey-fill {
+    stroke: url(#journey-gradient);
+    stroke-width: 8;
+    stroke-linecap: round;
+}
+.journey-node {
+    fill: #263143;
+    stroke: #8492a8;
+    stroke-width: 3;
+}
+.journey-node.done {
+    fill: #8fc6ff;
+    stroke: #b7d5ff;
+}
+.journey-current {
+    fill: #9cbaff;
+    fill-opacity: 0.25;
+    stroke: #c6d2ff;
+    stroke-width: 2;
+}
+.journey-grid {
+    display: grid;
+    grid-template-columns: 1fr 1fr;
+    gap: 1rem;
+}
+.journey-grid h3 {
+    margin: 0 0 0.7rem;
+}
+.journey-row {
+    display: flex;
+    justify-content: space-between;
+    padding: 0.6rem 0;
+    border-bottom: 1px solid var(--border);
+    gap: 1rem;
+}
+.journey-row:last-child {
+    border: 0;
+}
+.journey-row .pi {
+    color: #98a9ff;
+    margin-right: 0.4rem;
+}
+.journey-week {
+    border-radius: 0.7rem;
+    padding: 1rem;
+    background: #222a3b;
+}
+.journey-week strong {
+    font-size: 1.5rem;
+    color: #bbacff;
+}
+.journey-settings {
+    gap: 0.7rem;
+    margin-bottom: 1rem;
+}
+.journey-settings h3,
+.journey-settings p {
+    margin: 0.3rem 0;
+}
+.journey-setting-row {
+    display: grid;
+    grid-template-columns: minmax(120px, 190px) minmax(100px, 1fr) 65px;
+    gap: 1rem;
+    align-items: center;
+}
+.journey-setting-row input {
+    width: 100%;
+    accent-color: #9991fb;
+}
+.journey-goals {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 1rem;
+    margin: 0.4rem 0;
+}
+.journey-goals input {
+    width: 5rem;
+}
+.daily-heading {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    gap: 1rem;
+    padding: 1.6rem 1.8rem;
+    border: 1px solid #38445a;
+    border-radius: 1rem;
+    background: linear-gradient(120deg, #1c2a3f, #242237 65%, #263449);
+}
+.daily-heading p {
+    margin: 0.25rem 0 0;
+}
+.daily-count {
+    align-items: center;
+    min-width: 110px;
+    padding: 0.7rem 1rem;
+    border: 1px solid #5b6382;
+    border-radius: 0.8rem;
+    background: #1c2638;
+}
+.daily-count strong {
+    font-size: 1.7rem;
+    color: #c6b9ff;
+}
+.daily-counts {
+    display: flex;
+    gap: 0.7rem;
+}
+.daily-random {
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    justify-content: center;
+    gap: 0.1rem;
+    min-width: 110px;
+    padding: 0.7rem 1rem;
+    border: 1px solid #e0a35a;
+    border-radius: 0.8rem;
+    background: linear-gradient(135deg, #3b2a1c, #4a3220);
+    color: #ffc47a;
+    cursor: pointer;
+    font: inherit;
+}
+.daily-random:hover:not(:disabled) {
+    background: linear-gradient(135deg, #4a3322, #5c3d24);
+    border-color: #ffc47a;
+}
+.daily-random:disabled {
+    opacity: 0.5;
+    cursor: default;
+}
+.daily-random strong {
+    font-size: 0.95rem;
+    color: #ffc47a;
+}
+.daily-random small {
+    color: var(--muted);
+    font-size: 0.8rem;
+}
+.daily-count.reached {
+    border-color: var(--ok);
+}
+.daily-count.reached strong {
+    color: var(--ok-fg);
+}
+.daily-count strong span,
+.daily-count small {
+    color: var(--muted);
+    font-size: 0.8rem;
+}
+.daily-summary {
+    display: flex;
+    flex-wrap: wrap;
+    align-items: center;
+    gap: 1rem 1.7rem;
+    padding: 1rem 0.2rem;
+    color: #b3bed0;
+    font-size: 0.9rem;
+}
+.daily-summary .pi {
+    color: #a7a4ff;
+}
+.daily-summary label {
+    margin-left: auto;
+}
+.daily-list {
+    display: grid;
+    gap: 0.65rem;
+}
+.daily-item {
+    display: grid;
+    grid-template-columns: 48px minmax(150px, 1fr) 145px auto;
+    gap: 1rem;
+    align-items: center;
+    padding: 1rem 1.1rem;
+    border: 1px solid var(--border);
+    border-radius: 0.8rem;
+    background: var(--surface);
+}
+.daily-item.complete {
+    border-color: #326b58;
+    background: linear-gradient(110deg, #192b28, var(--surface));
+}
+.daily-icon {
+    width: 46px;
+    height: 46px;
+    display: grid;
+    place-items: center;
+    border-radius: 0.7rem;
+    color: #b5b2ff;
+    background: #2b2c48;
+}
+.daily-item.complete .daily-icon {
+    color: #86e2b0;
+    background: #23443a;
+}
+.daily-copy,
+.daily-time {
+    display: flex;
+    flex-direction: column;
+    gap: 0.2rem;
+}
+.daily-copy small,
+.daily-time small {
+    color: var(--muted);
+}
+.daily-progress {
+    max-width: 360px;
+    margin-top: 0.35rem;
+}
+.daily-time {
+    text-align: right;
+}
+@media (max-width: 720px) {
+    .journey-hero {
+        padding: 1.3rem;
+    }
+    .journey-metrics {
+        gap: 1.2rem;
+    }
+    .journey-grid {
+        grid-template-columns: 1fr;
+    }
+    .daily-heading {
+        padding: 1.1rem;
+    }
+    .daily-summary label {
+        margin-left: 0;
+    }
+    .daily-item {
+        grid-template-columns: 42px 1fr auto;
+    }
+    .daily-time {
+        grid-column: 2;
+        text-align: left;
+    }
+    .daily-item button {
+        grid-column: 3;
+        grid-row: 1 / 3;
+    }
+    .journey-setting-row {
+        grid-template-columns: 110px 1fr 55px;
+        gap: 0.4rem;
+    }
+}
+
+.daily-order {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 0.5rem;
+}
+.daily-order span {
+    border: 1px solid var(--border);
+    background: var(--surface-2);
+    border-radius: 0.5rem;
+    padding: 0.3rem 0.4rem 0.3rem 0.6rem;
+    font-size: 0.85rem;
+}
+.daily-order button {
+    background: transparent;
+    color: var(--text);
+    border: 0;
+    border-radius: 0.25rem;
+    cursor: pointer;
+    padding: 0.15rem 0.3rem;
+}
+.daily-order button:disabled {
+    opacity: 0.3;
+    cursor: default;
+}
+
+/* A travelling highlight is layered over the completed part of the journey. */
+.journey-shimmer {
+    fill: none;
+    stroke: #fff;
+    stroke-width: 4;
+    stroke-linecap: round;
+    stroke-opacity: 0.48;
+    stroke-dasharray: 12 108;
+}
+@media (prefers-reduced-motion: no-preference) {
+    .journey-shimmer {
+        animation: journey-shimmer 3.2s linear infinite;
+    }
+    @keyframes journey-shimmer {
+        from {
+            stroke-dashoffset: 0;
+        }
+        to {
+            stroke-dashoffset: 120;
+        }
+    }
+}
+@media (prefers-reduced-motion: reduce) {
+    .journey-shimmer {
+        display: none;
+    }
+}
+.journey-milestones {
+    margin-top: 1rem;
+    gap: 0.8rem;
+}
+.journey-milestones-heading {
+    display: flex;
+    align-items: baseline;
+    justify-content: space-between;
+    flex-wrap: wrap;
+    gap: 0.5rem;
+}
+.journey-milestones-heading h3,
+.journey-milestones-heading p {
+    margin: 0;
+}
+.journey-milestones-count {
+    color: var(--muted);
+    font-size: 0.85rem;
+}
+.journey-milestones-scroll {
+    overflow-x: auto;
+}
+.journey-milestones table {
+    width: 100%;
+    min-width: 480px;
+    table-layout: fixed;
+    border-spacing: 0.4rem;
+}
+.journey-milestones td {
+    padding: 0;
+}
+.journey-milestone {
+    display: flex;
+    align-items: center;
+    gap: 0.45rem;
+    padding: 0.5rem 0.65rem;
+    border: 1px solid var(--border);
+    border-radius: 0.5rem;
+    background: var(--surface-2);
+    color: var(--muted);
+    font-size: 0.88rem;
+}
+.journey-milestone .pi {
+    font-size: 0.8rem;
+}
+.journey-milestone.complete {
+    color: #a5ebbd;
+    border-color: #326b58;
+    background: #192f29;
+}
+.journey-milestone.next {
+    color: #d6d2ff;
+    border-color: #8075c5;
+    background: #2a2946;
+}
+
+/* vocabulary recall built from letter tiles */
+.tile-meaning {
+    color: #f0b86e;
+    font-style: italic;
+    padding: 0 0.15em;
+}
+.tile-slots {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 0.2rem 1rem;
+    margin: 0.6rem 0;
+}
+.tile-word {
+    display: inline-flex;
+    gap: 0.25rem;
+}
+.tile-slot {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    width: 34px;
+    height: 38px;
+    border: 1px dashed #6daaff;
+    border-radius: 6px;
+    color: #c6e1ff;
+    font-weight: 700;
+    font-size: 1.05rem;
+    background: transparent;
+}
+button.tile-slot-filled {
+    border-style: solid;
+    background: #25364d;
+    cursor: pointer;
+}
+.tile-pool {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 0.4rem;
+    margin: 0.4rem 0 0.6rem;
+}
+.tile {
+    width: 40px;
+    height: 42px;
+    border: 1px solid #6daaff;
+    border-radius: 8px;
+    background: #25364d;
+    color: #c6e1ff;
+    font-weight: 700;
+    font-size: 1.1rem;
+    cursor: pointer;
+}
+.tile:hover:not(:disabled) {
+    background: #365575;
+}
+.tile:disabled {
+    opacity: 0.3;
+    cursor: default;
+}
+

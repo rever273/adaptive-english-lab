@@ -6,8 +6,8 @@ import * as api from "../api";
 import { modelErrorText } from "../components/AiModelNotice";
 import { VoicesSettings } from "../components/VoicesSettings";
 
-type Values = { preloadModelOnStart?: boolean; practiceSoundsEnabled?: boolean; typingSoundsEnabled?: boolean; taskCount: number; weakRatio: number; voiceTarget: 0 | 1 | 2; voiceShare?: number; vocabularyTaskCount?: number; vocabularyNewWordsPerSession?: number; reviewNoticeThreshold?: number; difficultyMin?: api.Level; difficultyMax?: api.Level; typingWordsPerLevel?: number; typingVocabularyShare?: number; typingSpeedMultiplier?: number; typingBookMinutes?: number; typingDictationExercisesPerLesson?: number; typingRecallWords?: number };
-type Draft = { taskCount: number; weakRatio: number; voiceShare: number; practiceSoundsEnabled: boolean; typingSoundsEnabled: boolean; vocabularyTaskCount: number; vocabularyNewWordsPerSession: number; reviewNoticeThreshold: number; difficultyMin: api.Level; difficultyMax: api.Level; typingWordsPerLevel: number; typingVocabularyShare: number; typingSpeedMultiplier: number; typingBookMinutes: number; typingDictationExercisesPerLesson: number; typingRecallWords: number };
+type Values = { preloadModelOnStart?: boolean; practiceSoundsEnabled?: boolean; typingSoundsEnabled?: boolean; taskCount: number; weakRatio: number; voiceTarget: 0 | 1 | 2; voiceShare?: number; vocabularyTaskCount?: number; vocabularyNewWordsPerSession?: number; reviewNoticeThreshold?: number; difficultyMin?: api.Level; difficultyMax?: api.Level; typingWordsPerLevel?: number; typingDrillWordsPerLevel?: number; typingDrillSpeech?: boolean; typingVocabularyShare?: number; typingSpeedMultiplier?: number; typingBookMinutes?: number; typingBooksShowMistakes?: boolean; typingDictationExercisesPerLesson?: number; typingRecallWords?: number; clozeTaskCount?: number };
+type Draft = { taskCount: number; weakRatio: number; voiceShare: number; practiceSoundsEnabled: boolean; typingSoundsEnabled: boolean; vocabularyTaskCount: number; vocabularyNewWordsPerSession: number; reviewNoticeThreshold: number; difficultyMin: api.Level; difficultyMax: api.Level; typingWordsPerLevel: number; typingDrillWordsPerLevel: number; typingDrillSpeech: boolean; typingVocabularyShare: number; typingSpeedMultiplier: number; typingBookMinutes: number; typingBooksShowMistakes: boolean; typingDictationExercisesPerLesson: number; typingRecallWords: number; clozeTaskCount: number };
 const LEVELS: api.Level[] = ["A2", "B1", "B2", "C1", "C2"];
 
 /** docs/04 §7: only the settings the allocator reads today. A change is a new settings revision and applies to the next session. */
@@ -58,6 +58,13 @@ export function Settings() {
               <span className="muted small">5–30, default {saved.defaults.taskCount}. No daily limit.</span>
             </label>
           </div>
+          <div className="settings-fields">
+            <label>
+              Grammar Cloze exercises per session
+              <NumberInput min={5} max={50} value={draft.clozeTaskCount} onChange={(value) => setDraft((d) => d && ({ ...d, clozeTaskCount: value }))} data-testid="set-cloze-task-count" />
+              <span className="muted small">5–50, default 15. Sentences in one Grammar Cloze session (L01, L02, …); applies to the next session. The classic practice length above is separate.</span>
+            </label>
+          </div>
           <label>
             Weak skills share: {Math.round(draft.weakRatio * 100)}%
             <input type="range" min={0} max={100} step={5} value={Math.round(draft.weakRatio * 100)} onChange={(e) => setDraft({ ...draft, weakRatio: Number(e.target.value) / 100 })} data-testid="set-weak-ratio" />
@@ -98,6 +105,12 @@ export function Settings() {
               <span className="muted small">10–100, default 30. The exact number of meteor words in a Words level; it does not grow automatically.</span>
             </label>
             <label>
+              Drill words per level
+              <NumberInput min={20} max={200} value={draft.typingDrillWordsPerLevel} onChange={(value) => setDraft((d) => d && ({ ...d, typingDrillWordsPerLevel: value }))} data-testid="set-typing-drill-words" />
+              <span className="muted small">20–200, default 60. Words typed in one Finger Drills level, repeats included.</span>
+            </label>
+            <label className="check"><input type="checkbox" checked={draft.typingDrillSpeech} onChange={(e) => setDraft({ ...draft, typingDrillSpeech: e.target.checked })} data-testid="set-typing-drill-speech" /> Finger Drills: say every tenth word aloud (Piper)</label>
+            <label>
               Personal vocabulary share: {Math.round(draft.typingVocabularyShare * 100)}%
               <input type="range" min={0} max={100} step={5} value={Math.round(draft.typingVocabularyShare * 100)} onChange={(e) => setDraft({ ...draft, typingVocabularyShare: Number(e.target.value) / 100 })} data-testid="set-typing-vocab-share" />
               <span className="muted small">Share of Words targets taken from your saved vocabulary. Default 30%.</span>
@@ -112,6 +125,7 @@ export function Settings() {
               <NumberInput min={1} max={30} value={draft.typingBookMinutes} onChange={(value) => setDraft((d) => d && ({ ...d, typingBookMinutes: value }))} data-testid="set-typing-book-minutes" />
               <span className="muted small">1–30, default 5. Target duration of one Books level; the actual length rounds to a paragraph boundary.</span>
             </label>
+            <label className="check"><input type="checkbox" checked={draft.typingBooksShowMistakes} onChange={(e) => setDraft({ ...draft, typingBooksShowMistakes: e.target.checked })} data-testid="set-typing-books-mistakes" /> Show wrong letters in Books (untick: a wrong key is only counted, nothing appears to delete)</label>
             <label>
               Memory check words after a Words level
               <NumberInput min={0} max={3} value={draft.typingRecallWords} onChange={(value) => setDraft((d) => d && ({ ...d, typingRecallWords: value }))} data-testid="set-typing-recall-words" />
@@ -244,7 +258,7 @@ function VocabularySpeechSettings() {
 }
 
 /** older settings revisions hold a fixed voice count; it is shown as the share of the task count it was */
-const pick = (v: Values): Draft => ({ taskCount: v.taskCount, weakRatio: v.weakRatio, voiceShare: v.voiceShare ?? Math.round((v.voiceTarget / v.taskCount) * 20) / 20, practiceSoundsEnabled: v.practiceSoundsEnabled ?? true, typingSoundsEnabled: v.typingSoundsEnabled ?? true, vocabularyTaskCount: v.vocabularyTaskCount ?? 8, vocabularyNewWordsPerSession: v.vocabularyNewWordsPerSession ?? 4, reviewNoticeThreshold: v.reviewNoticeThreshold ?? 5, difficultyMin: v.difficultyMin ?? (v.difficultyMax ? "A2" : "B1"), difficultyMax: v.difficultyMax ?? "C1", typingWordsPerLevel: v.typingWordsPerLevel ?? 30, typingVocabularyShare: v.typingVocabularyShare ?? 0.3, typingSpeedMultiplier: v.typingSpeedMultiplier ?? 1.05, typingBookMinutes: v.typingBookMinutes ?? 5, typingDictationExercisesPerLesson: v.typingDictationExercisesPerLesson ?? 10, typingRecallWords: v.typingRecallWords ?? 2 });
+const pick = (v: Values): Draft => ({ taskCount: v.taskCount, weakRatio: v.weakRatio, voiceShare: v.voiceShare ?? Math.round((v.voiceTarget / v.taskCount) * 20) / 20, practiceSoundsEnabled: v.practiceSoundsEnabled ?? true, typingSoundsEnabled: v.typingSoundsEnabled ?? true, vocabularyTaskCount: v.vocabularyTaskCount ?? 8, vocabularyNewWordsPerSession: v.vocabularyNewWordsPerSession ?? 4, reviewNoticeThreshold: v.reviewNoticeThreshold ?? 5, difficultyMin: v.difficultyMin ?? (v.difficultyMax ? "A2" : "B1"), difficultyMax: v.difficultyMax ?? "C1", typingWordsPerLevel: v.typingWordsPerLevel ?? 30, typingDrillWordsPerLevel: v.typingDrillWordsPerLevel ?? 60, typingDrillSpeech: v.typingDrillSpeech ?? false, typingVocabularyShare: v.typingVocabularyShare ?? 0.3, typingSpeedMultiplier: v.typingSpeedMultiplier ?? 1.05, typingBookMinutes: v.typingBookMinutes ?? 5, typingBooksShowMistakes: v.typingBooksShowMistakes ?? true, typingDictationExercisesPerLesson: v.typingDictationExercisesPerLesson ?? 10, typingRecallWords: v.typingRecallWords ?? 2, clozeTaskCount: v.clozeTaskCount ?? 15 });
 const voiceCount = (d: Draft): number => Math.round(d.voiceShare * d.taskCount);
 
 const BUSY_TEXT: Record<string, string> = {

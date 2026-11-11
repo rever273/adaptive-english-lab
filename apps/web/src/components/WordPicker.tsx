@@ -1,97 +1,119 @@
-import { useEffect, useId, useMemo, useRef, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import type { WordLessonListItem } from "@english-lab/contracts";
 
 /** the text of one row: the English word with the Russian translation in brackets */
 export const lessonLabel = (l: Pick<WordLessonListItem, "lemma" | "translationRu">): string => `${l.lemma} (${l.translationRu})`;
 
+/** rows drawn at first and added each time the end of the table is reached; the box shows about ten of them, so it always has something to scroll */
+const PAGE = 20;
+
+const dateOf = (iso: string | null): string => {
+  if (!iso) return "";
+  const d = new Date(iso);
+  return Number.isNaN(d.getTime()) ? "" : d.toLocaleDateString(undefined, { day: "numeric", month: "short", year: "numeric" });
+};
+
 /**
- * A wide, searchable word list for Single Word Context Practice. Click it or start typing to filter by the English word or the translation;
- * arrows and Enter pick one. A word whose lesson was finished at least once has a green tick and the result of its last pass; those are hidden
- * unless "Show completed words" is on.
+ * The words that have a ready lesson, as a table for Single Word Practice. About ten rows are visible; more load as you scroll to the end.
+ * Words not finished yet come first (in progress ones marked); words finished at least once are green, at the very end, with their statistics
+ * (passes, last score, last date). "Hide learned words" removes the green ones. The search box filters by the English word or the translation.
  */
-export function WordPicker({ lessons, showCompleted, onPick, inputRef }: { lessons: readonly WordLessonListItem[]; showCompleted: boolean; onPick: (l: WordLessonListItem) => void; inputRef?: React.RefObject<HTMLInputElement | null> }) {
+export function WordTable({ lessons, hideCompleted, onPick, inputRef }: { lessons: readonly WordLessonListItem[]; hideCompleted: boolean; onPick: (l: WordLessonListItem) => void; inputRef?: React.RefObject<HTMLInputElement | null> }) {
   const [query, setQuery] = useState("");
-  const [open, setOpen] = useState(false);
-  const [active, setActive] = useState(0);
-  const listId = useId();
+  const [count, setCount] = useState(PAGE);
   const own = useRef<HTMLInputElement | null>(null);
   const field = inputRef ?? own;
+  const box = useRef<HTMLDivElement>(null);
+  const end = useRef<HTMLDivElement>(null);
   const q = query.trim().toLowerCase();
-  const shown = useMemo(
-    () => lessons.filter((l) => (showCompleted || l.completedRuns === 0) && (q === "" || l.lemma.toLowerCase().includes(q) || l.translationRu.toLowerCase().includes(q))),
-    [lessons, showCompleted, q],
-  );
-  useEffect(() => setActive(0), [q, showCompleted]);
-  const choose = (l: WordLessonListItem) => {
-    setOpen(false);
-    setQuery("");
-    onPick(l);
+  const rows = useMemo(() => {
+    const open = lessons.filter((l) => (!hideCompleted || l.completedRuns === 0) && (q === "" || l.lemma.toLowerCase().includes(q) || l.translationRu.toLowerCase().includes(q)));
+    // new words first (a word being worked on before the rest), finished ones last; each group stays alphabetical
+    const rank = (l: WordLessonListItem) => (l.completedRuns > 0 ? 2 : l.activeRunId ? 0 : 1);
+    return [...open].sort((a, b) => rank(a) - rank(b) || a.lemma.localeCompare(b.lemma));
+  }, [lessons, hideCompleted, q]);
+  useEffect(() => {
+    setCount(PAGE);
+    if (box.current) box.current.scrollTop = 0;
+  }, [q, hideCompleted]);
+  useEffect(() => {
+    const el = end.current;
+    const root = box.current;
+    if (!el || !root || count >= rows.length) return;
+    const observer = new IntersectionObserver((entries) => { if (entries.some((e) => e.isIntersecting)) setCount((n) => n + PAGE); }, { root, rootMargin: "120px" });
+    observer.observe(el);
+    return () => observer.disconnect();
+  }, [count, rows.length]);
+  const shown = rows.slice(0, count);
+  const focusRow = (from: Element | null, step: 1 | -1) => {
+    const list = Array.from(box.current?.querySelectorAll<HTMLElement>("tbody tr[tabindex]") ?? []);
+    const i = from ? list.indexOf(from as HTMLElement) : -1;
+    const next = list[i + step];
+    if (next) next.focus();
+    else if (step === -1) field.current?.focus();
+    else if (shown.length < rows.length) setCount((n) => n + PAGE);
   };
+  const doneCount = lessons.filter((l) => l.completedRuns > 0).length;
   return (
-    <div className="wl-picker">
+    <div className="wl-table-wrap">
       <input
         ref={field}
         className="wl-picker-input"
-        role="combobox"
-        aria-expanded={open}
-        aria-controls={listId}
-        aria-autocomplete="list"
-        aria-activedescendant={open && shown[active] ? `${listId}-${active}` : undefined}
-        aria-label="Choose a word for a single-word lesson"
-        placeholder={lessons.length === 0 ? "No lessons yet" : "Choose a word, or type to search"}
+        type="search"
+        aria-label="Search the words of the single-word lessons"
+        placeholder={lessons.length === 0 ? "No lessons yet" : "Search by word or translation"}
         autoComplete="off"
         spellCheck={false}
         value={query}
         disabled={lessons.length === 0}
         data-testid="word-picker"
-        onFocus={() => setOpen(true)}
-        onBlur={() => setOpen(false)}
-        onChange={(e) => {
-          setQuery(e.target.value);
-          setOpen(true);
-        }}
+        onChange={(e) => setQuery(e.target.value)}
         onKeyDown={(e) => {
-          if (e.key === "ArrowDown") {
-            e.preventDefault();
-            setOpen(true);
-            setActive((i) => Math.min(shown.length - 1, i + 1));
-          } else if (e.key === "ArrowUp") {
-            e.preventDefault();
-            setActive((i) => Math.max(0, i - 1));
-          } else if (e.key === "Enter" && open && shown[active]) {
-            e.preventDefault();
-            choose(shown[active]!);
-          } else if (e.key === "Escape") setOpen(false);
+          if (e.key === "Enter" && rows[0]) { e.preventDefault(); onPick(rows[0]); }
+          else if (e.key === "ArrowDown") { e.preventDefault(); box.current?.querySelector<HTMLElement>("tbody tr[tabindex]")?.focus(); }
         }}
       />
-      <i className="pi pi-chevron-down wl-picker-caret" aria-hidden="true" />
-      {open && (
-        <ul id={listId} role="listbox" className="wl-picker-list" data-testid="word-picker-list">
-          {shown.length === 0 && <li className="wl-picker-empty muted small">{lessons.length === 0 ? "No lessons yet." : q ? "No word matches." : "Every lesson has been finished. Tick “Show completed words” to repeat one."}</li>}
-          {shown.map((l, i) => (
-            <li
-              key={l.lessonId}
-              id={`${listId}-${i}`}
-              role="option"
-              aria-selected={i === active}
-              className={`wl-picker-row${i === active ? " wl-picker-on" : ""}${l.completedRuns > 0 ? " wl-picker-done" : ""}`}
-              onMouseDown={(e) => {
-                e.preventDefault(); // keep the focus in the box so the list does not close before the click
-                choose(l);
-              }}
-              onMouseEnter={() => setActive(i)}
-            >
-              <span className="wl-picker-word">{lessonLabel(l)}</span>
-              {l.activeRunId && l.completedRuns === 0 && <span className="muted small">in progress</span>}
-              {l.completedRuns > 0 && (
-                <span className="wl-picker-score" title={`Finished ${l.completedRuns} time${l.completedRuns === 1 ? "" : "s"}; the score is for the last pass`}>
-                  <i className="pi pi-check" aria-hidden="true" /> {l.lastScore ?? 0}/100
-                </span>
-              )}
-            </li>
-          ))}
-        </ul>
-      )}
+      <div className="wl-table-box" ref={box} data-testid="word-table">
+        <table className="wl-table">
+          <thead>
+            <tr><th scope="col">Word</th><th scope="col">Translation</th><th scope="col" className="wl-num">Passes</th><th scope="col" className="wl-num">Last score</th><th scope="col">Last pass</th></tr>
+          </thead>
+          <tbody>
+            {shown.map((l) => (
+              <tr
+                key={l.lessonId}
+                tabIndex={0}
+                className={l.completedRuns > 0 ? "wl-row-done" : l.activeRunId ? "wl-row-active" : undefined}
+                onClick={() => onPick(l)}
+                onKeyDown={(e) => {
+                  if (e.key === "Enter" || e.key === " ") { e.preventDefault(); onPick(l); }
+                  else if (e.key === "ArrowDown") { e.preventDefault(); focusRow(e.currentTarget, 1); }
+                  else if (e.key === "ArrowUp") { e.preventDefault(); focusRow(e.currentTarget, -1); }
+                }}
+              >
+                <td className="wl-word">{l.lemma}{l.activeRunId && l.completedRuns === 0 && <span className="muted small"> · in progress</span>}</td>
+                <td>{l.translationRu}</td>
+                {l.completedRuns > 0 ? (
+                  <>
+                    <td className="wl-num"><i className="pi pi-check" aria-hidden="true" /> {l.completedRuns}</td>
+                    <td className="wl-num" title="The score of the last pass">{l.lastScore ?? 0}/100</td>
+                    <td>{dateOf(l.lastCompletedAt)}</td>
+                  </>
+                ) : (
+                  <td colSpan={3} className="muted small">{l.activeRunId ? "continue" : "new"}</td>
+                )}
+              </tr>
+            ))}
+            {rows.length === 0 && (
+              <tr className="wl-table-empty"><td colSpan={5} className="muted small">{lessons.length === 0 ? "No lessons yet." : q ? "No word matches." : "Every lesson has been finished. Untick “Hide learned words” to repeat one."}</td></tr>
+            )}
+          </tbody>
+        </table>
+        <div ref={end} className="wl-table-end" aria-hidden="true" />
+      </div>
+      <p className="muted small" data-testid="word-table-count">
+        {rows.length} word{rows.length === 1 ? "" : "s"}{hideCompleted && doneCount > 0 ? ` (${doneCount} learned hidden)` : ""}
+      </p>
     </div>
   );
 }

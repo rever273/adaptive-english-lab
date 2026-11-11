@@ -11,6 +11,7 @@ import { firstTranslation, normalizeBookWord } from "../format";
 import { BooksScene } from "../game/booksScene";
 import { BookSpeedSamples, type BookSpeedSample } from "../game/bookSpeedSamples";
 import { playPracticeSound } from "../practiceSounds";
+import { HOTKEYS } from "../components/hotkeys";
 import { CYRILLIC, LAYOUT_HINT, Toast, useToast } from "./typingShared";
 
 /** the key the learner must press next, as a character for the keyboard hint (capital letters keep their case, so Shift lights up) */
@@ -198,9 +199,10 @@ export function BooksGame({ sessionId, data, onResult, onExit }: { sessionId: st
   const engine = engineRef.current;
   if (!samplesRef.current) samplesRef.current = new BookSpeedSamples(engine);
 
+  const showMistakesRef = useRef(true);
   useEffect(() => {
     let active = true;
-    void api.fetchSettings().then((settings) => { if (active) soundsRef.current = settings.values.typingSoundsEnabled ?? true; }).catch(() => {});
+    void api.fetchSettings().then((settings) => { if (active) { soundsRef.current = settings.values.typingSoundsEnabled ?? true; showMistakesRef.current = settings.values.typingBooksShowMistakes ?? true; } }).catch(() => {});
     return () => { active = false; };
   }, []);
 
@@ -219,7 +221,15 @@ export function BooksGame({ sessionId, data, onResult, onExit }: { sessionId: st
     return () => window.clearInterval(id);
   }, []);
 
-  const counters = useCallback(() => ({ offset: data.startOffset + engine.offset, activeMs: Math.round(engine.activeMs), charsTyped: engine.charsTyped, errors: engine.errorCount, ...(data.charStreak ? { charStreak: { current: engine.charStreak, best: engine.bestCharStreak } } : {}) }), [data.startOffset, data.charStreak, engine]);
+  const counters = useCallback(() => {
+    const errorOffsets = new Set(data.bookWordTracking?.errorOffsets ?? []);
+    for (const offset of engine.slipped) {
+      if (!/[\p{L}\p{N}'’\-]/u.test(engine.text.charAt(offset))) continue;
+      const token = engine.tokens.find(t => offset >= t.startOffset && offset < t.endOffset);
+      if (token) errorOffsets.add(data.startOffset + token.startOffset);
+    }
+    return { offset: data.startOffset + engine.offset, activeMs: Math.round(engine.activeMs), charsTyped: engine.charsTyped, errors: engine.errorCount, wordObservations: { errorOffsets: [...errorOffsets] }, ...(data.charStreak ? { charStreak: { current: engine.charStreak, best: engine.bestCharStreak } } : {}) };
+  }, [data.startOffset, data.charStreak, data.bookWordTracking, engine]);
 
   const checkpoint = useCallback((force = false) => {
     const now = performance.now();
@@ -274,10 +284,10 @@ export function BooksGame({ sessionId, data, onResult, onExit }: { sessionId: st
       const target = e.target as HTMLElement | null;
       if (target?.closest?.("input, textarea, select, [contenteditable=true], .word-panel")) return;
       if (e.key === "Enter" && finishing.current && completionRef.current?.status !== "error") { e.preventDefault(); if (!e.repeat) continueToResult(); return; }
-      if ((e.key === "Escape" || e.key === "F2") && finishing.current) { e.preventDefault(); return; }
-      if (e.key === "Escape" || e.key === "F2") { e.preventDefault(); if (!e.repeat) togglePause(); return; }
-      if (e.key === "F3") { e.preventDefault(); if (!e.repeat) toggleTranslationRef.current(); return; }
-      if (e.key === "F4") { e.preventDefault(); if (!e.repeat) void speakRef.current(); return; }
+      if ((e.key === "Escape" || e.key === HOTKEYS.pause) && finishing.current) { e.preventDefault(); return; }
+      if (e.key === "Escape" || e.key === HOTKEYS.pause) { e.preventDefault(); if (!e.repeat) togglePause(); return; }
+      if (e.key === HOTKEYS.translate) { e.preventDefault(); if (!e.repeat) toggleTranslationRef.current(); return; }
+      if (e.key === HOTKEYS.listen) { e.preventDefault(); if (!e.repeat) void speakRef.current(); return; }
       if (e.key !== "Backspace" && e.key.length !== 1) return;
       e.preventDefault();
       e.stopPropagation();
@@ -285,7 +295,7 @@ export function BooksGame({ sessionId, data, onResult, onExit }: { sessionId: st
       if (pausedRef.current || finishing.current) return;
       if (CYRILLIC.test(e.key)) { showLayoutNotice(); return; }
       const before = engine.offset;
-      const r = handleBookKey(engine, e.key);
+      const r = handleBookKey(engine, e.key, showMistakesRef.current);
       if (r.kind === "ignored") return;
       const fired = sceneRef.current?.keyResult(r.kind, before) ?? { shot: false, wordDone: false };
       if (r.kind === "error") sound("incorrect");

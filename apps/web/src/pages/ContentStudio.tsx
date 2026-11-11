@@ -1,48 +1,28 @@
 import { useCallback, useEffect, useState } from 'react';
 import { VocabularyStudio } from './VocabularyStudio';
-import { NumberInput } from '../components/NumberInput';
 import { WordLessonStudio } from './WordLessonStudio';
+import { STATUS_LABEL, errorText } from './studio/shared';
+import { DictationTracks } from './studio/DictationTracks';
+import { BatchDetail } from './studio/BatchDetail';
 import { batchCache, coverageCache, stockCache } from './studioCache';
 import {
-    ApiRequestError,
     createBatchApi,
     createAgentBatchApi,
     createThoughtBatchApi,
     fetchThoughts,
     fetchAgentTask,
-    fetchBatch,
-    fetchRevisionContent,
     fetchContentStock,
-    fetchTypingOverview,
-    fetchDictationPool,
-    prepareDictationTracks,
-    type DictationPoolSummary,
-    type BatchItem,
-    type BatchSummary,
     type StudioBatchSummary,
     type Coverage,
     type ItemStatus,
 } from '../api';
 
-const STATUS_LABEL: Record<ItemStatus, string> = {
-    queued: 'Generating',
-    invalid: 'Needs agent repair',
-    generated: 'Draft',
-    ready_for_review: 'Awaiting agent',
-    approved: 'Approved',
-    released: 'Accepted',
-    flagged: 'Flagged',
-    rejected: 'Rejected',
-};
-const errorText = (e: unknown) => (e instanceof ApiRequestError ? e.message : 'Something went wrong.');
 const THOUGHTS_AGENT_TASK = `English Lab: choose the grammar skills for my saved thoughts. Follow any local project instructions. Work on your own and run every command yourself; do not ask me to run anything. Do not commit or push. Never edit the SQLite database directly; use only the commands below. Keep the thoughts private: do not copy them into Git or public files.
 1. Run: npm run lab:thoughts -- export (read-only; it prints where thoughts.md and thoughts.json are).
 2. For EVERY pattern pick the ONE skill whose rule the pattern genuinely exercises, judging by the rule text, not the skill id; use null when nothing fits or the pattern is wrong for the sentence. Do not take the nearest-sounding skill.
 3. Write the manifest (template in thoughts.json) and apply it: npm run lab:thoughts -- apply <manifest.json>.
 4. Reply in Russian, briefly: how many thoughts got skills, how many patterns were dropped and why.`;
 
-export const batchAgentTask = (id: string, category: 'grammar' | 'vocabulary') =>
-    `Complete and publish ${category} replenishment batch ${id}. Read content/agent-workflows/${category}.md and common.md in that directory. Run npm run content:agent -- prepare ${id}, review every item, repair suitable drafts as new revisions and reject unsuitable ones. Use the check and finalize commands in the instructions. Independent review by a separate agent is explicitly requested for every final candidate, especially corrections; do not self-approve. Do the review through the content-reviewer agent and the tools in .claude/tools (see your project memory for the workflow), after you have rejected duplicates and fixed the known defects yourself. Apply the reviewed results to the local app yourself. Do not ask me to copy JSON or run commands. Preserve lesson selection, dictionary edits and raw attempt history. Reply briefly with accepted, corrected and rejected counts, and end with one short line: how many tokens the review subagent(s) used in total.`;
 
 const VIEWS = [
     ['grammar', 'Grammar exercises'],
@@ -103,110 +83,6 @@ function CreateLessonsTask() {
     </section>;
 }
 
-function DictationTracks() {
-    const [info, setInfo] = useState<Awaited<ReturnType<typeof fetchTypingOverview>>['dictation'] | null>(null);
-    const [pool, setPool] = useState<DictationPoolSummary | null>(null);
-    const [count, setCount] = useState(10);
-    const [error, setError] = useState<string | null>(null);
-    const load = useCallback(() => {
-        void fetchTypingOverview()
-            .then((o) => setInfo(o.dictation))
-            .catch(() => undefined);
-        void fetchDictationPool()
-            .then(setPool)
-            .catch(() => undefined);
-    }, []);
-    useEffect(load, [load]);
-    const generating = (info?.pool.generating ?? 0) > 0;
-    useEffect(() => {
-        if (!generating) return;
-        const id = window.setInterval(load, 2500);
-        return () => window.clearInterval(id);
-    }, [generating, load]);
-    const minutes = pool ? Math.floor(pool.audioSeconds / 60) : 0;
-    const day = (iso: string) => new Date(iso).toLocaleDateString();
-    return (
-        <>
-            <section className="card">
-                <h2>Audio Dictation tracks</h2>
-                <p className="lede">
-                    Prepare spoken sentences ahead of time, so Audio Dictation lessons start without waiting. Sentences stay hidden here so the dictation is not
-                    spoiled.
-                </p>
-                {error && (
-                    <p className="notice notice-error" role="alert">
-                        {error}
-                    </p>
-                )}
-                {info && !info.available && (
-                    <p className="notice notice-warning small" role="status">
-                        Audio Dictation is not available yet{info.reason ? `: ${info.reason}` : ''}.
-                    </p>
-                )}
-                <div className="dictation-prepare">
-                    <label className="small">
-                        Prepare{' '}
-                        <NumberInput
-                            min={1}
-                            max={50}
-                            value={count}
-                            onChange={setCount}
-                            aria-label="Number of audio tracks to prepare"
-                            data-testid="dictation-prepare-count"
-                        />{' '}
-                        audio tracks for later
-                    </label>
-                    <button
-                        className="btn"
-                        disabled={!info?.available}
-                        onClick={() => {
-                            setError(null);
-                            void prepareDictationTracks(count)
-                                .catch((e) => setError(errorText(e)))
-                                .finally(load);
-                        }}
-                        data-testid="dictation-prepare"
-                    >
-                        Prepare
-                    </button>
-                    {info && (
-                        <p className="muted small" role="status">
-                            {info.pool.prepared} ready for the next lessons{info.pool.generating > 0 ? ` · ${info.pool.generating} being prepared` : ''}
-                        </p>
-                    )}
-                </div>
-            </section>
-            <section className="card">
-                <h2>Prepared tracks</h2>
-                {!pool || (pool.ready === 0 && pool.used === 0) ? (
-                    <p className="muted">No prepared tracks yet.</p>
-                ) : (
-                    <>
-                        <div className="prepared-track-stats" data-testid="dictation-pool-summary">
-                            <div className="stat"><span className="stat-num">{pool.ready}</span><span className="stat-label">ready to play</span></div>
-                            <div className="stat"><span className="stat-num">{minutes > 0 ? `${minutes}m ` : ''}{pool.audioSeconds % 60}s</span><span className="stat-label">prepared audio</span></div>
-                            <div className="stat"><span className="stat-num">{pool.used}</span><span className="stat-label">used in lessons</span></div>
-                            <div className="stat"><span className="stat-num">{pool.topicTotal}</span><span className="stat-label">topics</span></div>
-                        </div>
-                        {pool.ready > 0 && <p className="muted small">{pool.minWords}-{pool.maxWords} words per track{pool.oldest ? ` | prepared ${day(pool.oldest)}${pool.newest && day(pool.newest) !== day(pool.oldest) ? ` to ${day(pool.newest)}` : ''}` : ''}.</p>}
-                        {pool.voices.length > 0 && (
-                            <>
-                                <h3>Voices in prepared tracks</h3>
-                                <p className="chips">
-                                    {pool.voices.map((v) => (
-                                        <span key={v.name} className="chip">
-                                            {v.name} · {v.n}
-                                        </span>
-                                    ))}
-                                </p>
-                            </>
-                        )}
-                    </>
-                )}
-            </section>
-        </>
-    );
-}
 
 function BatchStudio({ category, onCategoryChange }: { category: 'grammar' | 'vocabulary'; onCategoryChange: (category: 'grammar' | 'vocabulary') => void }) {
     const [batches, setBatches] = useState<StudioBatchSummary[]>(() =>
@@ -575,194 +451,5 @@ function BatchStudio({ category, onCategoryChange }: { category: 'grammar' | 'vo
                 )}
             </section>
         </>
-    );
-}
-function BatchDetail({ id, category }: { id: string; category: 'grammar' | 'vocabulary' }) {
-    const [data, setData] = useState<(BatchSummary & { items: BatchItem[] }) | null>(null);
-    const [error, setError] = useState<string | null>(null);
-    const [copied, setCopied] = useState(false);
-    useEffect(() => {
-        const load = async () => {
-            try {
-                setData(await fetchBatch(id));
-            } catch (e) {
-                setError(errorText(e));
-            }
-        };
-        void load();
-        const t = setInterval(() => void load(), 4000);
-        return () => clearInterval(t);
-    }, [id]);
-    const task = batchAgentTask(id, category);
-    const copy = async () => {
-        try {
-            await navigator.clipboard.writeText(task);
-            setCopied(true);
-        } catch {
-            setError('Clipboard unavailable. Select and copy the task below.');
-        }
-    };
-    return (
-        <div className="batch-detail" data-testid="batch-detail">
-            {error && (
-                <p className="notice notice-error" role="alert">
-                    {error}
-                </p>
-            )}
-            {!data ? (
-                <p>Loading?</p>
-            ) : data.completion ? (
-                <p className="notice notice-info" role="status">
-                    Completed: {data.completion.accepted} accepted, {data.completion.corrected} revised, {data.completion.rejected} rejected
-                    {data.completion.flagged ? `, ${data.completion.flagged} flagged` : ''}. Accepted exercises are available for practice.
-                </p>
-            ) : data.generationDone ? (
-                <>
-                    <h3>Task for the reviewing agent</h3>
-                    <p className="small muted">
-                        This task is for {data.requestedCount} {category} items in batch #{id.slice(0, 8)}. The agent checks every item, including generation
-                        failures, and publishes accepted exercises.
-                    </p>
-                    <textarea readOnly rows={4} value={task} aria-label="Task for the reviewing agent" onFocus={(e) => e.currentTarget.select()} />
-                    <button className="btn btn-primary" onClick={() => void copy()}>
-                        {copied ? 'Copied' : 'Copy'}
-                    </button>
-                </>
-            ) : (
-                <p role="status">Generating drafts? Follow progress in AI Tasks. The reviewing task appears when generation finishes.</p>
-            )}
-            {data && (
-                <details>
-                    <summary>Item details ({data.requestedCount})</summary>
-                    <table className="summary-table">
-                        <thead>
-                            <tr>
-                                <th>#</th>
-                                <th>Skill / word</th>
-                                <th>Status</th>
-                                <th />
-                            </tr>
-                        </thead>
-                        <tbody>
-                            {data.items.map((i) => (
-                                <ItemRow key={i.ordinal} item={i} />
-                            ))}
-                        </tbody>
-                    </table>
-                </details>
-            )}
-        </div>
-    );
-}
-function ItemRow({ item }: { item: BatchItem }) {
-    const [content, setContent] = useState<Record<string, unknown> | null>(null);
-    const [open, setOpen] = useState(false);
-    const [error, setError] = useState<string | null>(null);
-    const toggle = async () => {
-        setOpen(!open);
-        if (!open && item.revisionId && !content) {
-            try {
-                setContent((await fetchRevisionContent(item.revisionId)).content);
-            } catch (e) {
-                setError(errorText(e));
-            }
-        }
-    };
-    return (
-        <>
-            <tr>
-                <td>{item.ordinal + 1}</td>
-                <td>
-                    {item.plan.vocabulary?.lemma ?? item.plan.target_skill}
-                    {item.plan.lesson ? (
-                        <span className="muted small">
-                            {' '}
-                            · {/l(\d+)$/i.test(item.plan.lesson) ? `L${/l(\d+)$/i.exec(item.plan.lesson)![1]!.padStart(2, '0')}` : item.plan.lesson}
-                        </span>
-                    ) : null}
-                </td>
-                <td>{STATUS_LABEL[item.status]}</td>
-                <td>
-                    <button className="link" onClick={() => void toggle()}>
-                        {open ? 'Hide' : 'View'}
-                    </button>
-                </td>
-            </tr>
-            {open && (
-                <tr>
-                    <td colSpan={4}>
-                        {error ? (
-                            <p>{error}</p>
-                        ) : content ? (
-                            <Preview c={content} />
-                        ) : item.error ? (
-                            <p className="muted">Generation did not produce a valid draft. The agent can replace or reject this item.</p>
-                        ) : (
-                            <p>Loading?</p>
-                        )}
-                    </td>
-                </tr>
-            )}
-        </>
-    );
-}
-function Preview({ c }: { c: Record<string, unknown> }) {
-    const p = c.payload as Record<string, any>;
-    const type = c.type as string;
-    return (
-        <div className="preview small">
-            <p>
-                <strong>{String(c.prompt_en)}</strong>
-            </p>
-            {(type === 'choose_form' || type === 'choose_missing_fragment') && (
-                <ul>
-                    {(p.options as Array<{ id: string; text: string }>).map((o) => (
-                        <li key={o.id}>
-                            {(p.accepted_option_ids as string[]).includes(o.id) ? '✔ ' : ''}
-                            {o.text}
-                        </li>
-                    ))}
-                </ul>
-            )}
-            {type === 'detect_error' && (
-                <p>
-                    {p.sentence} {p.no_mistake ? <em>(no mistake)</em> : <>→ {(p.corrections as string[]).join(' / ')}</>}
-                </p>
-            )}
-            {(type === 'guided_short_answer' || type === 'russian_to_english_short') && (
-                <>
-                    <p className="ru">{p.cue_ru}</p>
-                    <ul>
-                        {(p.accepted_answers as string[]).map((a, k) => (
-                            <li key={k}>{a}</li>
-                        ))}
-                    </ul>
-                </>
-            )}
-            {type === 'context_reading' && (
-                <>
-                    {(p.paragraphs as string[]).map((t, k) => (
-                        <p key={k} className="passage">
-                            {t}
-                        </p>
-                    ))}
-                    {(p.questions as Array<{ prompt: string; options: Array<{ id: string; text: string }>; accepted_option_ids: string[] }>).map((q, k) => (
-                        <div key={k}>
-                            <p>{q.prompt}</p>
-                            <ul>
-                                {q.options.map((o) => (
-                                    <li key={o.id}>
-                                        {q.accepted_option_ids.includes(o.id) ? '✔ ' : ''}
-                                        {o.text}
-                                    </li>
-                                ))}
-                            </ul>
-                        </div>
-                    ))}
-                </>
-            )}
-            <p className="ru muted">{String((c.hints_ru as string[])[0] ?? '')}</p>
-            <p className="ru">{String(c.explanation_ru)}</p>
-        </div>
     );
 }

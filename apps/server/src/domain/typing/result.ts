@@ -2,10 +2,13 @@ import type { Db } from "../../db/open.js";
 import type { TypingPlanWord, TypingResult } from "@english-lab/contracts";
 import { skillOf } from "./metrics.js";
 import { wordErrorBands } from "./xp.js";
+import { drillsResultInfo } from "./drills.js";
 
 export interface TypingSessionRow {
   id: string;
   mode: "words" | "books";
+  /** Words: Meteor Rain or Finger Drills (TASK_033); Books rows keep the default */
+  variant: "meteors" | "drills";
   status: "active" | "completed" | "failed" | "interrupted";
   level_number: number;
   settings_revision: number;
@@ -55,9 +58,9 @@ export function planWords(row: TypingSessionRow): PlanWord[] {
   return plan.words ?? [];
 }
 
-/** Best WPM and score over finished sessions of the same mode, excluding the session itself. */
-function bestOf(db: Db, mode: "words" | "books", excludeId: string): { wpm: number | null; score: number | null } {
-  const r = db.prepare("SELECT MAX(wpm) AS w, MAX(score) AS s FROM typing_sessions WHERE mode = ? AND status = 'completed' AND id <> ?").get(mode, excludeId) as {
+/** Best WPM and score over finished sessions of the same mode and variant, excluding the session itself. */
+function bestOf(db: Db, row: TypingSessionRow): { wpm: number | null; score: number | null } {
+  const r = db.prepare("SELECT MAX(wpm) AS w, MAX(score) AS s FROM typing_sessions WHERE mode = ? AND variant = ? AND status = 'completed' AND id <> ?").get(row.mode, row.variant, row.id) as {
     w: number | null;
     s: number | null;
   };
@@ -68,9 +71,9 @@ function bestOf(db: Db, mode: "words" | "books", excludeId: string): { wpm: numb
 function previousComparable(db: Db, row: TypingSessionRow): { wpm: number } | null {
   const r = db
     .prepare(
-      "SELECT wpm FROM typing_sessions WHERE mode = ? AND status = 'completed' AND active_ms >= 20000 AND id <> ? AND ended_at <= ? ORDER BY ended_at DESC LIMIT 1",
+      "SELECT wpm FROM typing_sessions WHERE mode = ? AND variant = ? AND status = 'completed' AND active_ms >= 20000 AND id <> ? AND ended_at <= ? ORDER BY ended_at DESC LIMIT 1",
     )
-    .get(row.mode, row.id, row.ended_at ?? row.started_at) as { wpm: number } | undefined;
+    .get(row.mode, row.variant, row.id, row.ended_at ?? row.started_at) as { wpm: number } | undefined;
   return r && r.wpm != null && r.wpm > 0 ? { wpm: r.wpm } : null;
 }
 
@@ -88,16 +91,18 @@ export function buildTypingResult(db: Db, row: TypingSessionRow): TypingResult {
   const charsCorrect = finished && row.chars_correct != null ? row.chars_correct : row.mode === "words" ? wordsCharsCorrect.n : 0;
 
   const xp = (db.prepare("SELECT amount FROM typing_xp_events WHERE session_id = ?").get(row.id) as { amount: number } | undefined)?.amount ?? 0;
-  const best = bestOf(db, row.mode, row.id);
+  const best = bestOf(db, row);
   const prev = previousComparable(db, row);
   const comparison = prev && wpm > 0 ? { percent: Math.round(Math.abs(wpm / prev.wpm - 1) * 100), faster: wpm >= prev.wpm } : null;
 
   const words = row.mode === "words" ? resultWords(db, row) : undefined;
   const book = row.mode === "books" ? resultBook(db, row) : undefined;
+  const tracking = row.mode === "books" ? db.prepare("SELECT tracked_from AS start,completed_words AS completed,error_words AS withErrors,reliable FROM typing_book_word_tracking WHERE session_id=?").get(row.id) as {start:number;completed:number;withErrors:number;reliable:number}|undefined : undefined;
 
   return {
     sessionId: row.id,
     mode: row.mode,
+    ...(row.mode === "words" ? { variant: row.variant } : {}),
     status: row.status === "active" ? "interrupted" : row.status,
     level: row.level_number,
     metrics: {
@@ -118,7 +123,9 @@ export function buildTypingResult(db: Db, row: TypingSessionRow): TypingResult {
     wordsShown: row.mode === "words" ? (db.prepare("SELECT COUNT(*) AS n FROM typing_words WHERE session_id = ?").get(row.id) as { n: number }).n : undefined,
     wordsDestroyed: row.mode === "words" ? destroyedCount.n : undefined,
     wordErrorBands: bandsOf(words),
+    bookWords: tracking?.reliable ? {completed:tracking.completed,withErrors:tracking.withErrors,partial:tracking.start > (row.start_offset ?? 0)} : null,
     book,
+    ...(row.mode === "words" && row.variant === "drills" ? { drills: drillsResultInfo(db, row.id) } : {}),
   };
 }
 

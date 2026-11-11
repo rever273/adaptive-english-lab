@@ -1,0 +1,163 @@
+/* ---- Grammar Cloze / Sentence Survival (TASK_032) ---- */
+.gc-back {
+    margin: 0 0 0.75rem;
+}
+.gc-stages {
+    display: grid;
+    gap: 1rem;
+}
+.gc-stage-head {
+    display: flex;
+    justify-content: space-between;
+    align-items: baseline;
+    gap: 1rem;
+    flex-wrap: wrap;
+}
+.gc-stage-head h3 {
+    margin: 0;
+}
+.gc-locked {
+    opacity: 0.75;
+}
+.gc-reveal {
+    margin: 0.75rem 0;
+}
+.gc-reveal-canvas {
+    display: block;
+    width: 100%;
+    height: auto;
+    background: #000;
+    border-radius: 6px;
+    border: 1px solid var(--border);
+}
+.gc-numbers {
+    margin: 0.25rem 0;
+    font-variant-numeric: tabular-nums;
+}
+.gc-focus {
+    padding: 0.65rem 0.8rem;
+    border-left: 3px solid var(--accent);
+    background: var(--surface-2, rgba(127, 127, 127, 0.12));
+    border-radius: 4px;
+    line-height: 1.5;
+}
+.gc-card .gc-sentence {
+    font-size: 1.2rem;
+    line-height: 1.6;
+}
+.gc-sentence p {
+    margin: 0.25rem 0;
+}
+.gc-gap {
+    display: inline-block;
+    min-width: 4.5rem;
+    padding: 0 0.4rem;
+    border-bottom: 2px solid var(--accent);
+    text-align: center;
+    font-weight: 700;
+}
+.gc-gap-ok {
+    color: var(--ok-fg);
+    border-bottom-color: var(--ok);
+}
+.gc-gap-bad {
+    color: var(--err-fg);
+    border-bottom-color: var(--err);
+}
+button.gc-option {
+    width: 100%;
+    font: inherit;
+    font-size: 1.05rem;
+    color: var(--text);
+    background: var(--surface);
+    text-align: left;
+    min-height: 3rem;
+}
+button.gc-option:disabled {
+    opacity: 1;
+    cursor: default;
+}
+button.gc-option .pi {
+    margin-left: auto;
+}
+button.gc-option.gc-picked {
+    border-color: var(--accent);
+    background: var(--info-bg);
+}
+button.gc-option.gc-right {
+    border-color: var(--ok);
+    background: var(--ok-bg);
+    color: var(--ok-fg);
+}
+button.gc-option.gc-wrong {
+    border-color: var(--err);
+    background: var(--err-bg);
+    color: var(--err-fg);
+}
+.gc-exclude {
+    display: inline-flex;
+    gap: 0.5rem;
+    flex-wrap: wrap;
+    align-items: center;
+}
+.gc-rules {
+    list-style: none;
+    margin: 0;
+    padding: 0;
+}
+.gc-rules li {
+    display: flex;
+    justify-content: space-between;
+    gap: 1rem;
+    padding: 0.2rem 0;
+    border-bottom: 1px solid var(--border);
+}
+.gc-analysis .gc-rules li {
+    display: block;
+}
+.gc-translation {
+    margin: 0.5rem 0;
+    font-style: italic;
+    color: var(--muted);
+}
+.pause-overlay {
+    position: fixed;
+    inset: 0;
+    z-index: 50;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    background: color-mix(in srgb, var(--bg) 96%, transparent);
+}
+.pause-box {
+    text-align: center;
+    padding: 2rem;
+}
+.ml-legend {
+    list-style: none;
+    display: flex;
+    flex-wrap: wrap;
+    gap: 0.25rem 0.9rem;
+    margin: 0.4rem 0 0;
+    padding: 0;
+}
+.ml-legend-btn {
+    font: inherit;
+    font-size: 0.85rem;
+    color: var(--text);
+    background: none;
+    border: 0;
+    padding: 0.1rem 0.2rem;
+    cursor: pointer;
+}
+.ml-legend-btn.off {
+    opacity: 0.4;
+    text-decoration: line-through;
+}
+.ml-dot {
+    display: inline-block;
+    width: 0.7rem;
+    height: 0.7rem;
+    border-radius: 50%;
+    margin-right: 0.25rem;
+}

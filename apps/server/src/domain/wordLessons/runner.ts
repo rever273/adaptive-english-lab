@@ -79,6 +79,21 @@ const SAFE_SKILLS: readonly PlanSkill[] = [
 ];
 export const skillKey = (s: PlanSkill | undefined): string => (s ? (s.id ?? s.label) : "");
 
+/**
+ * Constructions that cannot be shown with this kind of word: an indirect question or a verb pattern around a conjunction or a preposition ("whereas"),
+ * a passive around a phrasal verb ("come up with"). The reviewer rejects such sentences every time, so the plan never asks for them.
+ */
+export function unsuitableSkill(s: PlanSkill, pos: string): boolean {
+  const id = s.id ?? "";
+  const label = s.label.toLowerCase();
+  const embedded = id.startsWith("questions.embedded") || /indirect question|embedded/.test(label);
+  const passive = id.startsWith("passive.") || label.startsWith("passive");
+  const pattern = id.startsWith("verb_patterns.") || /stop doing/.test(label);
+  if (/conjunction|preposition|determiner|pronoun|interjection/i.test(pos) && (embedded || pattern)) return true;
+  if (/adverb|particle/i.test(pos) && pattern) return true;
+  return /phrasal/i.test(pos) && passive;
+}
+
 /** the plan of this try: a construction that made an earlier try fail is replaced by a plain one */
 export function replanAvoiding(plan: LessonPlan, avoid: ReadonlySet<string>): LessonPlan {
   if (avoid.size === 0) return plan;
@@ -218,6 +233,7 @@ export async function runWordLessonJob(ctx: RunnerContext<WordLessonPayload>, o:
   ensurePromptVersion(db, WORD_LESSON_PAIRS_PROMPT, wordLessonPairsSchemaText());
   const sense = JSON.parse(row.sense_json) as SenseSnapshot;
   const avoid = new Set(ctx.job.payload.avoidSkills ?? []);
+  for (const s of [...(JSON.parse(row.plan_json) as LessonPlan).skills, ...SAFE_SKILLS]) if (unsuitableSkill(s, (JSON.parse(row.sense_json) as SenseSnapshot).pos)) avoid.add(skillKey(s));
   const storedPlan = JSON.parse(row.plan_json) as LessonPlan;
   const plan = replanAvoiding(storedPlan, avoid);
   const facts = factsOf(row.lemma, sense);

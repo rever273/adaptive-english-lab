@@ -208,6 +208,17 @@ export function PromptView({
         else onSubmit(selected);
     }
 
+    // tiles: once every slot is filled the word is sent by itself after a short pause (taking a letter back in that time cancels it);
+    // the client does not know the answer, so a full but wrong word is judged like any wrong typed answer
+    const submitRef = useRef(submit);
+    submitRef.current = submit;
+    const autoSend = useTiles && !locked && !busy && canSubmit && filled === tileCount && lockedCount < filled;
+    useEffect(() => {
+        if (!autoSend) return;
+        const t = window.setTimeout(() => submitRef.current(), 450);
+        return () => window.clearTimeout(t);
+    }, [autoSend, built]);
+
     // keyboard: 1-9 pick an option or part, Enter submits, I / H / A / S act, hold M to talk (Alt+M inside the text box)
     const options = p.kind === 'choice' ? p.options : p.kind === 'reading' ? p.question.options : p.kind === 'segments' ? p.segments : [];
     const canHint = !checkMode && (vocabulary || reveal.hintsAvailable > 0);
@@ -452,7 +463,7 @@ export function PromptView({
                             >
                                 Type it instead
                             </button>
-                            {' · '}Two letters are extra. A wrong word counts as a mistake, like a wrong typed answer.
+                            {' · '}Two letters are extra. The word is sent when the last slot is filled; a wrong word counts as a mistake, like a wrong typed answer.
                         </p>
                     )}
                 </div>

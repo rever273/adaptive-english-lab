@@ -3,7 +3,7 @@ import type { Db } from "../../db/open.js";
 import { ApiError } from "../../errors.js";
 import { localDateIn } from "./canonical.js";
 import type { AttemptDeps } from "./ports.js";
-import { awardCompletionXp } from "../sessions/xp.js";
+import { awardXpIfEarned } from "../sessions/xp.js";
 
 type StoredType = SessionEventResponse["type"];
 const API_TO_STORED: Record<SessionEventRequest["type"], StoredType> = {
@@ -115,10 +115,7 @@ export function recordSessionEvent(db: Db, deps: AttemptDeps, sessionId: string,
         `INSERT INTO session_events(id, session_id, slot_id, client_event_id, event_type, payload_json, server_at, local_date, timezone)
          VALUES (?,?,?,?,?,?,?,?,?)`,
       ).run(id, sessionId, req.slotId, req.clientEventId, type, JSON.stringify({ schema_version: 1, ...(req.type === "vocabulary_translation" || req.type === "vocabulary_letters" ? { kind: req.type } : {}), ...(req.letterIndex !== undefined ? { letterIndex: req.letterIndex } : {}) }), serverAt, localDateIn(session.timezone, now), session.timezone);
-      if (type === "continue" && session.purpose === "practice") {
-        const vocabulary = db.prepare("SELECT 1 FROM vocabulary_sessions WHERE session_id = ?").get(sessionId) !== undefined;
-        awardCompletionXp(db, { id: deps.newId(), slotId: req.slotId, eventId: id, track: vocabulary ? "vocabulary" : "grammar", at: serverAt });
-      }
+      if (type === "continue" && session.purpose === "practice") awardXpIfEarned(db, deps, req.slotId);
       let hint: string | null | undefined;
       let letters: Array<string | null> | undefined;
       if (req.type === "vocabulary_letters") {

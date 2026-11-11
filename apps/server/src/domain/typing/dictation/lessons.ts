@@ -414,6 +414,7 @@ function currentExercise(db: Db, exerciseId: string): { exercise: ExerciseRow; l
 
 export function recordPlay(db: Db, deps: Deps, exerciseId: string, source: "auto" | "manual" | "wrong_answer"): { ok: true } {
   const e = exerciseRow(db, exerciseId);
+  if (isDone(db, exerciseId)) return { ok: true };
   if (e.status === "completed") throw new ApiError(409, "TYPING_DICTATION_NOT_CURRENT", "The lesson is completed");
   db.prepare("INSERT INTO typing_dictation_events(id, exercise_id, kind, source, created_at) VALUES (?,?,?,?,?)").run(deps.newId(), exerciseId, "play", source, deps.now().toISOString());
   return { ok: true };
@@ -422,6 +423,9 @@ export function recordPlay(db: Db, deps: Deps, exerciseId: string, source: "auto
 export function openTranslation(db: Db, deps: Deps, exerciseId: string): { translationRu: string } {
   return db
     .transaction(() => {
+      const existing = exerciseRow(db, exerciseId);
+      // Studying a completed sentence must not create a help event or change its awarded credit.
+      if (isDone(db, exerciseId)) return { translationRu: existing.translation_ru };
       const { exercise } = currentExercise(db, exerciseId);
       if (!hasEvent(db, exercise.id, "translation")) db.prepare("INSERT INTO typing_dictation_events(id, exercise_id, kind, source, created_at) VALUES (?,?,?,?,?)").run(deps.newId(), exercise.id, "translation", "manual", deps.now().toISOString());
       return { translationRu: exercise.translation_ru };

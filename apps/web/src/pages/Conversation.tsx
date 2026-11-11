@@ -50,6 +50,8 @@ export function Conversation({ onDailyDone }: { onDailyDone?: () => void }) {
     finally { if (epoch === audioEpoch.current) setSpeechChecking(false); }
   }, [stopAudio]);
   const voice = useVoice(state?.session.id ?? null, tabId, !!state, api.conversationSttStart);
+  const voiceRef = useRef(voice.state.phase);
+  voiceRef.current = voice.state.phase;
   const homeRefresh = useCallback(() => { void api.conversationHome().then(setHome).catch(() => setError("Could not load topics.")); }, []);
   useEffect(homeRefresh, [homeRefresh]);
   useEffect(() => { void api.fetchSettings().then(s => setSoundsEnabled(s.values.practiceSoundsEnabled ?? true)).catch(() => undefined); return stopAudio; }, [stopAudio]);
@@ -74,7 +76,16 @@ export function Conversation({ onDailyDone }: { onDailyDone?: () => void }) {
     const heartbeat = window.setInterval(() => { void api.conversationHeartbeat(id, tabId).then(() => checkDailyGoal("conversation")).catch(() => undefined); }, 5000);
     const hide = () => { if (document.hidden) { current.current = null; stopAudio(); void api.conversationPause(id, tabId).catch(() => undefined); setState(null); homeRefresh(); } };
     document.addEventListener("visibilitychange", hide);
-    return () => { live = false; clearInterval(poll); clearInterval(heartbeat); document.removeEventListener("visibilitychange", hide); if (current.current === id) { current.current = null; void api.conversationPause(id, tabId).catch(() => undefined); } };
+    // two minutes without a key, click, scroll or touch pauses the conversation too (time stops; Continue picks it up again)
+    let lastTouch = Date.now();
+    const touch = () => { lastTouch = Date.now(); };
+    const touchEvents = ["keydown", "pointerdown", "wheel", "touchstart"] as const;
+    for (const e of touchEvents) window.addEventListener(e, touch, { passive: true });
+    const idle = window.setInterval(() => {
+      if (Date.now() - lastTouch <= 120_000 || ["preparing", "recording", "transcribing"].includes(voiceRef.current)) return;
+      current.current = null; stopAudio(); void api.conversationPause(id, tabId).catch(() => undefined); setState(null); homeRefresh(); setError("Paused: no activity for 2 minutes. Press Continue to carry on.");
+    }, 5000);
+    return () => { live = false; clearInterval(poll); clearInterval(heartbeat); clearInterval(idle); for (const e of touchEvents) window.removeEventListener(e, touch); document.removeEventListener("visibilitychange", hide); if (current.current === id) { current.current = null; void api.conversationPause(id, tabId).catch(() => undefined); } };
   }, [state?.session.id, tabId, homeRefresh, stopAudio]);
   const launch = async (resume: boolean) => {
     const nextTabId = crypto.randomUUID();
@@ -86,7 +97,7 @@ export function Conversation({ onDailyDone }: { onDailyDone?: () => void }) {
   const send = async () => {
     if (!state || !input.trim() || busy || ["preparing", "recording", "transcribing"].includes(voice.state.phase)) return;
     const text = input.trim(), id = state.session.id; setBusy(true); setError(""); voice.close();
-    try { const result = await api.conversationMessage(id, tabId, crypto.randomUUID(), text); if (current.current === id) { setState(result); setInput(""); } }
+    try { const result = await api.conversationMessage(id, tabId, crypto.randomUUID(), text); if (current.current === id) { setState(result); setInput(""); } api.announceXp(); }
     catch { if (current.current === id) setError("Your answer was not sent. Please try again."); } finally { setBusy(false); }
   };
   if (!state) return <section className="conversation"><h2><i className="pi pi-comments" /> Conversation</h2><p>Short, relaxed conversations in English.</p>{onDailyDone && <button onClick={onDailyDone}>Continue daily practice <i className="pi pi-arrow-right" /></button>}{error && <p role="alert">{error}</p>}{home?.latest && <div className="conversation-card"><h3>Continue your conversation</h3><p>{home.latest.topic} · {new Date(home.latest.updatedAt).toLocaleString()}</p><button onClick={() => void launch(true)} disabled={busy}>Continue</button></div>}<div className="conversation-card"><h3>Choose a topic</h3><p>Pick one, or try another selection.</p><div className="conversation-topics">{home?.topics.map(t => <button key={t} className={`conversation-topic colour-${topicColour(home.topicGroups[t] ?? t)}${topic === t ? " selected" : ""}`} onClick={() => setTopic(t)}>{t}</button>)}</div><p><button onClick={() => { setTopic(""); homeRefresh(); }}>Other topics</button></p></div><div className="conversation-card conversation-start"><div><h3>Start a new conversation</h3><p>{topic ? `Topic: ${topic}` : "Choose a topic above to begin."}</p></div><button disabled={!topic || busy} onClick={() => void launch(false)}>Start conversation</button></div>{home && <p>{home.statistics.conversations} conversations · {home.statistics.answers} answers · {formatTime(home.statistics.activeMs)} active</p>}</section>;

@@ -210,11 +210,23 @@ describe("vocabulary-selection-v2 picking", () => {
     const shownList = lemmas.map((l) => shown(l, `r-${l}`, daysAgo(2), "miss"));
     const p = pickVocabulary(input({ n: 5, fresh: lemmas.map((l) => fresh(l, `f-${l}`)), shown: shownList, events }));
     expect(p).toHaveLength(5);
-    expect(p.filter((x) => x.repeat).length).toBe(0); // different sentences are preferred for those words
+    expect(p.filter((x) => x.repeat).length).toBeLessThanOrEqual(1); // different sentences are preferred; the word cap (4 of 5) brings one missed sentence back
+    expect(new Set(p.map((x) => x.candidate.lemma)).size).toBe(4);
     const noFresh = pickVocabulary(input({ n: 5, shown: shownList, events }));
     expect(noFresh).toHaveLength(5);
     expect(noFresh.every((x) => x.repeat?.reason === "missed")).toBe(true); // repeat-only stock fills the whole session
     expect(new Set(noFresh.map((x) => x.candidate.revisionId)).size).toBe(5);
+  });
+
+  it("a session of 10 uses at most 8 different words when the stock allows, then words come back with another sentence", () => {
+    const lemmas = ["a", "b", "c", "d", "e", "f", "g", "h", "i", "j", "k", "l"];
+    const f = lemmas.flatMap((l) => [fresh(l, `${l}1`, "recognition"), fresh(l, `${l}2`, "guided_recall")]);
+    const p = pickVocabulary(input({ n: 10, fresh: f }));
+    expect(p).toHaveLength(10);
+    expect(new Set(p.map((x) => x.candidate.lemma)).size).toBeLessThanOrEqual(8);
+    expect(new Set(p.map((x) => x.candidate.revisionId)).size).toBe(10);
+    const thin = pickVocabulary(input({ n: 10, fresh: lemmas.slice(0, 10).map((l) => fresh(l, `${l}1`)) }));
+    expect(thin).toHaveLength(10); // one sentence per word: the cap gives way rather than leave the session short
   });
 
   it("the same seed gives the same choice, another seed may differ", () => {

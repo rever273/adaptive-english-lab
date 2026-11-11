@@ -11,6 +11,7 @@ import { MAX_OUTPUT_BYTES, schemaVariant, type Validated, type ValidationIssue }
 import { bankTexts } from "../vocabulary/forms.js";
 import { TUTOR_PROMPT } from "./repository.js";
 import { runConversation, type ConversationPayload } from "../conversation/runner.js";
+import { runGrammarClozeAnalysis, type AnalysisPayload } from "../grammarCloze/analysis.js";
 
 export interface TutorPayload {
   messageId: string;
@@ -101,7 +102,11 @@ export class TutorJobRunner implements JobRunner<TutorPayload | ConversationPayl
     return this.modelVersionId ? { modelVersionId: this.modelVersionId, configHash: configHashOf(TUTOR_PARAMS) } : null;
   }
 
-  async run(ctx: RunnerContext<TutorPayload | ConversationPayload>): Promise<RunnerOutput> {
+  async run(ctx: RunnerContext<TutorPayload | ConversationPayload | AnalysisPayload>): Promise<RunnerOutput> {
+    if ("grammarClozeAnalysisId" in ctx.job.payload) {
+      if (await this.o.installedDigest(this.pinned.tag) !== this.pinned.digest) throw new RunnerError("model_digest_mismatch", "The installed model differs from the pinned model", false);
+      return runGrammarClozeAnalysis(this.o.db, this.o.chat, ctx as RunnerContext<AnalysisPayload>);
+    }
     if ("conversation" in ctx.job.payload) {
       if (await this.o.installedDigest(this.pinned.tag) !== this.pinned.digest) throw new RunnerError("model_digest_mismatch", "The installed model differs from the pinned model", false);
       return runConversation(this.o.db, this.o.chat, ctx as RunnerContext<ConversationPayload>);

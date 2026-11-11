@@ -1,5 +1,5 @@
 import { Suspense, lazy, useEffect, useState } from "react";
-import { JourneyButton } from "./pages/Journey";
+import { JourneyButton } from "./components/JourneyButton";
 import { dailyOrder } from "./pages/dailyOrder";
 import * as api from "./api";
 import { AiActivity } from "./components/AiActivity";
@@ -15,6 +15,8 @@ const AITasks = lazy(() => import("./pages/AITasks").then((m) => ({ default: m.A
 const Analytics = lazy(() => import("./pages/Analytics").then((m) => ({ default: m.Analytics })));
 const ContentStudio = lazy(() => import("./pages/ContentStudio").then((m) => ({ default: m.ContentStudio })));
 const Practice = lazy(() => import("./pages/Practice").then((m) => ({ default: m.Practice })));
+const PracticeHub = lazy(() => import("./pages/PracticeHub").then((m) => ({ default: m.PracticeHub })));
+const GrammarCloze = lazy(() => import("./pages/GrammarCloze").then((m) => ({ default: m.GrammarCloze })));
 const Vocabulary = lazy(() => import("./pages/Vocabulary").then((m) => ({ default: m.Vocabulary })));
 const Typing = lazy(() => import("./pages/Typing").then((m) => ({ default: m.Typing })));
 const Conversation = lazy(() => import("./pages/Conversation").then((m) => ({ default: m.Conversation })));
@@ -38,7 +40,12 @@ const PAGES: Array<{ id: Page; label: string; icon: string; path: string; group:
 ];
 
 /** each tab has its own address (e.g. /vocabulary), so a reload or a bookmark opens the same tab; an unknown address shows Practice */
-const pageAtPath = (pathname: string): Page => PAGES.find((p) => p.path === pathname.replace(/\/+$/, ""))?.id ?? "practice";
+const pageAtPath = (pathname: string): Page => (pathname.startsWith("/practice") ? "practice" : PAGES.find((p) => p.path === pathname.replace(/\/+$/, ""))?.id ?? "practice");
+
+/** /practice is the choice of the two grammar practices; /practice/grammar is the classic Practice, /practice/cloze is Grammar Cloze (TASK_032) */
+type PracticeView = "hub" | "grammar" | "cloze";
+const practiceViewAt = (pathname: string): PracticeView => (pathname.startsWith("/practice/cloze") ? "cloze" : pathname.startsWith("/practice/grammar") ? "grammar" : "hub");
+const PRACTICE_PATH: Record<PracticeView, string> = { hub: "/practice", grammar: "/practice/grammar", cloze: "/practice/cloze" };
 
 /**
  * One small event stream to the server keeps this tab linked to it. When the server stops the browser keeps retrying by itself; the moment a
@@ -66,17 +73,20 @@ export function App() {
   const [page, setPage] = useState<Page>(() => pageAtPath(window.location.pathname));
   // a link from one page to a sub-view of another (Vocabulary -> Content Studio's vocabulary category, a vocabulary summary -> its analytics)
   const [focus, setFocus] = useState<"grammar" | "vocabulary" | "journey">("grammar");
-  const go = (p: Page, sub: "grammar" | "vocabulary" | "journey" = "grammar") => {
+  const [practiceView, setPracticeView] = useState<PracticeView>(() => practiceViewAt(window.location.pathname));
+  const go = (p: Page, sub: "grammar" | "vocabulary" | "journey" = "grammar", pv: PracticeView = "hub") => {
     setFocus(sub);
     setPage(p);
-    const path = PAGES.find((x) => x.id === p)!.path;
+    setPracticeView(pv);
+    const path = p === "practice" ? PRACTICE_PATH[pv] : PAGES.find((x) => x.id === p)!.path;
     if (window.location.pathname !== path) window.history.pushState(null, "", path);
   };
   const [dailyMode, setDailyMode] = useState<api.JourneyMode | null>(() => { try { return sessionStorage.getItem("el_daily_mode") as api.JourneyMode | null; } catch { return null; } });
   const [sequential, setSequential] = useState(() => { try { return localStorage.getItem("el_daily_sequence") === "1"; } catch { return false; } });
   const launchDaily = (mode: api.JourneyMode) => {
     setDailyMode(mode); try { sessionStorage.setItem("el_daily_mode", mode); } catch { /* storage unavailable */ }
-    go(mode === "conversation" ? "conversation" : mode === "grammar" ? "practice" : mode === "vocabulary" || mode === "wordLesson" ? "vocabulary" : "typing");
+    if (mode === "grammar" || mode === "grammarCloze") { go("practice", "grammar", mode === "grammar" ? "grammar" : "cloze"); return; }
+    go(mode === "conversation" ? "conversation" : mode === "vocabulary" || mode === "wordLesson" ? "vocabulary" : "typing");
   };
   const leaveDaily = () => { setDailyMode(null); try { sessionStorage.removeItem("el_daily_mode"); } catch { /* storage unavailable */ } go("daily"); };
   const dailyDone = async () => {
@@ -90,6 +100,7 @@ export function App() {
     const onPop = () => {
       setFocus("grammar");
       setPage(pageAtPath(window.location.pathname));
+      setPracticeView(practiceViewAt(window.location.pathname));
     };
     window.addEventListener("popstate", onPop);
     return () => window.removeEventListener("popstate", onPop);
@@ -137,7 +148,18 @@ export function App() {
         {page === "daily" ? (
           <DailyPractice onStart={launchDaily} sequential={sequential} onSequential={v => { setSequential(v); try { localStorage.setItem("el_daily_sequence", v ? "1" : "0"); } catch { /* unavailable */ } }} />
         ) : page === "practice" ? (
-          <Practice dailyStart={dailyMode === "grammar"} onDailyDone={dailyMode === "grammar" ? () => void dailyDone() : undefined} onNavigate={(p) => go(p)} />
+          practiceView === "hub" ? (
+            <PracticeHub onOpen={(v) => go("practice", "grammar", v)} />
+          ) : (
+            <>
+              <p className="gc-back"><button type="button" className="btn" onClick={() => go("practice")} data-testid="practice-back"><i className="pi pi-arrow-left" aria-hidden="true" /> All practice</button></p>
+              {practiceView === "grammar" ? (
+                <Practice dailyStart={dailyMode === "grammar"} onDailyDone={dailyMode === "grammar" ? () => void dailyDone() : undefined} onNavigate={(p) => go(p)} />
+              ) : (
+                <GrammarCloze dailyStart={dailyMode === "grammarCloze"} onDailyDone={dailyMode === "grammarCloze" ? () => void dailyDone() : undefined} />
+              )}
+            </>
+          )
         ) : page === "vocabulary" ? (
           <Vocabulary dailyStart={dailyMode === "vocabulary"} wordLessonFocus={dailyMode === "wordLesson"} onDailyDone={dailyMode === "vocabulary" || dailyMode === "wordLesson" ? () => void dailyDone() : undefined} onNavigate={(p) => go(p, "vocabulary")} />
         ) : page === "typing" ? (

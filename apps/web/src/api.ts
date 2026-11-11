@@ -1,557 +1,285 @@
-import {
-  AttemptResponseSchema,
-  AiModelStatusSchema,
-  CapabilitiesSchema,
-  CreateSessionResponseSchema,
-  CurrentSessionResponseSchema,
-  DashboardSchema,
-  ErrorEnvelopeSchema,
-  FeedbackResponseSchema,
-  HealthSchema,
-  LeaseResponseSchema,
-  RevealResponseSchema,
-  SessionBootstrapSchema,
-  SessionEventResponseSchema,
-  SessionSnapshotSchema,
-  SessionSummarySchema,
-  type AiModelStatus,
-  type Capabilities,
-  type Health,
-  type TypingAnalytics as TypingAnalyticsData,
-  type TypingBookStartResponse,
-  type TypingOverview,
-  type TypingResult,
-  type TypingWordsStartResponse,
-  type WordLessonEventKind,
-  type WordLessonListResponse,
-  type WordLessonRunState,
-  type WordLessonStudioStatus,
-} from "@english-lab/contracts";
-import type { ZodType } from "zod";
+// Public API facade. Domain modules share the single transport and CSRF state.
 
-export class ApiRequestError extends Error {
-  constructor(
-    readonly code: string,
-    message: string,
-    readonly status: number = 0,
-    readonly details: unknown = null,
-  ) {
-    super(message);
-  }
-}
+export { ApiRequestError } from "./api/transport";
 
-let csrfToken: string | null = null;
-/** Simultaneous identical GETs share one request; a mutation (POST/PATCH) drops them so nothing read before it is reused after it. */
-const inflightGets = new Map<string, Promise<unknown>>();
+export {
+  fetchHealth,
+  fetchAiModel,
+  loadAiModel,
+  unloadAiModel,
+  fetchCapabilities,
+  fetchSettings,
+  savePreloadModel,
+  saveSettings,
+  fetchDeepLUsage,
+  fetchGroqStatus,
+  sttStart,
+  sttConfirm,
+  sttStop,
+  sttAudio,
+  sendKeepalive,
+  fetchVoices,
+  saveVoiceSettings,
+  fetchVoiceHistory,
+  fetchVoiceSample
+} from "./api/system";
 
-function send<T>(method: "GET" | "POST" | "PATCH", path: string, schema: ZodType<T>, body?: unknown): Promise<T> {
-  if (method !== "GET") {
-    inflightGets.clear();
-    return request(method, path, schema, body).finally(() => inflightGets.clear());
-  }
-  const shared = inflightGets.get(path) as Promise<T> | undefined;
-  if (shared) return shared;
-  const started: Promise<T> = request(method, path, schema, body).finally(() => { if (inflightGets.get(path) === started) inflightGets.delete(path); });
-  inflightGets.set(path, started);
-  return started;
-}
+export type {
+  Level,
+  GroqStatus,
+  DeepLUsage,
+  VoiceSampleStats,
+  VoiceInfo,
+  VoiceSettingsUpdate
+} from "./api/system";
 
-async function request<T>(method: "GET" | "POST" | "PATCH", path: string, schema: ZodType<T>, body?: unknown): Promise<T> {
-  const headers: Record<string, string> = { Accept: "application/json" };
-  if (method !== "GET") {
-    if (!csrfToken) {
-      // same-origin bootstrap: sets the HttpOnly cookie and hands out the matching CSRF value
-      const boot = await fetch("/api/v1/session", { headers: { Accept: "application/json" } });
-      csrfToken = SessionBootstrapSchema.parse(await boot.json()).csrfToken;
-    }
-    headers["Content-Type"] = "application/json";
-    headers["X-CSRF-Token"] = csrfToken;
-  }
-  let res: Response;
-  try {
-    res = await fetch(path, { method, headers, body: body === undefined ? undefined : JSON.stringify(body) });
-  } catch {
-    throw new ApiRequestError("NETWORK", "Cannot reach the local English Lab server.");
-  }
-  const json: unknown = await res.json().catch(() => null);
-  if (!res.ok) {
-    if (res.status === 403) csrfToken = null; // a restarted server issues a new token: fetch it again next time
-    const env = ErrorEnvelopeSchema.safeParse(json);
-    throw new ApiRequestError(env.success ? env.data.error.code : `HTTP_${res.status}`, env.success ? env.data.error.message : "Unexpected server response.", res.status, env.success ? env.data.error.details : null);
-  }
-  return schema.parse(json);
-}
+export {
+  fetchDashboard,
+  fetchCurrentSession,
+  fetchRecentSession,
+  fetchSummary,
+  voiceDone,
+  fetchSession,
+  createSession,
+  createCheckSession,
+  recordPracticeActivity,
+  takeLease,
+  revealSlot,
+  submitAttempt,
+  sendEvent,
+  fetchFeedback,
+  finishSession,
+  fetchClozeOverview,
+  startClozeSession,
+  fetchClozeSession,
+  markClozeShown,
+  answerCloze,
+  excludeClozeItem,
+  completeClozeSession,
+  recordClozeActivity,
+  requestClozeAnalysis,
+  fetchClozeAnalysis
+} from "./api/practice";
 
-export const fetchHealth = (): Promise<Health> => send("GET", "/api/v1/health", HealthSchema);
-export const fetchAiModel = (): Promise<AiModelStatus> => send("GET", "/api/v1/ai/model", AiModelStatusSchema);
-export const loadAiModel = (): Promise<AiModelStatus> => send("POST", "/api/v1/ai/model/load", AiModelStatusSchema, {});
-export const unloadAiModel = (): Promise<AiModelStatus> => send("POST", "/api/v1/ai/model/unload", AiModelStatusSchema, {});
-export const fetchCapabilities = (): Promise<Capabilities> => send("GET", "/api/v1/capabilities", CapabilitiesSchema);
+export type {
+  SessionCategory,
+  ClozeOverview,
+  ClozeSessionView,
+  ClozeSummary,
+  ClozeAnswerResult,
+  ClozeSlotView,
+  ClozeStageView,
+  ClozeAnalysisView
+} from "./api/practice";
 
-type SettingsValues = { preloadModelOnStart?: boolean; practiceSoundsEnabled?: boolean; typingSoundsEnabled?: boolean; taskCount: number; weakRatio: number; voiceTarget: 0 | 1 | 2; voiceShare?: number; vocabularyTaskCount?: number; vocabularyNewWordsPerSession?: number; reviewNoticeThreshold?: number; difficultyMin?: Level; difficultyMax?: Level; typingWordsPerLevel?: number; typingVocabularyShare?: number; typingSpeedMultiplier?: number; typingBookMinutes?: number; typingDictationExercisesPerLesson?: number; typingRecallWords?: number };
-export type Level = "A2" | "B1" | "B2" | "C1" | "C2";
-type SettingsView = { revision: number; values: SettingsValues; defaults: SettingsValues };
-export const fetchSettings = () => send("GET", "/api/v1/settings", typed<SettingsView>());
-export const savePreloadModel = (on: boolean) => send("POST", "/api/v1/settings", typed<SettingsView>(), { preloadModelOnStart: on });
-export const saveSettings = (values: { taskCount: number; weakRatio: number; voiceShare: number; practiceSoundsEnabled?: boolean; typingSoundsEnabled?: boolean; vocabularyTaskCount?: number; vocabularyNewWordsPerSession?: number; reviewNoticeThreshold?: number; difficultyMin?: Level; difficultyMax?: Level; typingWordsPerLevel?: number; typingVocabularyShare?: number; typingSpeedMultiplier?: number; typingBookMinutes?: number; typingDictationExercisesPerLesson?: number; typingRecallWords?: number }) => send("POST", "/api/v1/settings", typed<SettingsView>(), values);
-export type VocabularySpeechStatus = { enabled: boolean; configured: boolean; requests: number; blockedUntil: string | null };
-export const fetchVocabularySpeech = () => send("GET", "/api/v1/vocabulary-speech", typed<VocabularySpeechStatus>());
-export type VocabularySpeechCredits = { available: boolean; reason?: string; used?: number; limit?: number; remaining?: number; resetsAt?: string | null; tier?: string | null; appCharacters30d: number };
-export const fetchVocabularySpeechCredits = () => send("GET", "/api/v1/vocabulary-speech/credits", typed<VocabularySpeechCredits>());
-export type GroqStatus = { configured: boolean; reachable: boolean; reason?: string; limits: { capturedAt: string; status: number | null; headers: Record<string, string> } | null };
-export type DeepLUsage = { available: true; used: number; limit: number } | { available: false; reason: string };
-export const fetchDeepLUsage = () => send("GET", "/api/v1/translate/usage", typed<DeepLUsage>());
-export const fetchGroqStatus = () => send("GET", "/api/v1/groq-status", typed<GroqStatus>());
-export const setVocabularySpeech = (enabled: boolean) => send("POST", "/api/v1/vocabulary-speech/settings", typed<VocabularySpeechStatus>(), { enabled });
-async function speechRequest(path: string, signal?: AbortSignal): Promise<Blob | null> {
-  if (!csrfToken) {
-    const boot = await fetch("/api/v1/session", { signal });
-    csrfToken = SessionBootstrapSchema.parse(await boot.json()).csrfToken;
-  }
-  const res = await fetch(path, { method: "POST", headers: { "X-CSRF-Token": csrfToken }, signal });
-  if (!res.ok) {
-    if (res.status === 403) csrfToken = null;
-    const error = ErrorEnvelopeSchema.safeParse(await res.json().catch(() => null));
-    throw new ApiRequestError(error.success ? error.data.error.code : `HTTP_${res.status}`, error.success ? error.data.error.message : "Unable to play pronunciation.", res.status);
-  }
-  return res.status === 204 ? null : res.blob();
-}
-export const vocabularySpeech = (sessionId: string, slotId: string, signal: AbortSignal) => speechRequest(`/api/v1/vocabulary-speech/${encodeURIComponent(sessionId)}/${encodeURIComponent(slotId)}`, signal);
-/** the word panel's pronounce button: any English word or short phrase, saved or not (ElevenLabs only when the file is not stored yet) */
-export async function vocabularyTextSpeech(text: string): Promise<Blob | null> {
-  if (!csrfToken) {
-    const boot = await fetch("/api/v1/session");
-    csrfToken = SessionBootstrapSchema.parse(await boot.json()).csrfToken;
-  }
-  const res = await fetch("/api/v1/vocabulary-speech/text", { method: "POST", headers: { "X-CSRF-Token": csrfToken, "Content-Type": "application/json" }, body: JSON.stringify({ text }) });
-  if (!res.ok) {
-    if (res.status === 403) csrfToken = null;
-    const error = ErrorEnvelopeSchema.safeParse(await res.json().catch(() => null));
-    throw new ApiRequestError(error.success ? error.data.error.code : `HTTP_${res.status}`, error.success ? error.data.error.message : "Unable to play pronunciation.", res.status);
-  }
-  return res.status === 204 ? null : res.blob();
-}
-export type MatchWord = { id: string; en: string; ru: string };
-/** the words of a finished vocabulary session for the matching game (read-only, not evidence) */
-export const fetchMatchWords = (sessionId: string) => send("GET", `/api/v1/vocabulary-sessions/${encodeURIComponent(sessionId)}/match-words`, typed<{ words: MatchWord[] }>());
-/** the raw result of a played matching game (not Mastery evidence); sent once, a repeat changes nothing */
-export const saveMatchResults = (sessionId: string, mode: "once" | "rush", results: Array<{ lemma: string; matched: number; wrong: number }>) =>
-  send("POST", `/api/v1/vocabulary-sessions/${encodeURIComponent(sessionId)}/match-results`, typed<{ saved: boolean }>(), { mode, results });
-export const vocabularyWordSpeech = (id: string) => speechRequest(`/api/v1/vocabulary-speech/word/${encodeURIComponent(id)}`);
-export const fetchDashboard = () => send("GET", "/api/v1/dashboard", DashboardSchema);
-export type SessionCategory = "grammar" | "vocabulary";
-export const fetchCurrentSession = (category: SessionCategory = "grammar") => send("GET", `/api/v1/sessions/current?category=${category}`, CurrentSessionResponseSchema);
-export const fetchRecentSession = (category: SessionCategory = "grammar") => send("GET", `/api/v1/sessions/recent?category=${category}`, SessionSummarySchema.nullable());
-export const fetchSummary = (id: string) => send("GET", `/api/v1/sessions/${id}/summary`, SessionSummarySchema);
-export const voiceDone = (id: string) => send("POST", `/api/v1/sessions/${id}/voice-done`, typed<{ released: boolean }>(), {});
-export const fetchSession = (id: string) => send("GET", `/api/v1/sessions/${id}`, SessionSnapshotSchema);
-export const createSession = (blueprintRevisionId: string) =>
-  send("POST", "/api/v1/sessions", CreateSessionResponseSchema, { purpose: "practice", blueprintRevisionId, timezone: Intl.DateTimeFormat().resolvedOptions().timeZone || "UTC" });
-export const createCheckSession = (purpose: "diagnostic" | "heldout") =>
-  send("POST", "/api/v1/sessions", CreateSessionResponseSchema, { purpose, timezone: Intl.DateTimeFormat().resolvedOptions().timeZone || "UTC" });
-export const recordPracticeActivity = (sessionId: string, body: { id: string; tabId: string; startMs: number; endMs: number }) => send("POST", `/api/v1/sessions/${encodeURIComponent(sessionId)}/activity`, typed<{ recorded: boolean }>(), { id: body.id, tabId: body.tabId, startMs: body.startMs, endMs: body.endMs });
-export const takeLease = (sessionId: string, tabId: string) => send("POST", `/api/v1/sessions/${sessionId}/lease`, LeaseResponseSchema, { tabId });
-export const revealSlot = (sessionId: string, slotId: string, tabId: string) => send("POST", `/api/v1/sessions/${sessionId}/reveal`, RevealResponseSchema, { slotId, tabId });
-export const submitAttempt = (body: { slotId: string; submissionId: string; answer?: string | string[]; idk?: boolean; transcriptId?: string }) =>
-  send("POST", "/api/v1/attempts", AttemptResponseSchema, { ...body, inputMode: body.transcriptId ? "voice" : "text" });
-export const sendEvent = (sessionId: string, slotId: string, type: "hint" | "vocabulary_translation" | "vocabulary_letters" | "reveal_answer" | "skip" | "continue", letterIndex?: number) =>
-  send("POST", `/api/v1/sessions/${sessionId}/events`, SessionEventResponseSchema, { slotId, type, clientEventId: crypto.randomUUID(), ...(letterIndex !== undefined ? { letterIndex } : {}) });
-export const fetchFeedback = (sessionId: string, slotId: string) => send("GET", `/api/v1/sessions/${sessionId}/slots/${slotId}/feedback`, FeedbackResponseSchema);
-export const finishSession = (sessionId: string, mode: "completed" | "ended_early") => send("POST", `/api/v1/sessions/${sessionId}/finish`, SessionSummarySchema, { mode });
+export {
+  fetchVocabularySpeech,
+  fetchVocabularySpeechCredits,
+  setVocabularySpeech,
+  vocabularySpeech,
+  vocabularyTextSpeech,
+  fetchMatchWords,
+  saveMatchResults,
+  vocabularyWordSpeech,
+  fetchVocabulary,
+  lookupVocabulary,
+  translateSentence,
+  matchVocabulary,
+  addVocabulary,
+  removeVocabulary,
+  patchVocabulary,
+  fetchExpressions,
+  addExpression,
+  editExpression,
+  retryExpression,
+  removeExpression,
+  fetchVocabPractice,
+  createVocabSession,
+  fetchVocabCoverage,
+  fetchWordLessons,
+  fetchWordLessonStudio,
+  generateWordLessons,
+  retryWordLessons,
+  startWordLessonRun,
+  fetchWordLessonRun,
+  sendWordLessonEvent,
+  sendWordLessonAttempt,
+  disputeWordLessonAttempt,
+  giveUpWordLessonCheck,
+  completeWordLessonRun,
+  recordWordLessonActivity,
+  wordLessonSttStart
+} from "./api/vocabulary";
 
-// ---- TASK_010/012: Content Studio and AI tasks. Typed on this side; the server validates every request. ----
-const typed = <T>(): ZodType<T> => ({ parse: (x: unknown) => x as T }) as unknown as ZodType<T>;
+export type {
+  VocabularySpeechStatus,
+  VocabularySpeechCredits,
+  MatchWord,
+  VocabEntry,
+  WordBankMatch,
+  ExpressionView,
+  VocabPracticeStatus,
+  VocabCoverageWord,
+  WordLessonListResponse,
+  WordLessonRunState,
+  WordLessonStudioStatus
+} from "./api/vocabulary";
 
-export type ItemStatus = "queued" | "invalid" | "generated" | "ready_for_review" | "approved" | "released" | "flagged" | "rejected";
-export interface BatchSummary {
-  id: string;
-  category: "grammar" | "vocabulary";
-  completion: { accepted: number; corrected: number; rejected: number; flagged: number; total: number } | null;
-  createdAt: string;
-  mode: string;
-  purpose: "trial" | "scale";
-  requestedCount: number;
-  promptVersion: string;
-  counts: Record<ItemStatus, number>;
-  reviewedItems: number;
-  generationDone: boolean;
-  resolved: boolean;
-}
-export interface BatchItem {
-  ordinal: number;
-  status: ItemStatus;
-  plan: { type: string; target_skill: string; topic: string; noMistake?: boolean; lesson?: string; vocabulary?: { lemma: string } };
-  revisionId: string | null;
-  contentHash: string | null;
-  reviews: number;
-  jobId: string | null;
-  error: unknown;
-  advisory: { source: string; flags: Array<{ code: string; label: string; text: string; score: number }> } | null;
-}
-export interface TrialGate {
-  passed: boolean;
-  trialBatchId: string | null;
-  reason: string;
-  promptVersion: string;
-}
-export interface Coverage {
-  targetPerSkill: number;
-  skills: Array<{ skill: string; released: number; approvedUnreleased: number; inReview: number; draft: number; flagged: number; rejected: number; deficit: number }>;
-  totals: { skills: number; skillsWithDeficit: number; releasedExercises: number };
-}
-export interface PublicJob {
-  id: string;
-  kind: string;
-  state: string;
-  priority: number;
-  createdAt: string;
-  startedAt: string | null;
-  finishedAt: string | null;
-  retryCount: number;
-  errorCode: string | null;
-  word?: string | null;
-  diagnosticCodes?: string[];
-  phase?: string | null;
-  progress: { done: number; total: number } | null;
-}
-export type GpuInfo =
-  | { available: false; reason: string }
-  | { available: true; owner: string | null; fencingToken: number; leaseUntil: string | null; activeJob: { id: string; kind: string; runningForMs: number } | null; residentModels: string[]; practiceActive: boolean; reserveMib: number; telemetry: { usedMib: number; totalMib: number; freeMib: number } | "unavailable"; waitingByReason: Record<string, number> };
+export {
+  fetchTypingOverview,
+  startTypingWords,
+  typingWordAppearances,
+  completeTypingWords,
+  abortTypingWords,
+  startTypingDrills,
+  completeTypingDrills,
+  fetchDrillSpeech,
+  startTypingBook,
+  checkpointTypingBook,
+  completeTypingBook,
+  abortTypingBook,
+  fetchTypingResult,
+  fetchTypingRecall,
+  saveTypingRecall,
+  fetchBookSpeech,
+  warmBookSpeech,
+  createDictationLesson,
+  retryDictationLesson,
+  startDictationLesson,
+  fetchDictationResult,
+  sendDictationPlay,
+  setDictationSoundFlag,
+  requestDictationHint,
+  revealDictationAnswer,
+  fetchDictationPool,
+  prepareDictationTracks,
+  openDictationTranslation,
+  answerDictation,
+  sendDictationTime,
+  fetchDictationAudio,
+  fetchDictationAnalytics
+} from "./api/typing";
 
-export type StudioBatchSummary = Pick<BatchSummary, "id" | "createdAt" | "category" | "requestedCount" | "completion"> & { counts: BatchSummary["counts"] | null };
-export const fetchStudioBatches = () => send("GET", "/api/v1/content/batch-summaries", typed<{ batches: StudioBatchSummary[] }>());
-export const fetchBatches = () => send("GET", "/api/v1/content/batches", typed<{ batches: BatchSummary[]; trialGate: TrialGate }>());
-export const fetchBatch = (id: string) => send("GET", `/api/v1/content/batches/${id}`, typed<BatchSummary & { items: BatchItem[]; trialGate: TrialGate }>());
-export const createBatchApi = (body: { count: number; mode: "adaptive" | "balanced" | "manual"; trial?: boolean; category?: "grammar" | "vocabulary" }) => send("POST", "/api/v1/content/batches", typed<{ batchId: string; items: number; units: number }>(), body);
-export const createAgentBatchApi = (body: { count: number; mode: "adaptive" | "balanced" | "manual"; trial?: boolean; category?: "grammar" | "vocabulary" }) => send("POST", "/api/v1/content/batches/agent", typed<{ batchId: string; items: number; units: number }>(), body);
-export const fetchContentStock = () => send("GET", "/api/v1/content/stock", typed<Record<"grammar" | "vocabulary", { available: number; threshold: number; low: boolean; message?: string; recommended?: number; plan?: { words: number; deficit: number; recommended: number; targetPerWord: number }; course?: { lessons: number; sessions: number; first: string | null; last: string | null; deficit: number; recommended: number; sessionsPerLesson: number }; lesson?: { key: string; label: string; range: string } }>>());
-export const fetchCoverage = () => send("GET", "/api/v1/content/coverage", typed<Coverage>());
-export const fetchRevisionContent = (id: string) => send("GET", `/api/v1/content/revisions/${id}`, typed<{ revisionId: string; contentHash: string; status: string; content: Record<string, unknown> }>());
-export const importReview = (batchId: string, manifest: unknown) => send("POST", `/api/v1/content/batches/${batchId}/review-import`, typed<{ recorded: number; approved: number; flagged: number; rejected: number }>(), manifest);
-export const previewRelease = (revisionIds: string[]) => send("POST", "/api/v1/content/releases/preview", typed<{ manifestHash: string; items: unknown[] }>(), { revisionIds });
-export const publishReleaseApi = (body: { revisionIds: string[]; reviewer: string; manifestHash: string }) => send("POST", "/api/v1/content/releases", typed<{ released: number; replayed: boolean }>(), body);
-export const fetchJobs = (limit = 30) => send("GET", `/api/v1/jobs?limit=${limit}`, typed<{ jobs: PublicJob[]; counts: Record<string, number>; total: number }>());
-export interface AiWave { kind: string; open: number; running: number; waiting: number; paused: number; done: number; failed: number; total: number; msPerItem: number | null; waitingReason: string | null }
-export interface AiActivity { waves: AiWave[]; active: { kind: string; runningForMs: number } | null; models: string[]; practiceActive: boolean; telemetry: { usedMib: number; totalMib: number } | null }
-export const fetchAiActivity = () => send("GET", "/api/v1/ai/activity", typed<AiActivity>());
-export const fetchGpu = () => send("GET", "/api/v1/gpu", typed<GpuInfo>());
-export const jobAction = (id: string, action: "pause" | "resume" | "retry" | "cancel") => send("POST", `/api/v1/jobs/${id}/actions`, typed<PublicJob>(), { action });
+export type {
+  DictationPoolSummary,
+  TypingAnalyticsData,
+  TypingBookStartResponse,
+  TypingDrillsStartResponse,
+  TypingOverview,
+  TypingResult,
+  TypingWordsStartResponse,
+  TypingRecallWord,
+  TypingRecallStartResponse,
+  DictationAnalytics,
+  DictationAnswerResponse,
+  DictationHintResponse,
+  DictationLessonSummary,
+  DictationResult,
+  DictationState
+} from "./api/typing";
 
-// ---- TASK_011: voice. Raw PCM goes up once and is dropped; only text comes back. ----
-export const sttStart = (sessionId: string, tabId: string) => send("POST", "/api/v1/stt/start", typed<{ streamId: string; maxSeconds: number; ready: { device: string } }>(), { sessionId, tabId });
-export type ConversationState = { session: { id: string; topic: string; status: string; activeMs: number; answerCount: number }; messages: Array<{ id: string; role: "user" | "assistant"; text: string; analysisStatus: string | null; analysis: string | null }>; vocabulary: string[]; jobs: Array<{ id: string; state: string; errorCode: string | null; action: string; messageId: string | null }> };
-export type ConversationHome = { topics: string[]; topicGroups: Record<string, string>; latest: { id: string; topic: string; updatedAt: string } | null; statistics: { conversations: number; answers: number; activeMs: number } };
-export const conversationHome = () => send("GET", "/api/v1/conversations", typed<ConversationHome>());
-export const conversationStart = (topic: string, tabId: string) => send("POST", "/api/v1/conversations", typed<ConversationState>(), { topic, tabId });
-export const conversationRead = (id: string) => send("GET", `/api/v1/conversations/${encodeURIComponent(id)}`, typed<ConversationState>());
-export const conversationResume = (id: string, tabId: string) => send("POST", `/api/v1/conversations/${encodeURIComponent(id)}/resume`, typed<ConversationState>(), { tabId });
-export const conversationPause = (id: string, tabId: string) => send("POST", `/api/v1/conversations/${encodeURIComponent(id)}/pause`, typed<{ ok: boolean }>(), { tabId });
-export const conversationHeartbeat = (id: string, tabId: string) => send("POST", `/api/v1/conversations/${encodeURIComponent(id)}/heartbeat`, typed<{ ok: boolean }>(), { tabId });
-export const conversationMessage = (id: string, tabId: string, messageId: string, text: string) => send("POST", `/api/v1/conversations/${encodeURIComponent(id)}/messages`, typed<ConversationState>(), { tabId, messageId, text });
-export const conversationSttStart = (id: string, tabId: string) => send("POST", `/api/v1/conversations/${encodeURIComponent(id)}/stt/start`, typed<{ streamId: string; maxSeconds: number; ready: { device: string } }>(), { tabId });
-export const conversationDelete = (id: string) => send("POST", `/api/v1/conversations/${encodeURIComponent(id)}/delete-history`, typed<{ ok: boolean }>(), {});
-export const conversationRetry = (id: string, jobId: string) => send("POST", `/api/v1/conversations/${encodeURIComponent(id)}/retry`, typed<{ ok: boolean }>(), { jobId });
-export async function conversationSpeech(id: string, messageId: string): Promise<Blob> {
-  if (!csrfToken) csrfToken = SessionBootstrapSchema.parse(await (await fetch("/api/v1/session", { headers: { Accept: "application/json" } })).json()).csrfToken;
-  const res = await fetch(`/api/v1/conversations/${encodeURIComponent(id)}/speech`, { method: "POST", headers: { "Content-Type": "application/json", "X-CSRF-Token": csrfToken ?? "" }, body: JSON.stringify({ messageId }) });
-  if (!res.ok) { if (res.status === 403) csrfToken = null; throw new ApiRequestError("SPEECH_UNAVAILABLE", "Voice playback is unavailable.", res.status); }
-  return res.blob();
-}
-export const sttConfirm = (streamId: string, draftId: string, slotId: string, text: string) => send("POST", `/api/v1/stt/${streamId}/confirm`, typed<{ transcriptId: string; edited: boolean }>(), { draftId, slotId, text });
-export const sttStop = (streamId: string) => send("POST", `/api/v1/stt/${streamId}/stop`, typed<{ stopped: boolean }>(), {});
-export async function sttAudio(streamId: string, pcm: Int16Array): Promise<{ draftId: string; text: string }> {
-  if (!csrfToken) throw new ApiRequestError("NO_SESSION", "Voice was not started."); // set by the start request that always comes first
-  const res = await fetch(`/api/v1/stt/${streamId}/audio`, { method: "POST", headers: { "Content-Type": "application/octet-stream", "X-CSRF-Token": csrfToken ?? "" }, body: new Blob([Uint8Array.from(pcm.buffer instanceof ArrayBuffer ? new Uint8Array(pcm.buffer, pcm.byteOffset, pcm.byteLength) : [])]) });
-  const json: unknown = await res.json().catch(() => null);
-  if (!res.ok) {
-    const env = ErrorEnvelopeSchema.safeParse(json);
-    throw new ApiRequestError(env.success ? env.data.error.code : `HTTP_${res.status}`, env.success ? env.data.error.message : "Unexpected server response.", res.status);
-  }
-  return json as { draftId: string; text: string };
-}
+export {
+  fetchReport,
+  fetchFindings,
+  createExport,
+  fetchExternal,
+  importExternalReport,
+  decideExternalReport,
+  fetchPracticeActivity,
+  fetchActivityProgress,
+  fetchTypingAnalytics,
+  fetchVocabAnalytics,
+  announceXp,
+  fetchJourney,
+  fetchConversationAnalytics,
+  fetchJourneyDailyTotals,
+  saveJourneySettings,
+  recordTypingInterval,
+  fetchClozeAnalytics,
+  fetchGrammarTrends
+} from "./api/analytics";
 
-// ---- TASK_014: reports, AI-detected findings, exports ----
-export interface Ratio { numerator: number; denominator: number; rate: number | null; wilson: { low: number; high: number } | null; lowN: boolean }
-export interface ReportData {
-  version: string;
-  asOf: string;
-  timezone: string;
-  cohort: { criterionVersion: string; difficulty: string; protocol: string };
-  counts: { attempts: number; slots: number };
-  metrics: {
-    firstAttemptAccuracy: Ratio & { assisted: { attempts: number; correct: number } };
-    practiceAccuracy: Ratio & { note: string };
-    heldoutAccuracy: Ratio;
-    delayedRetention: Ratio;
-    errorRecurrence: { skills: number; failuresAfterFirst: number; opportunitiesAfterFirst: number; rate: Ratio };
-    idk: Ratio;
-    skip: Ratio;
-    pending: { slots: number; attempts: number };
-    sessionProgress: { sessionId: string | null; closed: number; total: number };
-    courseProgress: { completedBlueprints: number; publishedBlueprints: number };
-    vocabulary: { available: boolean; words: number; learned: number; bankOccurrences: number; displayedOccurrences: number };
-  };
-  byDimension: Record<"recognition" | "correction" | "production", Ratio>;
-  skills: Array<{ skillId: string; failures: number; opportunities: number; rate: Ratio }>;
-  recurring: Array<{ skillId: string; firstFailure: string; lastFailure: string; failuresAfterFirst: number; opportunitiesAfterFirst: number; spanDays: number; contexts: number }>;
-  weeklyHeldout: Array<{ week: string; heldout: Ratio }>;
-  weeklyFirstTry: Array<{ week: string; firstTry: Ratio }>;
-  comparison: { status: "ok" | "insufficient_comparison_data"; mixDiffers: boolean; current: { from: string; to: string; firstTry: Ratio; heldout: Ratio }; previous: { from: string; to: string; firstTry: Ratio; heldout: Ratio } };
-  activity: Array<{ date: string; attempts: number }>;
-  otherCohorts: Array<{ criterionVersion: string; difficulty: string; protocol: string; attempts: number }>;
-  changeMarkers: Array<{ kind: string; id: string; firstDate: string; lastDate: string; attempts: number }>;
-}
-export interface SavedReportData { id: string; reused: boolean; inputHash: string; createdAt: string; watermarks: Record<string, number>; report: ReportData }
-export interface FindingData {
-  findingId: string;
-  attemptId: string;
-  skillId: string;
-  findingType: string;
-  correction: string | null;
-  explanationRu: string;
-  confidence: number | null;
-  originalStatus: string;
-  effectiveStatus: string;
-  label: string;
-  history: Array<{ sequence: number; verdict: string; reviewer: string; reason: string; at: string }>;
-  inputMode: string;
-  transcriptEdited: boolean | null;
-  contextId: string;
-  isLatestAnalysis: boolean;
-  provenance: { model: string | null; digest: string | null; runtime: string | null; prompt: string | null };
-}
-export interface DiscoveryAuditData { enabled: boolean; disabledReason: string | null; version: string; note: string; config: Record<string, number>; skills: Array<{ skillId: string; attempts: number; contexts: number; bonus: number }> }
-export const fetchReport = (q: { protocol: string; difficulty: string }) => send("GET", `/api/v1/analytics/report?protocol=${q.protocol}&difficulty=${q.difficulty}`, typed<SavedReportData>());
-export const fetchFindings = () => send("GET", "/api/v1/analytics/findings", typed<{ findings: FindingData[]; discovery: DiscoveryAuditData }>());
-export const createExport = (q: { protocol: string; difficulty: string }) => send("POST", "/api/v1/exports", typed<{ dir: string; files: Array<{ name: string; bytes: number }> }>(), q);
+export type {
+  Ratio,
+  ReportData,
+  SavedReportData,
+  FindingData,
+  DiscoveryAuditData,
+  ExternalData,
+  TrackProgress,
+  Rate,
+  VocabAnalytics,
+  JourneyMode,
+  JourneyData,
+  ConversationAnalyticsData,
+  ClozeWindow,
+  ClozeAnalyticsData,
+  GrammarTrendsData
+} from "./api/analytics";
 
-// ---- TASK_014b: outside reports (separate series) ----
-export interface ExternalData {
-  id: string;
-  source: string;
-  assessedAt: string;
-  method: string;
-  transcriptQuality: string;
-  status: string;
-  normalized: { assertions: Array<{ source: { section: string; line: number }; kind: string; text: string; percent: number | null }>; limitations: string[]; flags: string[]; truncated: boolean };
-  comparability: { reasons: string[] };
-}
-export const fetchExternal = () => send("GET", "/api/v1/external-assessments", typed<{ series: ExternalData[]; note: string }>());
-export const importExternalReport = (b: { format: "md" | "json"; text: string; source: string; assessedAt: string; method: string }) => send("POST", "/api/v1/external-assessments/import", typed<ExternalData & { created: boolean }>(), b);
-export const decideExternalReport = (id: string, d: "confirm" | "reject") => send("POST", `/api/v1/external-assessments/${id}/${d}`, typed<ExternalData>(), {});
+export {
+  fetchStudioBatches,
+  fetchBatches,
+  fetchBatch,
+  createBatchApi,
+  createAgentBatchApi,
+  fetchContentStock,
+  fetchCoverage,
+  fetchRevisionContent,
+  importReview,
+  previewRelease,
+  publishReleaseApi,
+  fetchJobs,
+  fetchAiActivity,
+  fetchGpu,
+  jobAction,
+  fetchThoughts,
+  addThought,
+  createThoughtBatchApi
+} from "./api/content";
 
-// ---- TASK_015: vocabulary ----
-type Src = "user" | "ai_draft" | null;
-export interface VocabEntry {
-  id: string;
-  lemma: string;
-  pos: string;
-  learned: boolean;
-  userRevision: number;
-  surfaceForms: string[];
-  translation: { text: string; source: Src };
-  example: { text: string; source: Src };
-  collocations: { items: string[]; source: Src };
-  draftPredatesEdit: boolean;
-  aiPending: boolean;
-  aiError?: string | null;
-  aiExampleOmitted?: boolean;
-  posSource: Src | "entry";
-  /** AI draft CEFR level (A1..C2) of the word in the sense it was met, or null (D64) */
-  level: string | null;
-  /** reference facts from the word job (D69), or null until it has run */
-  lexicon: { transcription: string; definitionRu: string; synonyms: string[]; irregularForms: string[]; frequency: number | null } | null;
-  /** vocabulary-practice tasks on this word that you have answered (first tries) */
-  practised: number;
-  bank: { occurrences: number; revisions: number };
-  displayed: { occurrences: number; slots: number };
-  lastSeen: string | null;
-  createdAt: string;
-}
-interface VocabTotals { words: number; learned: number; bankOccurrences: number; displayedOccurrences: number }
-const anyOf = <T>() => ({ parse: (x: unknown) => x as T }) as unknown as ZodType<T>;
-export const fetchPracticeActivity = () => send("GET", "/api/v1/journey/practice-activity", anyOf<{ days: Array<{ date: string; grammar: number; vocabulary: number }>; grammarResults: Array<{ date: string; correct: number; scored: number; skills: number }> }>());
-export const fetchVocabulary = (q = "", options?: { limit?: number; notLearned?: boolean }) => {
-  const params = new URLSearchParams();
-  if (q) params.set("q", q);
-  if (options?.limit) params.set("limit", String(options.limit));
-  if (options?.notLearned) params.set("learned", "false");
-  return send("GET", `/api/v1/vocabulary${params.size ? `?${params}` : ""}`, anyOf<{ words: VocabEntry[]; total: number; totals: VocabTotals }>());
-};
-export type WordBankMatch = { lemma: string; translationRu: string; partOfSpeech: string; form?: "past" | "participle" };
-export const lookupVocabulary = (word: string) => send("GET", `/api/v1/vocabulary/lookup?word=${encodeURIComponent(word)}`, anyOf<{ known: boolean; entry: VocabEntry | null; wordBank: WordBankMatch[] }>());
-export const translateSentence = (text: string) => send("POST", "/api/v1/translate", anyOf<{ text: string }>(), { text });
-export const matchVocabulary = (words: string[]) => send("POST", "/api/v1/vocabulary/match", anyOf<{ matches: Array<{ word: string; lemma: string; translationRu: string }> }>(), { words });
-export const addVocabulary = (word: string, selected?: string, slotId?: string) => send("POST", "/api/v1/vocabulary", anyOf<VocabEntry & { created: boolean }>(), { word, ...(selected ? { selected } : {}), ...(slotId ? { slotId } : {}) });
-export const removeVocabulary = (id: string) => send("POST", `/api/v1/vocabulary/${id}/remove`, anyOf<{ removed: true }>(), {});
-export const patchVocabulary = (id: string, body: { expectedRevision?: number; translationRu?: string; exampleEn?: string; collocations?: string[]; pos?: string; learned?: boolean }) => send("PATCH", `/api/v1/vocabulary/${id}`, anyOf<VocabEntry>(), body);
+export type {
+  ItemStatus,
+  BatchSummary,
+  BatchItem,
+  TrialGate,
+  Coverage,
+  PublicJob,
+  GpuInfo,
+  StudioBatchSummary,
+  AiWave,
+  AiActivity,
+  ThoughtItem
+} from "./api/content";
 
-// ---- TASK_016: tutor ----
-export interface TutorMessage {
-  id: string;
-  role: "user" | "assistant";
-  kind: string;
-  source: "user" | "approved_exercise" | "model";
-  status: string;
-  text: string;
-  examples: string[];
-  uncertaintyNoteRu: string | null;
-  createdAt: string;
-}
-export interface TutorThread {
-  slotId: string; messages: TutorMessage[]; pendingJobs: number;
-  /** kinds of AI answers still being written ("explain_ru", "more_examples", "question") */
-  pendingKinds?: string[];
-}
-export interface TutorSlot { slotId: string; sessionId: string; ordinal: number; revisionId: string; type: string; purpose: string; skill: string; prompt: string; outcome: "correct" | "incorrect" | "idk" | "pending" | "skipped" | string; at: string | null }
-export const fetchTutorSlots = (filter: "all" | "mistakes" = "all") => send("GET", `/api/v1/tutor/slots?filter=${filter}`, anyOf<{ slots: TutorSlot[] }>());
-export const fetchTutorThread = (slotId: string) => send("GET", `/api/v1/tutor/threads/${slotId}`, anyOf<TutorThread>());
-export const askTutor = (body: { sessionId: string; slotId: string; kind: "why" | "explain_ru" | "more_examples" | "question"; question?: string }) => send("POST", "/api/v1/tutor", anyOf<{ threadId: string; jobId: string | null; messages: TutorMessage[] }>(), body);
-export const fetchAgentTask = (kind: "session" | "exercise" | "batch" | "findings" | "coverage" | "progress" | "lessons" | "vocabulary" | "review", id?: string) => send("GET", `/api/v1/tutor/agent-task?kind=${kind}${id ? `&id=${encodeURIComponent(id)}` : ""}`, anyOf<{ text: string }>());
+export {
+  fetchTutorSlots,
+  fetchTutorThread,
+  askTutor,
+  fetchAgentTask
+} from "./api/tutor";
 
-// ---- Vocabulary Practice, XP tracks, vocabulary coverage and analytics (vocabulary TZ) ----
-export interface TrackProgress { track: "grammar" | "vocabulary" | "typing"; total: number; level: number; withinLevel: number; threshold: number; ruleVersion: string; levelRule?: string }
-export const fetchActivityProgress = () => send("GET", "/api/v1/activity-progress", typed<{ grammar: TrackProgress; vocabulary: TrackProgress; typing: TrackProgress }>());
+export type {
+  TutorMessage,
+  TutorThread,
+  TutorSlot
+} from "./api/tutor";
 
-// ---- Typing Practice (TASK_027) ----
-export type { TypingAnalyticsData, TypingBookStartResponse, TypingOverview, TypingResult, TypingWordsStartResponse };
-export const fetchTypingOverview = () => send("GET", "/api/v1/typing/overview", typed<TypingOverview>());
-export const startTypingWords = () => send("POST", "/api/v1/typing/words/start", typed<TypingWordsStartResponse>(), {});
-export const typingWordAppearances = (sessionId: string, appearances: Array<{ planIndex: number; order: number }>) => send("POST", `/api/v1/typing/words/${encodeURIComponent(sessionId)}/appearances`, typed<{ ok: true }>(), { appearances });
-export const completeTypingWords = (sessionId: string, body: { status: "completed" | "failed"; activeMs: number; charsTyped: number; errors: number; appearances: Array<{ planIndex: number; order: number }>; destroyedPlanIndexes: number[]; wordErrors?: Array<{ planIndex: number; errors: number }>; bestCombo?: number; bestCharStreak?: number; keyStats?: Array<{ pair: string; count: number; totalMs: number; errors: number }> }) => send("POST", `/api/v1/typing/words/${encodeURIComponent(sessionId)}/complete`, typed<TypingResult>(), body);
-export const abortTypingWords = (sessionId: string, body: { activeMs?: number; charsTyped?: number; errors?: number }) => send("POST", `/api/v1/typing/words/${encodeURIComponent(sessionId)}/abort`, typed<{ ok: true }>(), body);
-export const startTypingBook = () => send("POST", "/api/v1/typing/books/start", typed<TypingBookStartResponse>(), {});
-export const checkpointTypingBook = (sessionId: string, body: { offset: number; activeMs: number; charsTyped: number; errors: number; charStreak?: { current: number; best: number } }) => send("POST", `/api/v1/typing/books/${encodeURIComponent(sessionId)}/checkpoint`, typed<{ ok: true; applied: boolean }>(), body);
-export const completeTypingBook = (sessionId: string, body: { offset: number; activeMs: number; charsTyped: number; errors: number; bestCombo?: number; charStreak?: { current: number; best: number }; keyStats?: Array<{ pair: string; count: number; totalMs: number; errors: number }> }) => send("POST", `/api/v1/typing/books/${encodeURIComponent(sessionId)}/complete`, typed<TypingResult>(), body);
-export const abortTypingBook = (sessionId: string, body: { activeMs?: number; charsTyped?: number; errors?: number }) => send("POST", `/api/v1/typing/books/${encodeURIComponent(sessionId)}/abort`, typed<{ ok: true }>(), body);
-export const fetchTypingResult = (sessionId: string) => send("GET", `/api/v1/typing/sessions/${encodeURIComponent(sessionId)}/result`, typed<TypingResult>());
-export type { TypingRecallWord, TypingRecallStartResponse } from "@english-lab/contracts";
-export const fetchTypingRecall = (sessionId: string) => send("GET", `/api/v1/typing/sessions/${encodeURIComponent(sessionId)}/recall`, typed<import("@english-lab/contracts").TypingRecallStartResponse>());
-export const saveTypingRecall = (sessionId: string, results: Array<{ entryId: string; correctKeys: number; wrongKeys: number; hints: number; revealed: boolean }>) => send("POST", `/api/v1/typing/sessions/${encodeURIComponent(sessionId)}/recall`, typed<{ points: number; results: Array<{ entryId: string; lemma: string; points: number }> }>(), { results });
-/** Books: a sentence read aloud by a Piper voice (made on the spot, kept only in a temporary cache); resolves to the WAV */
-export async function fetchBookSpeech(body: { text: string; sessionId: string; paragraph: number } | { text: string }): Promise<Blob> {
-  if (!csrfToken) csrfToken = SessionBootstrapSchema.parse(await (await fetch("/api/v1/session", { headers: { Accept: "application/json" } })).json()).csrfToken;
-  const res = await fetch("sessionId" in body ? "/api/v1/typing/books/speech" : "/api/v1/practice/speech", { method: "POST", headers: { "Content-Type": "application/json", "X-CSRF-Token": csrfToken ?? "" }, body: JSON.stringify(body) });
-  if (!res.ok) {
-    if (res.status === 403) csrfToken = null;
-    const json = (await res.json().catch(() => null)) as { error?: { message?: string }; data?: { error?: { message?: string } } } | null;
-    throw new ApiRequestError(`HTTP_${res.status}`, json?.data?.error?.message ?? json?.error?.message ?? "Could not read this sentence aloud.", res.status);
-  }
-  return res.blob();
-}
-export const warmBookSpeech = () => send("POST", "/api/v1/typing/books/speech/warm", anyOf<{ ok: boolean }>(), {}).catch(() => undefined);
-// ---- Expressions (the second part of the dictionary) ----
-export interface ExpressionView { id: string; phrase: string; translationRu: string; exampleEn: string; descriptionRu: string; source: "model" | "user" | null; state: "ready" | "generating" | "failed"; createdAt: string; inSentences: number; shown: number }
-export const fetchExpressions = () => send("GET", "/api/v1/vocabulary/expressions", typed<{ expressions: ExpressionView[] }>());
-export const addExpression = (phrase: string) => send("POST", "/api/v1/vocabulary/expressions", typed<ExpressionView & { created: boolean }>(), { phrase });
-export const editExpression = (id: string, body: { translationRu?: string; exampleEn?: string; descriptionRu?: string }) => send("POST", `/api/v1/vocabulary/expressions/${encodeURIComponent(id)}/edit`, typed<ExpressionView>(), body);
-export const retryExpression = (id: string) => send("POST", `/api/v1/vocabulary/expressions/${encodeURIComponent(id)}/retry`, typed<ExpressionView>(), {});
-export const removeExpression = (id: string) => send("POST", `/api/v1/vocabulary/expressions/${encodeURIComponent(id)}/remove`, typed<{ removed: true }>(), {});
-export const fetchTypingAnalytics = (mode: "words" | "books", days: "7" | "30" | "90" | "all") => send("GET", `/api/v1/analytics/typing?mode=${mode}&days=${days}&timezone=${encodeURIComponent(Intl.DateTimeFormat().resolvedOptions().timeZone)}`, typed<TypingAnalyticsData>());
-// ---- Audio Dictation (TASK_028) ----
-import type { DictationAnalytics, DictationAnswerResponse, DictationHintResponse, DictationLessonSummary, DictationResult, DictationState } from "@english-lab/contracts";
-export type { DictationAnalytics, DictationAnswerResponse, DictationHintResponse, DictationLessonSummary, DictationResult, DictationState };
-const DICT = "/api/v1/typing/dictation";
-export const createDictationLesson = () => send("POST", `${DICT}/lessons`, typed<DictationLessonSummary>(), {});
-export const retryDictationLesson = (id: string) => send("POST", `${DICT}/lessons/${encodeURIComponent(id)}/retry`, typed<DictationLessonSummary>(), {});
-export const startDictationLesson = (id: string) => send("POST", `${DICT}/lessons/${encodeURIComponent(id)}/start`, typed<DictationState>(), {});
-export const fetchDictationResult = (id: string) => send("GET", `${DICT}/lessons/${encodeURIComponent(id)}/result`, typed<DictationResult>());
-export const sendDictationPlay = (exerciseId: string, source: "auto" | "manual" | "wrong_answer") => send("POST", `${DICT}/exercises/${encodeURIComponent(exerciseId)}/play`, typed<{ ok: true }>(), { source });
-export const setDictationSoundFlag = (exerciseId: string, flagged: boolean) => send("POST", `${DICT}/exercises/${encodeURIComponent(exerciseId)}/sound-flag`, typed<{ flagged: boolean }>(), { flagged });
-export const requestDictationHint = (exerciseId: string, typedText: string) => send("POST", `${DICT}/exercises/${encodeURIComponent(exerciseId)}/hint`, typed<DictationHintResponse>(), { typedText });
-export const revealDictationAnswer = (exerciseId: string) => send("POST", `${DICT}/exercises/${encodeURIComponent(exerciseId)}/reveal`, typed<DictationHintResponse>(), {});
-export type DictationPoolSummary = { ready: number; used: number; audioSeconds: number; minWords: number; maxWords: number; oldest: string | null; newest: string | null; topics: Array<{ topic: string; n: number }>; topicTotal: number; voices: Array<{ name: string; n: number }> };
-export const fetchDictationPool = () => send("GET", `${DICT}/pool`, typed<DictationPoolSummary>());
-export const prepareDictationTracks = (count: number) => send("POST", `${DICT}/pool`, typed<{ queued: number }>(), { count });
-export const openDictationTranslation = (exerciseId: string) => send("POST", `${DICT}/exercises/${encodeURIComponent(exerciseId)}/translation`, typed<{ translationRu: string }>(), {});
-export const answerDictation = (exerciseId: string, body: { attemptId: string; text: string; activeMs: number; typingMs?: number; keystrokes?: number }) => send("POST", `${DICT}/exercises/${encodeURIComponent(exerciseId)}/answer`, typed<DictationAnswerResponse>(), body);
-export const sendDictationTime = (lessonId: string, activeMs: number) => send("POST", `${DICT}/lessons/${encodeURIComponent(lessonId)}/time`, typed<{ ok: true; applied: boolean }>(), { activeMs });
-export async function fetchDictationAudio(exerciseId: string): Promise<Blob> {
-  const res = await fetch(`${DICT}/exercises/${encodeURIComponent(exerciseId)}/audio`);
-  if (!res.ok) throw new ApiRequestError("AUDIO_UNAVAILABLE", "The audio is not available.");
-  return res.blob();
-}
-export const fetchDictationAnalytics = (days: "7" | "30" | "90" | "all") => send("GET", `/api/v1/analytics/typing/dictation?days=${days}&timezone=${encodeURIComponent(Intl.DateTimeFormat().resolvedOptions().timeZone)}`, typed<DictationAnalytics>());
-/** fetch with keepalive for `pagehide`/`visibilitychange` checkpoints (CSRF requires fetch, not sendBeacon) */
-export async function sendKeepalive(path: string, body: unknown): Promise<void> {
-  if (!csrfToken) return; // no token yet: losing the last seconds is acceptable
-  try {
-    await fetch(path, { method: "POST", keepalive: true, headers: { "Content-Type": "application/json", "X-CSRF-Token": csrfToken }, body: JSON.stringify(body) });
-  } catch {
-    /* best effort */
-  }
-}
-export interface VocabPracticeStatus { wordQueue?: { due: number; newWords: number; recent: number }; taskCount: number; available: number; freshAvailable?: number; repeatsAvailable?: number; repeatStock?: number; wordsWithContexts: number; words: number; learned: number; approvedForWords: number; draftsNotReleased: number; shortage: { available: number; requested: number; message: string } | null; activeSessionId: string | null }
-export const fetchVocabPractice = () => send("GET", "/api/v1/vocabulary/practice", typed<VocabPracticeStatus>());
-export const createVocabSession = (count?: number) =>
-  send("POST", "/api/v1/vocabulary/sessions", CreateSessionResponseSchema, { timezone: Intl.DateTimeFormat().resolvedOptions().timeZone, ...(count ? { count } : {}) });
-export interface VocabCoverageWord { lemma: string; entryId: string; learned: boolean; approved: number; available: number; shown: number; notReleased: number; families: Record<string, number>; streak?: number; recentMisses?: number; dueNow?: boolean; freshLeft?: number }
-export const fetchVocabCoverage = () => send("GET", "/api/v1/vocabulary/coverage", typed<{ words: VocabCoverageWord[]; exercisesForOtherWords: number; sessionSize: number; available: number; warning: string | null }>());
-export interface Rate { correct: number; total: number; rate: number | null; insufficient: boolean }
-export interface VocabAnalytics {
-  version: string;
-  window: { days: number | null; since: string | null; timezone: string };
-  minSample: number;
-  weakMinMisses: number;
-  xp: TrackProgress;
-  overall: Rate & { assisted: number; pending: number; skipped: number };
-  families: Record<"recognition" | "guided_recall" | "collocation", Rate & { assisted: number; pending: number }>;
-  series: Array<{ date: string; correct: number; total: number; xp: number }>;
-  growth: { series: Array<{ date: string; added: number; learned: number }>; learnedNow: number; learnedWithoutDate: number };
-  encounters: { uniqueWordsShown: number; displays: number; bankWords: number; bankContexts: number; typedInBooks: { words: number; occurrences: number } };
-  weak: Array<{ lemma: string; entryId: string | null; attempts: number; misses: number; firstSeen: string; lastSeen: string; lastResult: string | null; example: string | null }>;
-  words: Array<{ lemma: string; attempts: number; misses: number; lastSeen: string; lastResult: string | null }>;
-  retention: Rate;
-  repeats?: { count: number; correct: number; miss: number; assisted: number; pending: number };
-}
-export const fetchVocabAnalytics = (days: "7" | "30" | "90" | "all") =>
-  send("GET", `/api/v1/analytics/vocabulary?days=${days}&timezone=${encodeURIComponent(Intl.DateTimeFormat().resolvedOptions().timeZone)}`, typed<VocabAnalytics>());
-/** components that change XP (a finished task) announce it so the header refreshes at once */
-export const announceXp = () => window.dispatchEvent(new Event("el:xp"));
+export {
+  conversationHome,
+  conversationStart,
+  conversationRead,
+  conversationResume,
+  conversationPause,
+  conversationHeartbeat,
+  conversationMessage,
+  conversationSttStart,
+  conversationDelete,
+  conversationRetry,
+  conversationSpeech
+} from "./api/conversation";
 
-export interface ThoughtItem { id: string; textRu: string; createdAt: string; status: "pending" | "needs_skills" | "ok" | "ambiguous" | "no_skill" | "failed"; englishDraft: string | null }
-export const fetchThoughts = () => send("GET", "/api/v1/thoughts", typed<{ thoughts: ThoughtItem[]; readyForBatch: number; needSkills: number }>());
-export const addThought = (text: string) => send("POST", "/api/v1/thoughts", typed<{ thought: ThoughtItem; created: boolean }>(), { text });
-export const createThoughtBatchApi = () => send("POST", "/api/v1/thoughts/batch", typed<{ batchId: string; items: number; thoughts: number }>(), {});
-// ---- Voices (TASK_029) ----
-import { VoicesResponseSchema, type VoiceInfo, type VoiceSettingsUpdate } from "@english-lab/contracts";
-export type { VoiceInfo, VoiceSettingsUpdate };
-export const fetchVoices = (purpose: "dictation" | "books" | "listening" = "dictation") => send("GET", `/api/v1/voices?purpose=${purpose}`, VoicesResponseSchema);
-export const saveVoiceSettings = (key: string, patch: VoiceSettingsUpdate) => send("PATCH", `/api/v1/voices/${encodeURIComponent(key)}/settings`, VoicesResponseSchema, patch);
-export const fetchVoiceHistory = (key: string) => send("GET", `/api/v1/voices/${encodeURIComponent(key)}/history`, typed<{ revisions: Array<{ revision: number; source: string; reason: string | null; createdAt: string; priorWeight: number; lengthScale: number; enabled: boolean }> }>());
-export interface VoiceSampleStats { speechSeconds: number; wordsPerMinute: number; syllablesPerSecond: number; lengthScale: number }
-/** the sample at the saved pace, or at `lengthScale` when given (a change not saved yet), with how fast it really speaks */
-export async function fetchVoiceSample(key: string, lengthScale?: number): Promise<{ blob: Blob; stats: VoiceSampleStats | null }> {
-  const res = await fetch(`/api/v1/voices/${encodeURIComponent(key)}/sample${lengthScale === undefined ? "" : `?lengthScale=${lengthScale}`}`);
-  if (!res.ok) throw new ApiRequestError("AUDIO_UNAVAILABLE", "The sample is not available. Is Piper installed (npm run dictation:setup)?");
-  let stats: VoiceSampleStats | null = null;
-  try { const h = res.headers.get("X-Sample-Stats"); stats = h ? (JSON.parse(h) as VoiceSampleStats) : null; } catch { stats = null; }
-  return { blob: await res.blob(), stats };
-}
-
-export type JourneyMode = "grammar" | "vocabulary" | "words" | "books" | "dictation" | "wordLesson" | "conversation";
-export type JourneyData = { version: string; timezone: string; today: string; totals: Record<JourneyMode, number>; todayMs: Record<JourneyMode, number>; activeDays: number; journeyHours: {b2:number;c1:number;c2:number}; dailyMinutes: Record<JourneyMode,number>; dailyOrder: JourneyMode[]; bookMinutes:number };
-export const fetchJourney = () => send("GET", "/api/v1/journey", typed<JourneyData>());
-export type ConversationAnalyticsData = { conversations:number; answers:number; activeMs:number; sentences:number; availableAnswers:number; good:number; suggestions:number; unclassified:number; deletedSessions:number; series:Array<{startedAt:string;answers:number;activeMs:number;good:number;suggestions:number}>; sessions:Array<{topic:string;startedAt:string;updatedAt:string;activeMs:number;answers:number;historyDeleted:number}> };
-export const fetchConversationAnalytics = (days: "7" | "30" | "90" | "all") => send("GET", `/api/v1/analytics/conversation?days=${days}`, typed<ConversationAnalyticsData>());
-export const fetchJourneyDailyTotals = () => send("GET", "/api/v1/journey/daily-totals", typed<{ days: Array<{ date: string; ms: number }> }>());
-export const saveJourneySettings = (body: { journeyHours?: JourneyData["journeyHours"]; dailyMinutes?: JourneyData["dailyMinutes"]; dailyOrder?: JourneyMode[] }) => send("POST", "/api/v1/settings", typed<SettingsView>(), body);
-export const recordTypingInterval = (body: {id:string;sessionId:string;mode:"words"|"books"|"dictation";startMs:number;endMs:number}) => send("POST", "/api/v1/journey/typing-interval", typed<{recorded:boolean}>(), body);
-
-// ---- TASK_031: Single Word Context Practice ----
-export type { WordLessonListResponse, WordLessonRunState, WordLessonStudioStatus };
-export const fetchWordLessons = () => send("GET", "/api/v1/word-lessons", typed<WordLessonListResponse>());
-export const fetchWordLessonStudio = () => send("GET", "/api/v1/word-lessons/studio", typed<WordLessonStudioStatus>());
-export const generateWordLessons = (count: number) => send("POST", "/api/v1/word-lessons/generate", typed<{ created: number; status: WordLessonStudioStatus }>(), { count });
-export const retryWordLessons = () => send("POST", "/api/v1/word-lessons/retry-failed", typed<{ queued: number; status: WordLessonStudioStatus }>(), {});
-export const startWordLessonRun = (lessonId: string, tabId: string) => send("POST", `/api/v1/word-lessons/${encodeURIComponent(lessonId)}/runs`, typed<{ runId: string; resumed: boolean; state: WordLessonRunState }>(), { tabId });
-export const fetchWordLessonRun = (runId: string) => send("GET", `/api/v1/word-lesson-runs/${encodeURIComponent(runId)}`, typed<WordLessonRunState>());
-const lessonRun = (runId: string, tail: string) => `/api/v1/word-lesson-runs/${encodeURIComponent(runId)}/${tail}`;
-export const sendWordLessonEvent = (runId: string, itemKey: string, kind: WordLessonEventKind) => send("POST", lessonRun(runId, "events"), typed<WordLessonRunState>(), { id: crypto.randomUUID(), itemKey, kind });
-export const sendWordLessonAttempt = (runId: string, body: { id: string; itemKey: string; text: string; input: "text" | "voice"; streamId?: string; draftId?: string }) => send("POST", lessonRun(runId, "attempts"), typed<WordLessonRunState>(), body);
-export const disputeWordLessonAttempt = (runId: string, attemptId: string, reason?: string) => send("POST", lessonRun(runId, `attempts/${encodeURIComponent(attemptId)}/dispute`), typed<WordLessonRunState>(), reason ? { reason } : {});
-export const giveUpWordLessonCheck = (runId: string, attemptId: string) => send("POST", lessonRun(runId, `attempts/${encodeURIComponent(attemptId)}/give-up`), typed<WordLessonRunState>(), {});
-export const completeWordLessonRun = (runId: string) => send("POST", lessonRun(runId, "complete"), typed<WordLessonRunState>(), {});
-export const recordWordLessonActivity = (runId: string, body: { id: string; tabId: string; startMs: number; endMs: number }) => send("POST", lessonRun(runId, "activity"), typed<{ recorded: boolean }>(), body);
-/** same shape as `sttStart`, so the voice hook can open a lesson run's stream (a stable module-level function) */
-export const wordLessonSttStart = (runId: string, tabId: string) => send("POST", lessonRun(runId, "stt/start"), typed<{ streamId: string; maxSeconds: number; ready: { device: string } }>(), { tabId });
+export type {
+  ConversationState,
+  ConversationHome
+} from "./api/conversation";

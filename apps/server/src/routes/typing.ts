@@ -6,6 +6,7 @@ import {
   TypingAppearancesRequestSchema,
   TypingBookCheckpointRequestSchema,
   TypingBookCompleteRequestSchema,
+  TypingDrillsCompleteRequestSchema,
   TypingRecallSaveRequestSchema,
   TypingWordsCompleteRequestSchema,
 } from "@english-lab/contracts";
@@ -18,6 +19,7 @@ import type { DictationEnv } from "../domain/typing/dictation/lessons.js";
 import { recallSave, recallStart } from "../domain/typing/recall.js";
 import { abortBook, booksOverview, checkpointBook, completeBook, startBook } from "../domain/typing/books.js";
 import { buildTypingResult, sessionRow } from "../domain/typing/result.js";
+import { completeDrills, startDrills } from "../domain/typing/drills.js";
 import { abortWords, completeWords, recordAppearances, startWords, wordsOverview } from "../domain/typing/words.js";
 
 function parse<T>(schema: ZodType<T>, body: unknown): T {
@@ -30,7 +32,7 @@ function parse<T>(schema: ZodType<T>, body: unknown): T {
 
 const idParams = { type: "object", properties: { id: { type: "string", minLength: 1, maxLength: 64 } }, required: ["id"] } as const;
 
-const AnalyticsQuery = z.object({ mode: z.enum(["words", "books"]), days: z.enum(["7", "30", "90", "all"]).optional(), timezone: z.string().min(1).max(64).optional() }).strict();
+const AnalyticsQuery = z.object({ mode: z.enum(["words", "books", "drills"]), days: z.enum(["7", "30", "90", "all"]).optional(), timezone: z.string().min(1).max(64).optional() }).strict();
 
 export interface TypingRouteOptions {
   booksDir: string;
@@ -60,6 +62,17 @@ export function registerTypingRoutes(app: FastifyInstance, db: Db, deps: Session
     return abortWords(db, deps, req.params.id, b);
   });
 
+  // Finger Drills (TASK_033): a Words session of the 'drills' variant; abort goes through /typing/words/:id/abort
+  app.post("/api/v1/typing/drills/start", async (req, reply) => {
+    reply.code(201);
+    return startDrills(db, deps);
+  });
+
+  app.post<{ Params: { id: string } }>("/api/v1/typing/drills/:id/complete", { schema: { params: idParams } }, async (req) => {
+    const b = parse(TypingDrillsCompleteRequestSchema, req.body);
+    return completeDrills(db, deps, req.params.id, b);
+  });
+
   app.post("/api/v1/typing/books/start", async (req, reply) => {
     reply.code(201);
     return startBook(db, deps, opts.booksDir);
@@ -67,7 +80,7 @@ export function registerTypingRoutes(app: FastifyInstance, db: Db, deps: Session
 
   app.post<{ Params: { id: string } }>("/api/v1/typing/books/:id/checkpoint", { schema: { params: idParams } }, async (req) => {
     const b = parse(TypingBookCheckpointRequestSchema, req.body);
-    return checkpointBook(db, req.params.id, b);
+    return checkpointBook(db, req.params.id, b, opts.booksDir);
   });
 
   app.post<{ Params: { id: string } }>("/api/v1/typing/books/:id/complete", { schema: { params: idParams } }, async (req) => {

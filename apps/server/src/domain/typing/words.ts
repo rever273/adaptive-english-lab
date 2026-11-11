@@ -10,6 +10,7 @@ import { recallTrouble } from "./recall.js";
 import { computeMetrics, METRICS_VERSION } from "./metrics.js";
 import { buildTypingResult, sessionRow, type TypingSessionRow } from "./result.js";
 import { computeSpeed, fallMs, type SpeedHistoryPoint } from "./speed.js";
+import { drillsOverview } from "./drills.js";
 import { awardTypingXp, typingXpForWordBands, wordErrorBands } from "./xp.js";
 
 export interface WordsDeps {
@@ -76,7 +77,8 @@ function lemmaRatings(db: Db): Map<string, number> {
       `SELECT w.lemma AS lemma,
               SUM(CASE WHEN w.destroyed_at IS NOT NULL AND r.errors = 0 THEN 1 ELSE 0 END) AS clean,
               SUM(CASE WHEN r.errors > 0 THEN 1 ELSE 0 END) AS errorful
-         FROM typing_words w LEFT JOIN typing_word_results r ON r.session_id = w.session_id AND r.plan_index = w.plan_index
+         FROM typing_words w JOIN typing_sessions s ON s.id = w.session_id AND s.variant = 'meteors'
+         LEFT JOIN typing_word_results r ON r.session_id = w.session_id AND r.plan_index = w.plan_index
         GROUP BY w.lemma`,
     )
     .all() as Array<{ lemma: string; clean: number; errorful: number }>;
@@ -85,7 +87,7 @@ function lemmaRatings(db: Db): Map<string, number> {
 
 /** lemmas of the most recent Words session: they are offered less right after, so levels do not repeat each other */
 function previousLemmas(db: Db): Set<string> {
-  const last = db.prepare("SELECT id FROM typing_sessions WHERE mode = 'words' AND status <> 'active' ORDER BY started_at DESC LIMIT 1").get() as { id: string } | undefined;
+  const last = db.prepare("SELECT id FROM typing_sessions WHERE mode = 'words' AND variant = 'meteors' AND status <> 'active' ORDER BY started_at DESC LIMIT 1").get() as { id: string } | undefined;
   if (!last) return new Set();
   return new Set((db.prepare("SELECT lemma FROM typing_words WHERE session_id = ?").all(last.id) as Array<{ lemma: string }>).map((r) => r.lemma));
 }
@@ -111,7 +113,7 @@ function personalCandidates(db: Db, level: number, deps: WordsDeps): PersonalCan
   const rows = db
     .prepare(
       `SELECT e.id, e.lemma, e.learned,
-              (SELECT MAX(w.shown_at) FROM typing_words w WHERE w.vocabulary_entry_id = e.id) AS last
+              (SELECT MAX(w.shown_at) FROM typing_words w JOIN typing_sessions s ON s.id = w.session_id AND s.variant = 'meteors' WHERE w.vocabulary_entry_id = e.id) AS last
          FROM vocabulary_entries e
         WHERE (SELECT kind FROM vocabulary_entry_events ev WHERE ev.entry_id = e.id ORDER BY ev.created_at DESC, ev.rowid DESC LIMIT 1) IS NOT 'removed'`,
     )
@@ -154,7 +156,7 @@ export interface WordsPlan {
 
 function wordsHistory(db: Db): { points: SpeedHistoryPoint[]; previousEstimate: number | null } {
   const rows = db
-    .prepare("SELECT status, chars_correct, active_ms, plan_json FROM typing_sessions WHERE mode = 'words' AND status <> 'active' ORDER BY ended_at ASC")
+    .prepare("SELECT status, chars_correct, active_ms, plan_json FROM typing_sessions WHERE mode = 'words' AND variant = 'meteors' AND status <> 'active' ORDER BY ended_at ASC")
     .all() as Array<{ status: string; chars_correct: number | null; active_ms: number; plan_json: string | null }>;
   // an interrupted session is neither a loss nor a win: it must not break a losing streak or feed the estimate
   const points = rows
@@ -179,7 +181,7 @@ function wordsHistory(db: Db): { points: SpeedHistoryPoint[]; previousEstimate: 
 
 /** Next Words level = one above the highest completed level (derived, nothing stored). */
 export function wordsNextLevel(db: Db): number {
-  const r = db.prepare("SELECT COALESCE(MAX(level_number), 0) AS n FROM typing_sessions WHERE mode = 'words' AND status = 'completed'").get() as { n: number };
+  const r = db.prepare("SELECT COALESCE(MAX(level_number), 0) AS n FROM typing_sessions WHERE mode = 'words' AND variant = 'meteors' AND status = 'completed'").get() as { n: number };
   return r.n + 1;
 }
 
@@ -299,11 +301,11 @@ export function buildWordsPlan(db: Db, level: number, settings: SettingsV1, deps
   return { level, words: planWords, speed };
 }
 
-export function wordsOverview(db: Db): { nextLevel: number; completedLevel: number; activeSessionId: string | null; bankWords: number } {
-  const active = db.prepare("SELECT id FROM typing_sessions WHERE mode = 'words' AND status = 'active' LIMIT 1").get() as { id: string } | undefined;
-  const completed = db.prepare("SELECT COALESCE(MAX(level_number), 0) AS n FROM typing_sessions WHERE mode = 'words' AND status = 'completed'").get() as { n: number };
+export function wordsOverview(db: Db): { nextLevel: number; completedLevel: number; activeSessionId: string | null; bankWords: number; drills: ReturnType<typeof drillsOverview> } {
+  const active = db.prepare("SELECT id FROM typing_sessions WHERE mode = 'words' AND variant = 'meteors' AND status = 'active' LIMIT 1").get() as { id: string } | undefined;
+  const completed = db.prepare("SELECT COALESCE(MAX(level_number), 0) AS n FROM typing_sessions WHERE mode = 'words' AND variant = 'meteors' AND status = 'completed'").get() as { n: number };
   const bank = db.prepare("SELECT COUNT(*) AS n FROM typing_word_bank WHERE typing_ok = 1").get() as { n: number };
-  return { nextLevel: completed.n + 1, completedLevel: completed.n, activeSessionId: active?.id ?? null, bankWords: bank.n };
+  return { nextLevel: completed.n + 1, completedLevel: completed.n, activeSessionId: active?.id ?? null, bankWords: bank.n, drills: drillsOverview(db) };
 }
 
 export function startWords(db: Db, deps: WordsDeps): TypingWordsStartResponse {
@@ -332,7 +334,7 @@ export function startWords(db: Db, deps: WordsDeps): TypingWordsStartResponse {
 
 export function recordAppearances(db: Db, deps: WordsDeps, sessionId: string, appearances: Array<{ planIndex: number; order: number }>): { ok: true } {
   const row = sessionRow(db, sessionId);
-  if (row.mode !== "words") throw new ApiError(409, "TYPING_SESSION_WRONG_MODE", "Not a words session");
+  if (row.mode !== "words" || row.variant !== "meteors") throw new ApiError(409, "TYPING_SESSION_WRONG_MODE", "Not a Meteor Rain session");
   if (row.status !== "active") throw new ApiError(409, "TYPING_SESSION_FINISHED", "This session is already finished");
   const plan = JSON.parse(row.plan_json ?? "{}") as { words?: TypingPlanWord[] };
   const words = plan.words ?? [];
@@ -368,7 +370,7 @@ export interface WordsCompleteRequest {
 
 export function completeWords(db: Db, deps: WordsDeps, sessionId: string, req: WordsCompleteRequest): ReturnType<typeof buildTypingResult> {
   const row = sessionRow(db, sessionId);
-  if (row.mode !== "words") throw new ApiError(409, "TYPING_SESSION_WRONG_MODE", "Not a words session");
+  if (row.mode !== "words" || row.variant !== "meteors") throw new ApiError(409, "TYPING_SESSION_WRONG_MODE", "Not a Meteor Rain session");
   if (row.status !== "active") return buildTypingResult(db, row); // idempotent: return the saved result
 
   // lost appearances are cheap to restore; validate the re-sent full set

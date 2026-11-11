@@ -11,8 +11,9 @@ export function ContentStockNotice({ onOpen }: { onOpen: (category: Category) =>
   const [stock, setStock] = useState<Awaited<ReturnType<typeof stockCache.get>> | null>(null);
   const [dismissed, setDismissed] = useState<Set<string>>(() => new Set((["grammar", "vocabulary"] as const).filter(seenBefore)));
   useEffect(() => {
-    const load = async () => { try { setStock(await stockCache.get(true)); } catch { /* Keep the previous stock; connection errors have their own UI. */ } };
-    void load(); const t = setInterval(() => void load(), 15000); return () => clearInterval(t);
+    // the stock query costs the server ~0.3 s of blocked time (it stalls every other request, e.g. the next Grammar Cloze sentence), so: once a minute, never in a hidden tab, and the 30 s cache may answer
+    const load = async () => { if (document.hidden) return; try { setStock(await stockCache.get(false)); } catch { /* Keep the previous stock; connection errors have their own UI. */ } };
+    void load(); const t = setInterval(() => void load(), 60000); return () => clearInterval(t);
   }, []);
   /** grammar is gated when a lesson is opened (LESSON_STOCK_LOW), never announced during a lesson */
   const category = (["vocabulary"] as const).find(c => stock?.[c].low && !dismissed.has(c));

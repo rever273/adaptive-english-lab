@@ -32,6 +32,8 @@ export const SELECTION_CONFIG = {
   recentMissBoostCap: 3,
   /** repeats may fill at most this share of a session */
   repeatShareCap: 0.6,
+  /** the most different words in one practice session; the other exercises are further sentences of the same words */
+  maxWordsPerSession: 8,
   defaultNewWordsPerSession: 4,
   order: "due words by priority, then new words (capped), then not-yet-due words to fill; round-robin by word",
 } as const;
@@ -283,10 +285,16 @@ function pickVocabularyPass(input: PickInput, shortage: boolean): VocabularyPick
     }
   };
   // One new word remains possible even with a large due backlog; extra new words fill only shortages.
+  // At most `maxWords` different words per session, so that words come back with another sentence (and a missed one can return); when the
+  // limited set cannot fill the session (too few sentences), the unlimited passes below take over.
+  const maxWords = Number.isFinite(n) && n < Number.MAX_SAFE_INTEGER ? Math.max(2, Math.min(SELECTION_CONFIG.maxWordsPerSession, Math.ceil(n * 0.8))) : Number.MAX_SAFE_INTEGER;
   if (newCapped.length > 0 && dueWords.length >= n) {
-    round(dueWords.slice(0, Math.max(0, n - 1)));
+    round(dueWords.slice(0, Math.max(0, Math.min(n, maxWords) - 1)));
     round(newCapped.slice(0, 1));
   }
+  const limitedNew = newCapped.slice(0, maxWords);
+  const limitedPrimary = [...dueWords.slice(0, Math.max(0, maxWords - limitedNew.length)), ...limitedNew];
+  fill(limitedPrimary, fillWords.slice(0, Math.max(0, maxWords - limitedPrimary.length)));
   fill([...dueWords, ...newCapped], fillWords);
   if (picked.length < n && newExtra.length > 0) fill([...dueWords, ...newCapped, ...newExtra], fillWords);
   // the 60% repeat share is SOFT: it only prefers fresh sentences for the places beyond it; when no fresh sentence is left,

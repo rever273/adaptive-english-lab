@@ -4,7 +4,7 @@ import { ApiRequestError, addVocabulary, createVocabSession, fetchVocabPractice,
 import { WordImage } from "../components/WordImage";
 import { Practice } from "./Practice";
 import { WordLesson } from "./WordLesson";
-import { WordPicker } from "../components/WordPicker";
+import { WordTable } from "../components/WordPicker";
 import { VocabularyExpressions } from "./VocabularyExpressions";
 import { Kbd, isTextField, useKeys } from "../components/hotkeys";
 
@@ -253,16 +253,16 @@ function PracticeBlock({ status, onStart, onStudio, error }: { status: VocabPrac
   );
 }
 
-const loadShowCompleted = (): boolean => {
+const loadHideCompleted = (): boolean => {
   try {
-    return localStorage.getItem("vocab.wl.showCompleted") === "1";
+    return localStorage.getItem("vocab.wl.hideCompleted") === "1";
   } catch {
     return false;
   }
 };
 
 /** Single Word Practice: one word from the dictionary, five short steps in its own ready-made lesson. Lessons are made ahead of time in Content Studio. */
-function SingleWordBlock({ data, showCompleted, onShowCompleted, onPick, onStudio, inputRef }: { data: WordLessonListResponse | null; showCompleted: boolean; onShowCompleted: (v: boolean) => void; onPick: (lessonId: string) => void; onStudio: () => void; inputRef: React.RefObject<HTMLInputElement | null> }) {
+function SingleWordBlock({ data, hideCompleted, onHideCompleted, onPick, onStudio, inputRef }: { data: WordLessonListResponse | null; hideCompleted: boolean; onHideCompleted: (v: boolean) => void; onPick: (lessonId: string) => void; onStudio: () => void; inputRef: React.RefObject<HTMLInputElement | null> }) {
   return (
     <div className="vocab-practice wl-block" id="single-word-practice" data-testid="word-lesson-block">
       <div className="vocab-practice-main">
@@ -272,8 +272,8 @@ function SingleWordBlock({ data, showCompleted, onShowCompleted, onPick, onStudi
         </div>
       </div>
       <div className="wl-pick-row">
-        <WordPicker lessons={data?.lessons ?? []} showCompleted={showCompleted} onPick={(l) => onPick(l.lessonId)} inputRef={inputRef} />
-        <label className="inline toggle"><input type="checkbox" checked={showCompleted} onChange={(e) => onShowCompleted(e.target.checked)} data-testid="wl-show-completed" /> Show completed words</label>
+        <WordTable lessons={data?.lessons ?? []} hideCompleted={hideCompleted} onPick={(l) => onPick(l.lessonId)} inputRef={inputRef} />
+        <label className="inline toggle"><input type="checkbox" checked={hideCompleted} onChange={(e) => onHideCompleted(e.target.checked)} data-testid="wl-hide-completed" /> Hide learned words</label>
       </div>
       {data && (
         <p className="muted small" data-testid="wl-coverage">
@@ -305,7 +305,7 @@ export function Vocabulary({ onNavigate, dailyStart = false, wordLessonFocus = f
   // Single Word Practice: the ready lessons, the lesson being played, and the filter for finished ones
   const [lessons, setLessons] = useState<WordLessonListResponse | null>(null);
   const [lesson, setLesson] = useState<string | null>(null);
-  const [showCompleted, setShowCompleted] = useState(loadShowCompleted);
+  const [hideCompleted, setHideCompleted] = useState(loadHideCompleted);
   const pickerBox = useRef<HTMLInputElement>(null);
   const loadLessons = useCallback(async () => {
     try {
@@ -319,11 +319,11 @@ export function Vocabulary({ onNavigate, dailyStart = false, wordLessonFocus = f
   }, [loadLessons]);
   useEffect(() => {
     try {
-      localStorage.setItem("vocab.wl.showCompleted", showCompleted ? "1" : "0");
+      localStorage.setItem("vocab.wl.hideCompleted", hideCompleted ? "1" : "0");
     } catch {
       /* a convenience only */
     }
-  }, [showCompleted]);
+  }, [hideCompleted]);
   // the Daily Practice button opens this page at the block, which is the only place a word is chosen
   const focused = useRef(false);
   useEffect(() => {
@@ -461,7 +461,7 @@ export function Vocabulary({ onNavigate, dailyStart = false, wordLessonFocus = f
       <p className="lede">Words you saved while practising. Saving is instant; the local AI adds a translation in the background (shown in <span className="ai-text">blue</span>), and anything you write yourself is never replaced. The dotted line under a word shows its level, from green (A1) to red (C2) — hover to see it.</p>
       {error && <p className="notice notice-error" role="alert">{error}</p>}
       <PracticeBlock status={practice} onStart={(c) => void start(c)} onStudio={() => onNavigate?.("studio")} error={startError} />
-      <SingleWordBlock data={lessons} showCompleted={showCompleted} onShowCompleted={setShowCompleted} onPick={setLesson} onStudio={() => onNavigate?.("studio")} inputRef={pickerBox} />
+      <SingleWordBlock data={lessons} hideCompleted={hideCompleted} onHideCompleted={setHideCompleted} onPick={setLesson} onStudio={() => onNavigate?.("studio")} inputRef={pickerBox} />
       <div className="toolbar">
         <div className="field-add">
           <input value={newWord} onChange={(e) => setNewWord(e.target.value)} onKeyDown={(e) => e.key === "Enter" && newWord.trim() && void add()} placeholder="Add a word or a short phrase" aria-label="Add a word" data-testid="new-word" />

@@ -24,9 +24,27 @@ export interface LessonPlan {
 /** families whose rule cannot be shown by rewriting one sentence (an article, an agreement, a preposition, a verb pattern, a modal or a conditional changes the meaning when a sentence is rewritten to show it, so those are practised when the learner builds a sentence (stage 4)) */
 const NOT_A_TRANSFORMATION = new Set(["articles", "countability", "prepositions", "agreement", "pronouns", "collocations", "register", "subjunctive", "verb_forms", "verb_patterns", "modals", "conditionals"]);
 /** Stage 3 rewrites one sentence into another with the SAME meaning: only these constructions do that reliably (the others are practised in stage 4, where the learner builds a sentence) */
-const REWRITES = /^(passive\.|reported_speech\.|questions\.embedded_|tenses\.perfect_vs_past$)/;
+const REWRITES = /^(passive\.|reported_speech\.|questions\.embedded_|tenses\.perfect_vs_past$|relatives\.defining$|linking\.(contrast|concession|cause)$|comparisons\.|possessives\.possessive_s$)/;
 const transformable = (s: PlanSkill): boolean => s.id === null ? SAFE_STAGE3.includes(s.label) : !NOT_A_TRANSFORMATION.has(s.id.split(".")[0]!) && REWRITES.test(s.id);
-export const SAFE_STAGE3 = ["Passive voice", "Present perfect vs past simple", "Reported speech", "Question word + statement order (indirect question)"];
+/**
+ * Rewrites that keep the meaning and change at least two words. Stage 3 draws its tasks from these (and from the learner's own weak skills that
+ * fit a rewrite), so a lesson gets three different kinds of task instead of the same few every time. `rule` and `good` go to the model as the brief.
+ */
+export const REWRITE_KINDS: ReadonlyArray<{ label: string; rule: string; good: string[] }> = [
+  { label: "Passive voice", rule: "Turn an active sentence into the passive: the object becomes the subject, the verb becomes be + past participle, the doer may follow by.", good: ["The council approved the plan. => The plan was approved by the council."] },
+  { label: "Present perfect vs past simple", rule: "Change between the tenses by changing the time frame: present perfect for an unfinished period or a result now, past simple with a finished time.", good: ["She has lived here since 2015. => She started living here in 2015."] },
+  { label: "Reported speech", rule: "Turn direct speech into reported speech: shift the tense back and change pronouns and time words.", good: ["\"I am tired,\" he said. => He said that he was tired."] },
+  { label: "Question word + statement order (indirect question)", rule: "Turn a direct question into an indirect one: statement word order, no do/does/did, no question mark after a polite opening.", good: ["Where is the station? => Could you tell me where the station is?"] },
+  { label: "Contrast: but => although", rule: "Express the same contrast with although/even though + clause (or despite + noun/-ing) instead of but.", good: ["The route was long, but we arrived early. => Although the route was long, we arrived early."] },
+  { label: "Cause: because => so", rule: "Swap the order of cause and result: because + cause becomes cause, so + result.", good: ["We left early because the road was closed. => The road was closed, so we left early."] },
+  { label: "Purpose: to => so that", rule: "Say the purpose with so that + clause (with can/could/would) instead of to + verb.", good: ["She took notes to remember the details. => She took notes so that she could remember the details."] },
+  { label: "Condition: if ... not => unless", rule: "Replace if ... not with unless + positive verb; the meaning stays the same.", good: ["If you don't book early, you will miss out. => Unless you book early, you will miss out."] },
+  { label: "Comparison: comparative => not as ... as", rule: "Say the same comparison from the other side: A is bigger than B => B is not as big as A.", good: ["The new office is bigger than the old one. => The old office is not as big as the new one."] },
+  { label: "Time clause: after + clause => after + -ing", rule: "Shorten a time clause with after/before + -ing when both parts have the same subject.", good: ["After she finished the report, she went home. => After finishing the report, she went home."] },
+  { label: "Possessive: of => 's", rule: "Replace the 'of' phrase for a person or group with a possessive 's.", good: ["The report of the manager was late. => The manager's report was late."] },
+  { label: "Negative: not any => no", rule: "Replace not ... any with no (or none) after a positive verb; keep the same meaning.", good: ["We didn't have any time. => We had no time."] },
+];
+export const SAFE_STAGE3: string[] = REWRITE_KINDS.map((k) => k.label);
 
 export interface SkillPool {
   weak: PlanSkill[];
@@ -85,7 +103,8 @@ export function buildPlan(settings: Pick<SettingsV1, "difficultyMin" | "difficul
   const any = () => true;
   const fallback = (stage3 = false): PlanSkill => {
     if (stage3) {
-      const safe = SAFE_STAGE3.find((g) => !used.has(g) && !labels.has(g));
+      const start = Math.floor(rand() * SAFE_STAGE3.length);
+      const safe = SAFE_STAGE3.map((_, i) => SAFE_STAGE3[(start + i) % SAFE_STAGE3.length]!).find((g) => !used.has(g) && !labels.has(g));
       if (safe) {
         used.add(safe);
         labels.add(safe);
@@ -102,7 +121,9 @@ export function buildPlan(settings: Pick<SettingsV1, "difficultyMin" | "difficul
   const fourth = (weakLeft > 0 ? take(pool.weak, index * 2, any) : null) ?? take(pool.familiar, index * 3, any) ?? take(pool.weak, index, any);
   if (fourth && pool.weak.some((w) => keyOf(w) === keyOf(fourth))) weakLeft--;
   for (let k = 0; k < transformations; k++) {
-    const pick = (weakLeft > 0 ? take(pool.weak, index * 2 + k, transformable) : null) ?? take(pool.familiar, index * 3 + k, transformable) ?? take(pool.weak, index + k, transformable);
+    // after the weak skills, half of the tasks come from the wider list of rewrites (see REWRITE_KINDS) so the three tasks differ from lesson to lesson
+    const own = rand() < 0.5;
+    const pick = (weakLeft > 0 ? take(pool.weak, index * 2 + k, transformable) : null) ?? (own ? take(pool.familiar, index * 3 + k, transformable) : null);
     if (pick && pool.weak.some((w) => keyOf(w) === keyOf(pick))) weakLeft--;
     skills.push(pick ?? fallback(true));
   }

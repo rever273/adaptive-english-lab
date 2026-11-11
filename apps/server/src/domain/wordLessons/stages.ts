@@ -1,6 +1,6 @@
 import type { Validated } from "../ai/validate.js";
 import { skillCards } from "../content/batches/draftFormats.js";
-import type { PlanSkill } from "./plan.js";
+import { REWRITE_KINDS, type PlanSkill } from "./plan.js";
 import type { LessonPlan } from "./plan.js";
 import {
   SentenceLedger,
@@ -78,6 +78,7 @@ const base = (f: WordFacts, plan: LessonPlan, task: string) => ({
   meaning_ru: f.definitionRu || undefined,
   synonyms: f.synonyms.length ? f.synonyms : undefined,
   word_forms: f.word.forms.slice(0, 12),
+  word_rule: /phrasal/i.test(f.pos) ? "Keep this phrasal verb in the active voice in every sentence; never use it in the passive." : /conjunction|preposition/i.test(f.pos) ? "This word links parts of a sentence; never put it inside a question or an indirect question." : undefined,
   cefr: `${plan.difficulty.min}-${plan.difficulty.max}`,
 });
 
@@ -100,7 +101,9 @@ export function stageInput(f: WordFacts, plan: LessonPlan, stage: "stage12" | "s
 export function skillBrief(s: PlanSkill | undefined): { construction: string; rule?: string; good_examples?: string[] } {
   if (!s) return { construction: "a common construction you know well" };
   const card = s.id ? skillCards()[s.id] : undefined;
-  return card ? { construction: s.label, rule: card.rule, good_examples: card.good.slice(0, 2) } : { construction: s.label };
+  if (card) return { construction: s.label, rule: card.rule, good_examples: card.good.slice(0, 2) };
+  const kind = REWRITE_KINDS.find((k) => k.label === s.label);
+  return kind ? { construction: s.label, rule: kind.rule, good_examples: kind.good } : { construction: s.label };
 }
 
 const hasOnly = (o: Record<string, unknown>, keys: string[]): boolean => Object.keys(o).every((k) => keys.includes(k));
@@ -164,7 +167,7 @@ function variants(expected: string, given: string[], f: WordFacts): string[] | s
 const MAY_VANISH = new Set([
   "a", "an", "the", "do", "does", "did", "have", "has", "had", "will", "would", "was", "were", "is", "are", "am", "be", "been", "being", "to", "that", "if", "whether", "not", "dont", "wonder", "know", "want", "like", "used", "could", "can", "you", "tell", "me",
   "i", "he", "she", "it", "we", "they", "him", "her", "us", "them", "his", "its", "our", "their", "my", "your",
-  "yesterday", "ago", "last", "week", "month", "year", "so", "far", "now", "already", "yet", "still", "just", "ever", "since", "for", "during", "today", "currently", "usually", "often", "always",
+  "but", "although", "though", "despite", "because", "so", "unless", "then", "after", "before", "of", "than", "no", "any", "order", "able", "yesterday", "ago", "last", "week", "month", "year", "so", "far", "now", "already", "yet", "still", "just", "ever", "since", "for", "during", "today", "currently", "usually", "often", "always",
 ]);
 const sameWord = (x: string, y: string): boolean => x === y || (x.length >= 4 && y.length >= 4 && x.slice(0, 4) === y.slice(0, 4)); // an ending may change (cope/coped, resolves/resolved)
 

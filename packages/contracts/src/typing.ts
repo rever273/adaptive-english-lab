@@ -82,6 +82,61 @@ export const TypingAbortRequestSchema = z
   .strict();
 export type TypingAbortRequest = z.infer<typeof TypingAbortRequestSchema>;
 
+/* ---- Finger Drills (TASK_033): the second Words variant, a few comfortable words typed many times ---- */
+
+export const TYPING_DRILL_RULES_VERSION = "drill-rules-v2";
+export const TypingWordsVariantSchema = z.enum(["meteors", "drills"]);
+export type TypingWordsVariant = z.infer<typeof TypingWordsVariantSchema>;
+
+/** one showing of a word in the drill (the same lemma appears many times, each with its own planIndex) */
+export const TypingDrillWordSchema = z
+  .object({
+    planIndex: z.number().int().nonnegative(),
+    lemma: z.string().min(1).max(60),
+    source: z.enum(["general", "vocabulary"]),
+    vocabularyEntryId: z.string().nullable(),
+    translationRu: z.string().nullable(),
+    /** the translation is printed under this showing (every fifth showing of the word, from the first) */
+    showTranslation: z.boolean(),
+    /** Piper says the word after this showing (every tenth showing of the word) */
+    speak: z.boolean(),
+    /** the word was already learned before this level: a review showing */
+    review: z.boolean(),
+  })
+  .strict();
+export type TypingDrillWord = z.infer<typeof TypingDrillWordSchema>;
+
+export const TypingDrillsStartResponseSchema = z
+  .object({
+    sessionId: z.string(),
+    level: z.number().int().positive(),
+    /** 1..6: which keys and word lengths are open */
+    stage: z.number().int().positive(),
+    stageKeys: z.string(),
+    words: z.array(TypingDrillWordSchema),
+    speed: TypingSpeedSchema,
+    /** every wrong key costs one life; none left ends the level. Set from the learner's recent error rate and the level's length */
+    lives: z.number().int().positive(),
+    learned: z.number().int().nonnegative(),
+  })
+  .strict();
+export type TypingDrillsStartResponse = z.infer<typeof TypingDrillsStartResponseSchema>;
+
+export const TypingDrillsCompleteRequestSchema = z
+  .object({
+    status: z.enum(["completed", "failed"]),
+    ...Counters,
+    /** every word that was reached, in order: completed ones (with the time from the first letter to the space) and the one being typed */
+    words: z
+      .array(z.object({ planIndex: z.number().int().nonnegative(), errors: z.number().int().min(0).max(1000), completed: z.boolean(), typeMs: z.number().int().min(0).max(600_000).nullable() }).strict())
+      .max(300),
+    keyStats: KeyStats,
+    bestCombo: z.number().int().min(0).max(100000).optional(),
+    bestCharStreak: z.number().int().min(0).max(10_000_000).optional(),
+  })
+  .strict();
+export type TypingDrillsCompleteRequest = z.infer<typeof TypingDrillsCompleteRequestSchema>;
+
 export const TypingBookStartResponseSchema = z
   .object({
     sessionId: z.string(),
@@ -103,23 +158,31 @@ export const TypingBookStartResponseSchema = z
     activeMs: z.number().int(),
     charsTyped: z.number().int(),
     errors: z.number().int(),
+    bookWordTracking: z.object({ fromOffset: z.number().int().nonnegative(), errorOffsets: z.array(z.number().int().nonnegative()), reliable: z.boolean() }).strict().nullable().optional(),
   })
   .strict();
 export type TypingBookStartResponse = z.infer<typeof TypingBookStartResponseSchema>;
 
 const CharStreak = z.object({ current: z.number().int().min(0).max(10_000_000), best: z.number().int().min(0).max(10_000_000) }).strict();
-export const TypingBookCheckpointRequestSchema = z.object({ offset: z.number().int().nonnegative(), ...Counters, charStreak: CharStreak.optional() }).strict();
+const BookWordObservations = z.object({ errorOffsets: z.array(z.number().int().nonnegative()).max(10000) }).strict().optional();
+export const TypingBookCheckpointRequestSchema = z.object({ offset: z.number().int().nonnegative(), ...Counters, charStreak: CharStreak.optional(), wordObservations: BookWordObservations }).strict();
 export type TypingBookCheckpointRequest = z.infer<typeof TypingBookCheckpointRequestSchema>;
 
 /** bestCombo: the longest run of characters typed correctly (Precision Combo) */
-export const TypingBookCompleteRequestSchema = z.object({ offset: z.number().int().nonnegative(), ...Counters, keyStats: KeyStats, bestCombo: z.number().int().min(0).max(10_000_000).optional(), charStreak: CharStreak.optional() }).strict();
+export const TypingBookCompleteRequestSchema = z.object({ offset: z.number().int().nonnegative(), ...Counters, keyStats: KeyStats, bestCombo: z.number().int().min(0).max(10_000_000).optional(), charStreak: CharStreak.optional(), wordObservations: BookWordObservations }).strict();
 export type TypingBookCompleteRequest = z.infer<typeof TypingBookCompleteRequestSchema>;
 
 export const TypingOverviewSchema = z
   .object({
     dictation: DictationOverviewSchema,
     words: z
-      .object({ nextLevel: z.number().int(), completedLevel: z.number().int(), activeSessionId: z.string().nullable(), bankWords: z.number().int() })
+      .object({
+        nextLevel: z.number().int(),
+        completedLevel: z.number().int(),
+        activeSessionId: z.string().nullable(),
+        bankWords: z.number().int(),
+        drills: z.object({ nextLevel: z.number().int(), stage: z.number().int(), learned: z.number().int(), activeSessionId: z.string().nullable() }).strict(),
+      })
       .strict(),
     books: z
       .object({
@@ -143,6 +206,8 @@ export const TypingResultSchema = z
   .object({
     sessionId: z.string(),
     mode: TypingModeSchema,
+    /** Words only: Meteor Rain or Finger Drills */
+    variant: TypingWordsVariantSchema.optional(),
     status: z.enum(["completed", "failed", "interrupted"]),
     level: z.number().int(),
     metrics: z
@@ -167,16 +232,22 @@ export const TypingResultSchema = z
     wordsDestroyed: z.number().int().optional(),
     /** destroyed words by wrong keys: none, exactly one, two or more (only when the client reported them) */
     wordErrorBands: z.object({ clean: z.number().int(), one: z.number().int(), many: z.number().int() }).strict().optional(),
+    bookWords: z.object({ completed: z.number().int(), withErrors: z.number().int(), partial: z.boolean() }).strict().nullable().optional(),
     book: z.object({ title: z.string(), chapter: z.string().nullable(), percentRead: z.number(), finished: z.boolean() }).strict().optional(),
+    /** Finger Drills: the stage now, all learned words now, and the words this level made learned */
+    drills: z.object({ stage: z.number().int(), learned: z.number().int(), newlyLearned: z.array(z.string()) }).strict().optional(),
   })
   .strict();
 export type TypingResult = z.infer<typeof TypingResultSchema>;
 
 const Point = z.object({ at: z.string(), value: z.number(), status: z.string() }).strict();
 
+export const TypingAnalyticsModeSchema = z.enum(["words", "books", "drills"]);
+export type TypingAnalyticsMode = z.infer<typeof TypingAnalyticsModeSchema>;
+
 export const TypingAnalyticsSchema = z
   .object({
-    mode: TypingModeSchema,
+    mode: TypingAnalyticsModeSchema,
     window: z.object({ days: z.number().nullable(), timezone: z.string() }).strict(),
     summary: z
       .object({
@@ -201,6 +272,36 @@ export const TypingAnalyticsSchema = z
         bestCharStreak: z.number().int().nullable().optional(),
         /** Words only: the memory check after levels (words typed from their translation) */
         recall: z.object({ checks: z.number().int(), words: z.number().int(), withoutHelpRate: z.number().nullable(), avgPoints: z.number().nullable() }).strict().optional(),
+        /** Finger Drills only: current stage, learned words and words practised at least once */
+        drills: z
+          .object({
+            stage: z.number().int(),
+            learned: z.number().int(),
+            practised: z.number().int(),
+            /** a clean level moves a learned word to rarer reviews at or below this time per letter (90% of the usual speed in the other modes) */
+            targetMsPerLetter: z.number().int(),
+            /** a word is learned when this share of its last `accuracyWindow` showings was perfect, after `minShowings` showings */
+            accuracyNeeded: z.number(),
+            minShowings: z.number().int(),
+            accuracyWindow: z.number().int(),
+            maxStep: z.number().int(),
+            /** the most recently practised words; step 0 = in practice, 1..maxStep = learned review step */
+            words: z.array(
+              z
+                .object({
+                  lemma: z.string(),
+                  showings: z.number().int(),
+                  accuracy: z.number(),
+                  step: z.number().int(),
+                  msPerLetter: z.number().int().nullable(),
+                  learned: z.boolean(),
+                  nextInLevels: z.number().int().nullable(),
+                })
+                .strict(),
+            ),
+          })
+          .strict()
+          .optional(),
       })
       .strict(),
     /** letter pairs that are slow or often mistyped, over all finished Words and Books sessions */
@@ -221,6 +322,9 @@ export const TypingAnalyticsSchema = z
         duration: z.array(Point),
         personalBest: z.array(z.object({ at: z.string(), wpm: z.number(), score: z.number() }).strict()),
         charStreak: z.array(z.object({ at: z.string(), value: z.number().int().nullable(), status: z.string() }).strict()).optional(),
+        /** Finger Drills: per finished level, typed words without and with errors, and the learned words after it */
+        drillProgress: z.array(z.object({ at: z.string(), status: z.string(), clean: z.number().int(), withErrors: z.number().int(), learned: z.number().int() }).strict()).optional(),
+        bookWordAccuracy: z.array(z.object({ at: z.string(), completed: z.number().int(), withErrors: z.number().int(), partial: z.boolean() }).strict()).optional(),
       })
       .strict(),
   })

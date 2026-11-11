@@ -152,7 +152,7 @@ export function splitSentences(text: string): Array<{ start: number; end: number
     let e = index + segment.length;
     while (s < e && /\s/.test(text.charAt(s))) s++;
     while (e > s && /\s/.test(text.charAt(e - 1))) e--;
-    if (e > s) raw.push({ start: s, end: e });
+    if (e > s) raw.push(...splitBeforeLowercase(text, s, e));
   }
   const out: Array<{ start: number; end: number }> = [];
   for (const s of raw) {
@@ -160,6 +160,34 @@ export function splitSentences(text: string): Array<{ start: number; end: number
     if (prev && endsWithAbbreviation(text, prev)) prev.end = s.end;
     else out.push({ start: s.start, end: s.end });
   }
+  return out;
+}
+
+/** words that end with a full stop inside a sentence even when a lower-case word follows */
+const INNER_STOPS = new Set(["Mr", "Mrs", "Ms", "Dr", "St", "Mt", "etc", "vs", "e.g", "i.e", "no", "approx", "inc", "ltd", "co", "jr", "sr", "prof"]);
+
+/**
+ * The segmenter never breaks before a lower-case word, but some books do begin sentences in lower case (a diary, verse, informal text):
+ * "...the flicks. then you saw ...". A full stop, ! or ? (not an ellipsis, not an abbreviation or a single initial) followed by a space and a
+ * lower-case letter ends a sentence here as well.
+ */
+function splitBeforeLowercase(text: string, start: number, end: number): Array<{ start: number; end: number }> {
+  const out: Array<{ start: number; end: number }> = [];
+  const re = /([.!?])["'”’)\]]*(\s+)(?=[a-z])/g;
+  const slice = text.slice(start, end);
+  let from = start;
+  for (let m = re.exec(slice); m; m = re.exec(slice)) {
+    const stopAt = start + m.index; // the stop character
+    if (m[1] === "." && (text.charAt(stopAt - 1) === "." || text.charAt(stopAt + 1) === ".")) continue; // ellipsis
+    let w = stopAt;
+    while (w > from && /[A-Za-z.]/.test(text.charAt(w - 1))) w--;
+    const word = text.slice(w, stopAt);
+    if (m[1] === "." && (word.length <= 1 || INNER_STOPS.has(word) || INNER_STOPS.has(word.toLowerCase()))) continue;
+    const to = start + m.index + m[0].length - m[2]!.length;
+    out.push({ start: from, end: to });
+    from = start + m.index + m[0].length;
+  }
+  out.push({ start: from, end });
   return out;
 }
 

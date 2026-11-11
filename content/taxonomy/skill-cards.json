@@ -1,0 +1,1397 @@
+{
+  "schema_version": "skill-cards-v3",
+  "legacy_snapshots": [
+    "skill-cards-v1.json",
+    "skill-cards-v2-extra.json"
+  ],
+  "authorship": "Cards of taxonomy-v1/v2 skills are copied unchanged from the frozen snapshots (originally written by an AI agent, claude-sonnet-5-5, for TASK_010; not reviewed by a human). Cards with since=skill-cards-v3 were written by an AI agent for TASK_032 and were reviewed once by an independent subagent (4 wrong-examples corrected) and are marked validated. Used to tell generators and the local model what a skill means; never shown to the learner as authority.",
+  "skills": {
+    "articles.indefinite": {
+      "family": "articles",
+      "displayName": "Indefinite article (a / an)",
+      "displayNameRu": "неопределённый артикль",
+      "since": "taxonomy-v1",
+      "inTaxonomy": true,
+      "status": "validated",
+      "rule": "Use a/an before a singular countable noun when it is not specific or is mentioned for the first time (a/an by SOUND: an hour, a university).",
+      "good": [
+        "She bought a laptop and an adaptor.",
+        "He is an honest manager."
+      ],
+      "wrong": "She bought laptop. (missing a)"
+    },
+    "articles.definite": {
+      "family": "articles",
+      "displayName": "Definite article (the)",
+      "displayNameRu": "определённый артикль",
+      "since": "taxonomy-v1",
+      "inTaxonomy": true,
+      "status": "validated",
+      "rule": "Use the when both speaker and listener know which one: already mentioned, unique, or made specific.",
+      "good": [
+        "I sent the report you asked for.",
+        "The sun was strong at the beach."
+      ],
+      "wrong": "A report you asked for is ready. (specific, needs the)"
+    },
+    "articles.zero_general": {
+      "family": "articles",
+      "displayName": "Zero article for general statements",
+      "displayNameRu": "нулевой артикль в общих утверждениях",
+      "since": "taxonomy-v1",
+      "inTaxonomy": true,
+      "status": "validated",
+      "rule": "No article with plural or uncountable nouns used in a general sense.",
+      "good": [
+        "Volunteers need training.",
+        "Information is power."
+      ],
+      "wrong": "The volunteers need training. (when speaking about volunteers in general)"
+    },
+    "articles.possessive_no_article": {
+      "family": "articles",
+      "displayName": "No article with possessives",
+      "displayNameRu": "нет артикля с притяжательными",
+      "since": "taxonomy-v1",
+      "inTaxonomy": true,
+      "status": "validated",
+      "rule": "A possessive (my, her, their) replaces the article: never 'the my', 'a her'.",
+      "good": [
+        "She lost her wallet.",
+        "We met their manager."
+      ],
+      "wrong": "She lost the her wallet."
+    },
+    "articles.quantifiers": {
+      "family": "articles",
+      "displayName": "Articles with quantifiers",
+      "displayNameRu": "артикли с количественными словами",
+      "since": "taxonomy-v1",
+      "inTaxonomy": true,
+      "status": "validated",
+      "rule": "Articles and quantifiers do not stack: 'a few', 'a little' vs 'few', 'little'; 'some/any' replace a/an with plural and uncountable nouns.",
+      "good": [
+        "We need some paper.",
+        "Do you have any questions?"
+      ],
+      "wrong": "We need a some paper."
+    },
+    "countability.mass_nouns": {
+      "family": "countability",
+      "displayName": "Uncountable nouns",
+      "displayNameRu": "неисчисляемые существительные",
+      "since": "taxonomy-v1",
+      "inTaxonomy": true,
+      "status": "validated",
+      "rule": "Mass (uncountable) nouns have no plural and no a/an: information, advice, luggage, furniture, equipment, news, traffic, research.",
+      "good": [
+        "She gave me useful advice.",
+        "The luggage was heavy."
+      ],
+      "wrong": "She gave me an advice. / informations"
+    },
+    "countability.singular_plural": {
+      "family": "countability",
+      "displayName": "Singular and plural nouns",
+      "displayNameRu": "единственное и множественное число",
+      "since": "taxonomy-v1",
+      "inTaxonomy": true,
+      "status": "validated",
+      "rule": "Countable nouns change form: one car, two cars; irregular plurals (child/children, person/people); the verb agrees.",
+      "good": [
+        "Both children were late.",
+        "Three people have applied."
+      ],
+      "wrong": "Three persons has applied."
+    },
+    "countability.few_little": {
+      "family": "countability",
+      "displayName": "Few / a few / little / a little",
+      "displayNameRu": "few, a few, little, a little",
+      "since": "taxonomy-v1",
+      "inTaxonomy": true,
+      "status": "validated",
+      "rule": "few/fewer + plural countable; little/less + uncountable.",
+      "good": [
+        "Few people attended.",
+        "We have little time."
+      ],
+      "wrong": "We have few time. / little people"
+    },
+    "countability.much_many": {
+      "family": "countability",
+      "displayName": "Much / many / a lot of",
+      "displayNameRu": "much, many, a lot of",
+      "since": "taxonomy-v1",
+      "inTaxonomy": true,
+      "status": "validated",
+      "rule": "many + plural countable; much + uncountable (mostly in questions and negatives); a lot of works with both.",
+      "good": [
+        "How many tickets are left?",
+        "There isn't much space."
+      ],
+      "wrong": "How much tickets are left?"
+    },
+    "countability.agreement_quantity": {
+      "family": "countability",
+      "displayName": "Agreement with quantity words",
+      "displayNameRu": "согласование с количественными словами",
+      "since": "taxonomy-v1",
+      "inTaxonomy": true,
+      "status": "validated",
+      "rule": "Verb agrees with the noun after the quantifier: a number of + plural verb; the amount of + singular; each/every + singular.",
+      "good": [
+        "A number of customers have complained.",
+        "Every student was present."
+      ],
+      "wrong": "A number of customers has complained."
+    },
+    "tenses.past_simple": {
+      "family": "tenses",
+      "displayName": "Past Simple",
+      "displayNameRu": "простое прошедшее",
+      "since": "taxonomy-v1",
+      "inTaxonomy": true,
+      "status": "validated",
+      "rule": "Past simple for finished actions at a stated or understood time in the past (yesterday, last week, in 2019); regular -ed, irregular forms.",
+      "good": [
+        "The clinic opened last week.",
+        "We did not hear the alarm."
+      ],
+      "wrong": "We have seen him yesterday."
+    },
+    "tenses.present_simple": {
+      "family": "tenses",
+      "displayName": "Present Simple",
+      "displayNameRu": "простое настоящее",
+      "since": "taxonomy-v1",
+      "inTaxonomy": true,
+      "status": "validated",
+      "rule": "Present simple for habits, facts and timetables; third person singular takes -s.",
+      "good": [
+        "The bus leaves at nine.",
+        "She works in a pharmacy."
+      ],
+      "wrong": "She work in a pharmacy."
+    },
+    "tenses.present_continuous": {
+      "family": "tenses",
+      "displayName": "Present Continuous",
+      "displayNameRu": "длительное настоящее",
+      "since": "taxonomy-v1",
+      "inTaxonomy": true,
+      "status": "validated",
+      "rule": "Present continuous (am/is/are + -ing) for actions happening now or temporary situations and fixed plans.",
+      "good": [
+        "They are repairing the road this week.",
+        "I am meeting my tutor tomorrow."
+      ],
+      "wrong": "They repair the road right now."
+    },
+    "tenses.past_continuous": {
+      "family": "tenses",
+      "displayName": "Past Continuous",
+      "displayNameRu": "длительное прошедшее",
+      "since": "taxonomy-v1",
+      "inTaxonomy": true,
+      "status": "validated",
+      "rule": "Past continuous (was/were + -ing) for an action in progress at a past moment or interrupted by a past simple action.",
+      "good": [
+        "I was driving when the phone rang.",
+        "They were waiting outside at six."
+      ],
+      "wrong": "I drove when the phone was ringing."
+    },
+    "tenses.present_perfect": {
+      "family": "tenses",
+      "displayName": "Present Perfect",
+      "displayNameRu": "настоящее совершённое",
+      "since": "taxonomy-v1",
+      "inTaxonomy": true,
+      "status": "validated",
+      "rule": "Present perfect (have/has + past participle) links past and present: experience, result now, unfinished time (for, since, ever, already, yet, just).",
+      "good": [
+        "I have lived here since 2019.",
+        "She has already sent the file."
+      ],
+      "wrong": "I live here since 2019."
+    },
+    "tenses.perfect_vs_past": {
+      "family": "tenses",
+      "displayName": "Present Perfect vs Past Simple",
+      "displayNameRu": "Present Perfect или Past Simple",
+      "since": "taxonomy-v1",
+      "inTaxonomy": true,
+      "status": "validated",
+      "rule": "Finished time word (yesterday, in 2020, last year) needs past simple; no stated finished time or unfinished period needs present perfect.",
+      "good": [
+        "She moved to Perth in 2020.",
+        "She has moved to Perth, so she is not here."
+      ],
+      "wrong": "She has moved to Perth in 2020."
+    },
+    "tenses.future_forms": {
+      "family": "tenses",
+      "displayName": "Future forms",
+      "displayNameRu": "формы будущего",
+      "since": "taxonomy-v1",
+      "inTaxonomy": true,
+      "status": "validated",
+      "rule": "will for decisions and predictions; going to for plans and evidence; present continuous for arrangements; present simple for timetables; no will after if/when/before in time clauses.",
+      "good": [
+        "I'll call you when I arrive.",
+        "We are going to repaint the office."
+      ],
+      "wrong": "I'll call you when I will arrive."
+    },
+    "tenses.past_perfect": {
+      "family": "tenses",
+      "displayName": "Past Perfect",
+      "displayNameRu": "предпрошедшее",
+      "since": "taxonomy-v1",
+      "inTaxonomy": true,
+      "status": "validated",
+      "rule": "Past perfect (had + past participle) for an action completed before another past action or time.",
+      "good": [
+        "When we arrived, the shop had closed.",
+        "She had never flown before that trip."
+      ],
+      "wrong": "When we arrived, the shop has closed."
+    },
+    "tenses.tense_sequence": {
+      "family": "tenses",
+      "displayName": "Sequence of tenses",
+      "displayNameRu": "согласование времён",
+      "since": "taxonomy-v1",
+      "inTaxonomy": true,
+      "status": "validated",
+      "rule": "Keep tenses consistent in a sentence/narrative; after a past main verb the other verb usually shifts back (said he was).",
+      "good": [
+        "She said she was tired.",
+        "He knew that the train had left."
+      ],
+      "wrong": "She said she is tired yesterday."
+    },
+    "tenses.habitual_used_to": {
+      "family": "tenses",
+      "displayName": "Used to / would for past habits",
+      "displayNameRu": "used to и would для прошлых привычек",
+      "since": "taxonomy-v1",
+      "inTaxonomy": true,
+      "status": "validated",
+      "rule": "used to + base verb for past habits/states that no longer hold; 'be used to + -ing' means accustomed.",
+      "good": [
+        "We used to walk to school.",
+        "He is used to working late."
+      ],
+      "wrong": "We used to walking to school."
+    },
+    "verb_patterns.stop_doing_vs_stop_to_do": {
+      "family": "verb_patterns",
+      "displayName": "stop doing vs stop to do",
+      "displayNameRu": "stop + -ing или stop + to",
+      "since": "taxonomy-v1",
+      "inTaxonomy": true,
+      "status": "validated",
+      "rule": "stop + -ing = quit the activity; stop + to-infinitive = pause in order to do something.",
+      "good": [
+        "He stopped smoking last year.",
+        "She stopped to read the sign."
+      ],
+      "wrong": "He stopped to smoke last year. (means pause in order to smoke)"
+    },
+    "verb_patterns.think_of_doing": {
+      "family": "verb_patterns",
+      "displayName": "think of / about + -ing",
+      "displayNameRu": "think of / about + -ing",
+      "since": "taxonomy-v1",
+      "inTaxonomy": true,
+      "status": "validated",
+      "rule": "think of/about + -ing (consider an idea); preposition + gerund.",
+      "good": [
+        "I'm thinking of changing jobs.",
+        "They thought about moving to Darwin."
+      ],
+      "wrong": "I'm thinking to change jobs."
+    },
+    "verb_patterns.would_rather": {
+      "family": "verb_patterns",
+      "displayName": "would rather + base verb",
+      "displayNameRu": "would rather + глагол без to",
+      "since": "taxonomy-v1",
+      "inTaxonomy": true,
+      "status": "validated",
+      "rule": "would rather + base verb (no to); 'would rather X than Y' also uses base verbs; would rather + past form for another person's action.",
+      "good": [
+        "I would rather stay home.",
+        "She'd rather walk than drive."
+      ],
+      "wrong": "I would rather to stay home."
+    },
+    "verb_patterns.enjoy_doing": {
+      "family": "verb_patterns",
+      "displayName": "Verbs followed by -ing",
+      "displayNameRu": "глаголы с -ing",
+      "since": "taxonomy-v1",
+      "inTaxonomy": true,
+      "status": "validated",
+      "rule": "enjoy, avoid, finish, mind, keep, practise + -ing form.",
+      "good": [
+        "She enjoys cooking for friends.",
+        "Would you mind closing the door?"
+      ],
+      "wrong": "She enjoys to cook."
+    },
+    "verb_patterns.want_to": {
+      "family": "verb_patterns",
+      "displayName": "Verbs followed by to + verb",
+      "displayNameRu": "глаголы с to + инфинитив",
+      "since": "taxonomy-v1",
+      "inTaxonomy": true,
+      "status": "validated",
+      "rule": "want, hope, decide, plan, need + to-infinitive; want someone to do (not 'want that').",
+      "good": [
+        "I want to book a table.",
+        "He wants us to arrive early."
+      ],
+      "wrong": "I want book a table. / He wants that we arrive early."
+    },
+    "verb_patterns.make_let_bare": {
+      "family": "verb_patterns",
+      "displayName": "make / let + base verb",
+      "displayNameRu": "make / let + глагол без to",
+      "since": "taxonomy-v1",
+      "inTaxonomy": true,
+      "status": "validated",
+      "rule": "make/let + object + bare infinitive (no to); be made to + infinitive in the passive; allow someone to.",
+      "good": [
+        "The manager let us leave early.",
+        "The film made me cry."
+      ],
+      "wrong": "The manager let us to leave early."
+    },
+    "verb_patterns.spend_time_doing": {
+      "family": "verb_patterns",
+      "displayName": "spend time + -ing",
+      "displayNameRu": "spend time + -ing",
+      "since": "taxonomy-v1",
+      "inTaxonomy": true,
+      "status": "validated",
+      "rule": "spend/waste time + -ing (no 'to'); it takes + time + to-infinitive.",
+      "good": [
+        "I spent an hour waiting for the bus.",
+        "It took two days to repair the car."
+      ],
+      "wrong": "I spent an hour to wait for the bus."
+    },
+    "verb_patterns.suggest_doing": {
+      "family": "verb_patterns",
+      "displayName": "suggest + -ing",
+      "displayNameRu": "suggest + -ing",
+      "since": "taxonomy-v1",
+      "inTaxonomy": true,
+      "status": "validated",
+      "rule": "suggest + -ing, or suggest (that) + subject + base verb; never 'suggest to do'.",
+      "good": [
+        "She suggested going by train.",
+        "He suggested that we leave now."
+      ],
+      "wrong": "She suggested to go by train."
+    },
+    "prepositions.listen_to": {
+      "family": "prepositions",
+      "displayName": "listen to",
+      "displayNameRu": "предлог после listen",
+      "since": "taxonomy-v1",
+      "inTaxonomy": true,
+      "status": "validated",
+      "rule": "listen TO something/someone (hear = no preposition).",
+      "good": [
+        "We listened to the announcement.",
+        "Please listen to me."
+      ],
+      "wrong": "We listened the announcement."
+    },
+    "prepositions.wait_for": {
+      "family": "prepositions",
+      "displayName": "wait for",
+      "displayNameRu": "предлог после wait",
+      "since": "taxonomy-v1",
+      "inTaxonomy": true,
+      "status": "validated",
+      "rule": "wait FOR something/someone; wait to do something.",
+      "good": [
+        "She is waiting for the bus.",
+        "I'm waiting to see the doctor."
+      ],
+      "wrong": "She is waiting the bus."
+    },
+    "prepositions.explain_to": {
+      "family": "prepositions",
+      "displayName": "explain to",
+      "displayNameRu": "предлог после explain",
+      "since": "taxonomy-v1",
+      "inTaxonomy": true,
+      "status": "validated",
+      "rule": "explain something TO someone; never 'explain someone something'.",
+      "good": [
+        "The tutor explained the rule to us.",
+        "Can you explain it to me?"
+      ],
+      "wrong": "The tutor explained us the rule."
+    },
+    "prepositions.depend_on": {
+      "family": "prepositions",
+      "displayName": "depend on",
+      "displayNameRu": "предлог после depend",
+      "since": "taxonomy-v1",
+      "inTaxonomy": true,
+      "status": "validated",
+      "rule": "depend ON (not 'of' or 'from'); it depends on whether/what/how.",
+      "good": [
+        "It depends on the weather.",
+        "Prices depend on demand."
+      ],
+      "wrong": "It depends of the weather."
+    },
+    "prepositions.interested_in": {
+      "family": "prepositions",
+      "displayName": "interested in",
+      "displayNameRu": "предлог после interested",
+      "since": "taxonomy-v1",
+      "inTaxonomy": true,
+      "status": "validated",
+      "rule": "interested IN; good at, afraid of, keen on, responsible for are fixed.",
+      "good": [
+        "She is interested in graphic design.",
+        "He is good at maths."
+      ],
+      "wrong": "She is interested on design."
+    },
+    "prepositions.time_at_on_in": {
+      "family": "prepositions",
+      "displayName": "Prepositions of time (at / on / in)",
+      "displayNameRu": "предлоги времени",
+      "since": "taxonomy-v1",
+      "inTaxonomy": true,
+      "status": "validated",
+      "rule": "at + clock time/point (at 5 pm, at night); on + days/dates (on Friday, on 3 May); in + months, years, seasons, parts of the day (in July, in 2024, in the morning).",
+      "good": [
+        "The meeting is at 3 pm on Tuesday.",
+        "We moved in March."
+      ],
+      "wrong": "The meeting is in Tuesday."
+    },
+    "prepositions.place_at_on_in": {
+      "family": "prepositions",
+      "displayName": "Prepositions of place (at / on / in)",
+      "displayNameRu": "предлоги места",
+      "since": "taxonomy-v1",
+      "inTaxonomy": true,
+      "status": "validated",
+      "rule": "at + point/address (at the station, at 12 Park Road); on + surface/street/floor (on the table, on level two); in + enclosed area/city (in the office, in Perth).",
+      "good": [
+        "She is at the bus stop.",
+        "The keys are on the desk."
+      ],
+      "wrong": "The keys are in the desk surface. / She lives at Perth."
+    },
+    "prepositions.movement": {
+      "family": "prepositions",
+      "displayName": "Prepositions of movement",
+      "displayNameRu": "предлоги движения",
+      "since": "taxonomy-v1",
+      "inTaxonomy": true,
+      "status": "validated",
+      "rule": "to = direction/destination (go to work); into/out of = entering/leaving; arrive AT a small place, IN a city/country; get on/off a bus/train, in/out of a car.",
+      "good": [
+        "We arrived at the airport at noon.",
+        "She got off the tram."
+      ],
+      "wrong": "We arrived to the airport."
+    },
+    "agreement.third_person": {
+      "family": "agreement",
+      "displayName": "Third person -s",
+      "displayNameRu": "окончание -s в 3-м лице",
+      "since": "taxonomy-v1",
+      "inTaxonomy": true,
+      "status": "validated",
+      "rule": "Present simple third person singular verb ends in -s/-es (he works, she watches, it has); do not add -s after I/you/we/they or modals.",
+      "good": [
+        "My brother works nights.",
+        "The system checks every file."
+      ],
+      "wrong": "My brother work nights. / She can swims."
+    },
+    "agreement.be_auxiliary": {
+      "family": "agreement",
+      "displayName": "Agreement with be",
+      "displayNameRu": "согласование с be",
+      "since": "taxonomy-v1",
+      "inTaxonomy": true,
+      "status": "validated",
+      "rule": "be agrees with the subject: I am, he/she/it is, you/we/they are; was/were in the past; plural subject joined by 'and' takes are.",
+      "good": [
+        "The tickets are on the table.",
+        "My sister and I were late."
+      ],
+      "wrong": "The tickets is on the table."
+    },
+    "agreement.do_auxiliary": {
+      "family": "agreement",
+      "displayName": "Agreement with do",
+      "displayNameRu": "согласование с do",
+      "since": "taxonomy-v1",
+      "inTaxonomy": true,
+      "status": "validated",
+      "rule": "do/does/did form questions and negatives: does for he/she/it, followed by the BASE verb (does she work, he doesn't know).",
+      "good": [
+        "Does she work on Saturdays?",
+        "They didn't receive the email."
+      ],
+      "wrong": "Does she works on Saturdays?"
+    },
+    "agreement.have_auxiliary": {
+      "family": "agreement",
+      "displayName": "Agreement with have",
+      "displayNameRu": "согласование с have",
+      "since": "taxonomy-v1",
+      "inTaxonomy": true,
+      "status": "validated",
+      "rule": "have/has/had + past participle; has for he/she/it; have for I/you/we/they.",
+      "good": [
+        "She has finished the report.",
+        "They have already left."
+      ],
+      "wrong": "She have finished the report."
+    },
+    "agreement.collective_nouns": {
+      "family": "agreement",
+      "displayName": "Collective nouns",
+      "displayNameRu": "собирательные существительные",
+      "since": "taxonomy-v1",
+      "inTaxonomy": true,
+      "status": "validated",
+      "rule": "Collective nouns (team, committee, group, staff, family) take a singular verb when seen as one unit and may take a plural verb in British/Australian usage when seen as individuals; police, people, staff(plural) take plural verbs.",
+      "good": [
+        "The committee has approved the plan.",
+        "The police are investigating."
+      ],
+      "wrong": "The police is investigating."
+    },
+    "questions.direct_auxiliary": {
+      "family": "questions",
+      "displayName": "Direct questions with auxiliaries",
+      "displayNameRu": "прямые вопросы со вспомогательными",
+      "since": "taxonomy-v1",
+      "inTaxonomy": true,
+      "status": "validated",
+      "rule": "Direct question: wh-word + auxiliary + subject + verb (Where did you park?); no auxiliary when the wh-word is the subject.",
+      "good": [
+        "Where did you park?",
+        "What time does the shop close?"
+      ],
+      "wrong": "Where you parked?"
+    },
+    "questions.embedded_order": {
+      "family": "questions",
+      "displayName": "Word order in embedded questions",
+      "displayNameRu": "порядок слов во вложенных вопросах",
+      "since": "taxonomy-v1",
+      "inTaxonomy": true,
+      "status": "validated",
+      "rule": "Embedded question after 'Could you tell me / I wonder / Do you know' uses statement word order and no do-support.",
+      "good": [
+        "Could you tell me where the station is?",
+        "I wonder what time it starts."
+      ],
+      "wrong": "Could you tell me where is the station?"
+    },
+    "questions.embedded_whether": {
+      "family": "questions",
+      "displayName": "Embedded questions with if / whether",
+      "displayNameRu": "вложенные вопросы с if / whether",
+      "since": "taxonomy-v1",
+      "inTaxonomy": true,
+      "status": "validated",
+      "rule": "Yes/no embedded questions use if/whether + statement order.",
+      "good": [
+        "Do you know whether the bank is open?",
+        "I wonder if she has called."
+      ],
+      "wrong": "Do you know is the bank open?"
+    },
+    "questions.subject_questions": {
+      "family": "questions",
+      "displayName": "Subject questions",
+      "displayNameRu": "вопросы к подлежащему",
+      "since": "taxonomy-v1",
+      "inTaxonomy": true,
+      "status": "validated",
+      "rule": "When the question word is the subject, no auxiliary and the verb agrees: Who called? What happened?",
+      "good": [
+        "Who called you yesterday?",
+        "Which team won?"
+      ],
+      "wrong": "Who did call you yesterday?"
+    },
+    "questions.question_tags": {
+      "family": "questions",
+      "displayName": "Question tags",
+      "displayNameRu": "разделительные вопросы",
+      "since": "taxonomy-v1",
+      "inTaxonomy": true,
+      "status": "validated",
+      "rule": "Question tag: opposite polarity, same auxiliary, pronoun subject (She works here, doesn't she? / They aren't late, are they?).",
+      "good": [
+        "It's cold today, isn't it?",
+        "You didn't call, did you?"
+      ],
+      "wrong": "It's cold today, is it? (positive + positive)"
+    },
+    "modals.ability": {
+      "family": "modals",
+      "displayName": "Modals of ability",
+      "displayNameRu": "модальные глаголы способности",
+      "since": "taxonomy-v1",
+      "inTaxonomy": true,
+      "status": "validated",
+      "rule": "can/could + base verb for ability; be able to for specific past achievements or other tenses; no -s and no to after can.",
+      "good": [
+        "She can speak three languages.",
+        "We were able to fix it."
+      ],
+      "wrong": "She can to speak three languages."
+    },
+    "modals.obligation": {
+      "family": "modals",
+      "displayName": "Modals of obligation",
+      "displayNameRu": "модальные глаголы долженствования",
+      "since": "taxonomy-v1",
+      "inTaxonomy": true,
+      "status": "validated",
+      "rule": "must/have to = obligation; mustn't = prohibited; don't have to = not necessary; need to.",
+      "good": [
+        "You must wear a helmet.",
+        "We don't have to pay."
+      ],
+      "wrong": "You mustn't to wear a helmet. / You don't must"
+    },
+    "modals.advice": {
+      "family": "modals",
+      "displayName": "Modals of advice",
+      "displayNameRu": "модальные глаголы совета",
+      "since": "taxonomy-v1",
+      "inTaxonomy": true,
+      "status": "validated",
+      "rule": "should/ought to/had better + base verb to give advice; 'if I were you, I would'.",
+      "good": [
+        "You should see a doctor.",
+        "You had better leave now."
+      ],
+      "wrong": "You should to see a doctor."
+    },
+    "modals.deduction": {
+      "family": "modals",
+      "displayName": "Modals of deduction",
+      "displayNameRu": "модальные глаголы предположения",
+      "since": "taxonomy-v1",
+      "inTaxonomy": true,
+      "status": "validated",
+      "rule": "must be (sure), might/may/could be (possible), can't be (impossible); past: must/might/can't + have + past participle.",
+      "good": [
+        "She must be at work.",
+        "He can't have seen the message."
+      ],
+      "wrong": "She must to be at work."
+    },
+    "modals.polite_requests": {
+      "family": "modals",
+      "displayName": "Polite requests with modals",
+      "displayNameRu": "вежливые просьбы с модальными",
+      "since": "taxonomy-v1",
+      "inTaxonomy": true,
+      "status": "validated",
+      "rule": "Could/Would/Might for polite requests (Could you open the window?); May I/Could I for permission; avoid bare 'Give me'.",
+      "good": [
+        "Could you send me the file?",
+        "May I use your phone?"
+      ],
+      "wrong": "Can you to send me the file?"
+    },
+    "conditionals.zero": {
+      "family": "conditionals",
+      "displayName": "Zero conditional",
+      "displayNameRu": "нулевое условное",
+      "since": "taxonomy-v1",
+      "inTaxonomy": true,
+      "status": "validated",
+      "rule": "Zero conditional: if + present simple, present simple. General truths and rules.",
+      "good": [
+        "If you heat ice, it melts.",
+        "If the alarm sounds, everyone leaves the building."
+      ],
+      "wrong": "If you heat ice, it will melt always."
+    },
+    "conditionals.first": {
+      "family": "conditionals",
+      "displayName": "First conditional",
+      "displayNameRu": "условное 1-го типа",
+      "since": "taxonomy-v1",
+      "inTaxonomy": true,
+      "status": "validated",
+      "rule": "First conditional: if + present simple, will + base verb. Real future possibility. Never will after if.",
+      "good": [
+        "If it rains, we will stay inside.",
+        "If you finish early, I'll drive you home."
+      ],
+      "wrong": "If it will rain, we stay inside."
+    },
+    "conditionals.second": {
+      "family": "conditionals",
+      "displayName": "Second conditional",
+      "displayNameRu": "условное 2-го типа",
+      "since": "taxonomy-v1",
+      "inTaxonomy": true,
+      "status": "validated",
+      "rule": "Second conditional: if + past simple, would + base verb. Unreal or unlikely present/future; 'were' for all persons in formal use.",
+      "good": [
+        "If I had more time, I would learn French.",
+        "If she were here, she would help."
+      ],
+      "wrong": "If I would have more time, I would learn French."
+    },
+    "conditionals.third": {
+      "family": "conditionals",
+      "displayName": "Third conditional",
+      "displayNameRu": "условное 3-го типа",
+      "since": "taxonomy-v1",
+      "inTaxonomy": true,
+      "status": "validated",
+      "rule": "Third conditional: if + past perfect, would have + past participle. Unreal past.",
+      "good": [
+        "If we had left earlier, we would have caught the train.",
+        "She wouldn't have failed if she had studied."
+      ],
+      "wrong": "If we would have left earlier, we would have caught the train."
+    },
+    "conditionals.mixed": {
+      "family": "conditionals",
+      "displayName": "Mixed conditionals",
+      "displayNameRu": "смешанные условные",
+      "since": "taxonomy-v1",
+      "inTaxonomy": true,
+      "status": "validated",
+      "rule": "Mixed conditional: if + past perfect, would + base verb (past cause, present result), or if + past simple, would have + participle (present state, past result).",
+      "good": [
+        "If I had taken that job, I would be living in Sydney now.",
+        "If she were more careful, she wouldn't have broken it."
+      ],
+      "wrong": "If I would have taken that job, I would live in Sydney now."
+    },
+    "passive.present": {
+      "family": "passive",
+      "displayName": "Passive: present",
+      "displayNameRu": "пассив в настоящем",
+      "since": "taxonomy-v1",
+      "inTaxonomy": true,
+      "status": "validated",
+      "rule": "Present passive: am/is/are + past participle (The files are checked daily).",
+      "good": [
+        "The reports are printed every Friday.",
+        "English is spoken here."
+      ],
+      "wrong": "The reports print every Friday. (when the reports are the receivers)"
+    },
+    "passive.past": {
+      "family": "passive",
+      "displayName": "Passive: past",
+      "displayNameRu": "пассив в прошедшем",
+      "since": "taxonomy-v1",
+      "inTaxonomy": true,
+      "status": "validated",
+      "rule": "Past passive: was/were + past participle; by + agent only when important.",
+      "good": [
+        "The bridge was built in 1932.",
+        "The parcels were delivered late."
+      ],
+      "wrong": "The bridge built in 1932."
+    },
+    "passive.perfect": {
+      "family": "passive",
+      "displayName": "Passive: perfect",
+      "displayNameRu": "пассив в перфекте",
+      "since": "taxonomy-v1",
+      "inTaxonomy": true,
+      "status": "validated",
+      "rule": "Perfect passive: has/have been + past participle; modal passive: will/must be + participle.",
+      "good": [
+        "The report has been sent.",
+        "Your order will be delivered tomorrow."
+      ],
+      "wrong": "The report has sent. / has been send"
+    },
+    "reported_speech.statements": {
+      "family": "reported_speech",
+      "displayName": "Reported statements",
+      "displayNameRu": "косвенная речь: утверждения",
+      "since": "taxonomy-v1",
+      "inTaxonomy": true,
+      "status": "validated",
+      "rule": "Reported statements: tell someone / say (that); verbs shift back (am → was, will → would, can → could) after a past reporting verb; pronouns change.",
+      "good": [
+        "She said that she was tired.",
+        "He told me he would call later."
+      ],
+      "wrong": "He told that he would call later. / He said me"
+    },
+    "reported_speech.questions": {
+      "family": "reported_speech",
+      "displayName": "Reported questions",
+      "displayNameRu": "косвенная речь: вопросы",
+      "since": "taxonomy-v1",
+      "inTaxonomy": true,
+      "status": "validated",
+      "rule": "Reported questions use statement order, no do-support, if/whether for yes/no, and no question mark.",
+      "good": [
+        "She asked where I had parked.",
+        "He asked if I wanted coffee."
+      ],
+      "wrong": "She asked where had I parked."
+    },
+    "reported_speech.time_reference": {
+      "family": "reported_speech",
+      "displayName": "Time references in reported speech",
+      "displayNameRu": "время и место в косвенной речи",
+      "since": "taxonomy-v1",
+      "inTaxonomy": true,
+      "status": "validated",
+      "rule": "Time words change when reporting later: today → that day, yesterday → the day before, tomorrow → the next day, now → then, here → there.",
+      "good": [
+        "She said she would call the next day.",
+        "He said he had seen it the day before."
+      ],
+      "wrong": "She said on Monday she would call tomorrow. (reported later)"
+    },
+    "relatives.defining": {
+      "family": "relatives",
+      "displayName": "Defining relative clauses",
+      "displayNameRu": "определительные придаточные",
+      "since": "taxonomy-v1",
+      "inTaxonomy": true,
+      "status": "validated",
+      "rule": "Defining relative clause identifies the noun and has NO commas; who/that for people, which/that for things; the pronoun can be dropped when it is the object.",
+      "good": [
+        "The man who called is my uncle.",
+        "The report that I wrote is ready."
+      ],
+      "wrong": "The man, who called, is my uncle. (commas change the meaning)"
+    },
+    "relatives.nondefining": {
+      "family": "relatives",
+      "displayName": "Non-defining relative clauses",
+      "displayNameRu": "неопределительные придаточные",
+      "since": "taxonomy-v1",
+      "inTaxonomy": true,
+      "status": "validated",
+      "rule": "Non-defining relative clause adds extra information, is set off by commas, uses who/which (never that) and cannot drop the pronoun.",
+      "good": [
+        "My manager, who lives in Perth, is retiring.",
+        "The report, which was late, is finished."
+      ],
+      "wrong": "My manager, that lives in Perth, is retiring."
+    },
+    "relatives.relative_pronouns": {
+      "family": "relatives",
+      "displayName": "Relative pronouns",
+      "displayNameRu": "относительные местоимения",
+      "since": "taxonomy-v1",
+      "inTaxonomy": true,
+      "status": "validated",
+      "rule": "who = people, which = things, whose = possession, where = place, when = time; do not repeat the subject after the clause (the man who he called).",
+      "good": [
+        "The woman whose car broke down called us.",
+        "That is the shop where I work."
+      ],
+      "wrong": "The woman who her car broke down called us."
+    },
+    "word_order.adverbs": {
+      "family": "word_order",
+      "displayName": "Position of adverbs",
+      "displayNameRu": "место наречий",
+      "since": "taxonomy-v1",
+      "inTaxonomy": true,
+      "status": "validated",
+      "rule": "Frequency adverbs go before the main verb and after be (she always arrives early; he is often late); place and time go after the object; not between verb and object.",
+      "good": [
+        "She always arrives early.",
+        "I read the report quickly."
+      ],
+      "wrong": "I read quickly the report."
+    },
+    "word_order.negation": {
+      "family": "word_order",
+      "displayName": "Word order in negatives",
+      "displayNameRu": "порядок слов в отрицаниях",
+      "since": "taxonomy-v1",
+      "inTaxonomy": true,
+      "status": "validated",
+      "rule": "Negatives: not after the auxiliary/be; do-support for present/past simple (She does not work); never two negatives for one meaning.",
+      "good": [
+        "They didn't see anyone.",
+        "He has not replied."
+      ],
+      "wrong": "They didn't see nobody."
+    },
+    "word_order.adjective_order": {
+      "family": "word_order",
+      "displayName": "Order of adjectives",
+      "displayNameRu": "порядок прилагательных",
+      "since": "taxonomy-v1",
+      "inTaxonomy": true,
+      "status": "validated",
+      "rule": "Adjective order: opinion, size, age, shape, colour, origin, material, purpose + noun (a lovely small old round red Italian leather bag).",
+      "good": [
+        "She wore a beautiful long red dress.",
+        "He owns a small old wooden boat."
+      ],
+      "wrong": "She wore a red long beautiful dress."
+    },
+    "pronouns.subject_object": {
+      "family": "pronouns",
+      "displayName": "Subject and object pronouns",
+      "displayNameRu": "личные местоимения: субъект и объект",
+      "since": "taxonomy-v1",
+      "inTaxonomy": true,
+      "status": "validated",
+      "rule": "Subject pronouns (I, he, she, we, they) before verbs; object pronouns (me, him, her, us, them) after verbs/prepositions; 'between you and me'.",
+      "good": [
+        "She gave him the keys.",
+        "They invited my wife and me."
+      ],
+      "wrong": "Her gave he the keys."
+    },
+    "pronouns.reflexives": {
+      "family": "pronouns",
+      "displayName": "Reflexive pronouns",
+      "displayNameRu": "возвратные местоимения",
+      "since": "taxonomy-v1",
+      "inTaxonomy": true,
+      "status": "validated",
+      "rule": "Reflexive (myself, themselves) when subject and object are the same person; not after verbs like relax, wash (usually), feel; each other for mutual action.",
+      "good": [
+        "He cut himself while cooking.",
+        "They help each other."
+      ],
+      "wrong": "He cut him while cooking."
+    },
+    "pronouns.demonstratives": {
+      "family": "pronouns",
+      "displayName": "this / that / these / those",
+      "displayNameRu": "указательные местоимения",
+      "since": "taxonomy-v1",
+      "inTaxonomy": true,
+      "status": "validated",
+      "rule": "this/these = near; that/those = far; they agree in number with the noun (this chair, these chairs).",
+      "good": [
+        "These shoes are comfortable.",
+        "Look at that building over there."
+      ],
+      "wrong": "These shoe are comfortable."
+    },
+    "collocations.make_do": {
+      "family": "collocations",
+      "displayName": "make vs do",
+      "displayNameRu": "make или do",
+      "since": "taxonomy-v1",
+      "inTaxonomy": true,
+      "status": "validated",
+      "rule": "make = create/produce (make a decision, make progress, make a mistake, make an effort); do = tasks/activities (do homework, do the dishes, do business, do research).",
+      "good": [
+        "We need to make a decision.",
+        "She does the accounts on Fridays."
+      ],
+      "wrong": "We need to do a decision. / make homework"
+    },
+    "collocations.job_and_work": {
+      "family": "collocations",
+      "displayName": "job vs work",
+      "displayNameRu": "job или work",
+      "since": "taxonomy-v1",
+      "inTaxonomy": true,
+      "status": "validated",
+      "rule": "work = activity/uncountable (a lot of work, at work); job = a position, countable (a new job). Fixed: find a job, apply for a job, do a job, have a day off.",
+      "good": [
+        "She has a demanding job.",
+        "I have a lot of work today."
+      ],
+      "wrong": "She has a demanding work. / I have many works today."
+    },
+    "collocations.natural_phrases": {
+      "family": "collocations",
+      "displayName": "Natural collocations",
+      "displayNameRu": "естественные сочетания слов",
+      "since": "taxonomy-v1",
+      "inTaxonomy": true,
+      "status": "validated",
+      "rule": "Words that naturally go together: heavy rain (not strong rain), take a break, catch a cold, pay attention, run a business, strong coffee, make an appointment.",
+      "good": [
+        "We took a short break.",
+        "She pays close attention to detail."
+      ],
+      "wrong": "We made a short break. / strong rain"
+    },
+    "register.politeness": {
+      "family": "register",
+      "displayName": "Politeness",
+      "displayNameRu": "вежливость",
+      "since": "taxonomy-v1",
+      "inTaxonomy": true,
+      "status": "validated",
+      "rule": "Soften requests and refusals: could/would, 'I was wondering if', 'Would you mind', 'I'm afraid'; avoid blunt imperatives with strangers.",
+      "good": [
+        "Would you mind turning the music down?",
+        "I'm afraid we're fully booked."
+      ],
+      "wrong": "Turn the music down. (to a neighbour you do not know)"
+    },
+    "register.formal_informal": {
+      "family": "register",
+      "displayName": "Formal and informal register",
+      "displayNameRu": "формальный и неформальный стиль",
+      "since": "taxonomy-v1",
+      "inTaxonomy": true,
+      "status": "validated",
+      "rule": "Match formality to the situation: contractions and phrasal verbs are informal; 'regarding', 'I would be grateful' are formal.",
+      "good": [
+        "I am writing to enquire about the position.",
+        "Thanks for getting back to me so fast."
+      ],
+      "wrong": "Hey, gimme the documents ASAP. (in a formal email)"
+    },
+    "register.dialect_variants": {
+      "family": "register",
+      "displayName": "Dialect variants",
+      "displayNameRu": "диалектные варианты",
+      "since": "taxonomy-v1",
+      "inTaxonomy": true,
+      "status": "validated",
+      "rule": "Standard Australian/British forms are correct: -our/-ise spelling (colour, organise), 'the team are', 'have got', 'at the weekend'/'on the weekend' (AU), 'will'/'shall'. Do not mark them as errors.",
+      "good": [
+        "We organise the centre's events.",
+        "The committee are meeting today."
+      ],
+      "wrong": "(Standard variants are not errors: do not create items that punish them.)"
+    },
+    "linking.contrast": {
+      "family": "linking",
+      "displayName": "Linking: contrast",
+      "displayNameRu": "связки: противопоставление",
+      "since": "taxonomy-v1",
+      "inTaxonomy": true,
+      "status": "validated",
+      "rule": "but / however / although / while / whereas show contrast; 'although' + clause (not 'although but'); however needs punctuation.",
+      "good": [
+        "The room was small, but it was clean.",
+        "Although it rained, we went out."
+      ],
+      "wrong": "Although it rained, but we went out."
+    },
+    "linking.cause": {
+      "family": "linking",
+      "displayName": "Linking: cause and result",
+      "displayNameRu": "связки: причина и следствие",
+      "since": "taxonomy-v1",
+      "inTaxonomy": true,
+      "status": "validated",
+      "rule": "because + clause; because of / due to + noun; so/therefore for result; as and since for given reasons.",
+      "good": [
+        "The flight was delayed because of fog.",
+        "We left early because the road was closed."
+      ],
+      "wrong": "The flight was delayed because fog."
+    },
+    "linking.concession": {
+      "family": "linking",
+      "displayName": "Linking: concession",
+      "displayNameRu": "связки: уступка",
+      "since": "taxonomy-v1",
+      "inTaxonomy": true,
+      "status": "validated",
+      "rule": "despite / in spite of + noun or -ing (never 'despite of'); even though + clause; nevertheless/still.",
+      "good": [
+        "Despite the rain, the match went ahead.",
+        "Even though he was tired, he kept working."
+      ],
+      "wrong": "Despite of the rain, the match went ahead."
+    },
+    "verb_forms.resultant_states": {
+      "family": "verb_forms",
+      "displayName": "Resultant states: be gone / finished",
+      "displayNameRu": "результативные состояния: be gone / finished",
+      "since": "taxonomy-v2",
+      "inTaxonomy": true,
+      "status": "validated",
+      "rule": "Be + an established participial adjective can describe a present state: be gone (absent), be finished (done). Do not generalise be to all motion verbs. Contrast has gone (present perfect, departure with present relevance); she has gone for her break is natural. Do not treat both forms as interchangeable in every context.",
+      "good": [
+        "The guests are gone.",
+        "Are you finished with the report?"
+      ],
+      "wrong": "He is left for work. (use has left)"
+    },
+    "subjunctive.present_wishes": {
+      "family": "subjunctive",
+      "displayName": "Wishes about the present",
+      "displayNameRu": "желания о настоящем",
+      "since": "taxonomy-v2",
+      "inTaxonomy": true,
+      "status": "validated",
+      "rule": "Wish + past form expresses a present situation one wants to be different. After I/he/she/it both was and were are grammatical; were is more formal. Accept both when context permits. Distinguish wishes about the past (past perfect).",
+      "good": [
+        "I wish I knew the answer.",
+        "I wish she was here.",
+        "I wish she were here."
+      ],
+      "wrong": "I wish I know the answer. (present unreal wish)"
+    },
+    "tenses.present_perfect_continuous": {
+      "family": "tenses",
+      "displayName": "Present Perfect Continuous",
+      "displayNameRu": "настоящее совершённо-длительное",
+      "since": "skill-cards-v3",
+      "inTaxonomy": false,
+      "status": "validated",
+      "rule": "Present perfect continuous (have/has been + -ing) for an action that started in the past and is still going on or has just stopped with a visible result; often with for and since.",
+      "good": [
+        "I have been waiting for twenty minutes.",
+        "Her eyes are red because she has been crying."
+      ],
+      "wrong": "I am waiting here since noon. (use have been waiting)"
+    },
+    "tenses.past_perfect_continuous": {
+      "family": "tenses",
+      "displayName": "Past Perfect Continuous",
+      "displayNameRu": "прошедшее совершённо-длительное",
+      "since": "skill-cards-v3",
+      "inTaxonomy": false,
+      "status": "validated",
+      "rule": "Past perfect continuous (had been + -ing) for an action that had been going on up to a point in the past, or that explains a past result.",
+      "good": [
+        "They had been walking for hours when it started to rain.",
+        "He was tired because he had been working all night."
+      ],
+      "wrong": "He was tired because he was working all night before. (use had been working)"
+    },
+    "tenses.future_continuous": {
+      "family": "tenses",
+      "displayName": "Future Continuous",
+      "displayNameRu": "будущее длительное",
+      "since": "skill-cards-v3",
+      "inTaxonomy": false,
+      "status": "validated",
+      "rule": "Future continuous (will be + -ing) for an action in progress at a stated future time, or for a polite question about plans.",
+      "good": [
+        "This time tomorrow I will be flying to Perth.",
+        "Will you be using the car tonight?"
+      ],
+      "wrong": "This time tomorrow I will be fly to Perth. (use will be flying)"
+    },
+    "tenses.future_perfect": {
+      "family": "tenses",
+      "displayName": "Future Perfect",
+      "displayNameRu": "будущее совершённое",
+      "since": "skill-cards-v3",
+      "inTaxonomy": false,
+      "status": "validated",
+      "rule": "Future perfect (will have + past participle) for an action that will be finished before a stated future time; often with by or before.",
+      "good": [
+        "By Friday I will have finished the report.",
+        "They will have left before you arrive."
+      ],
+      "wrong": "By Friday I will finished the report. (use will have finished)"
+    },
+    "tenses.future_perfect_continuous": {
+      "family": "tenses",
+      "displayName": "Future Perfect Continuous",
+      "displayNameRu": "будущее совершённо-длительное",
+      "since": "skill-cards-v3",
+      "inTaxonomy": false,
+      "status": "validated",
+      "rule": "Future perfect continuous (will have been + -ing) for how long an action will have been going on by a future time.",
+      "good": [
+        "By June she will have been teaching for ten years.",
+        "At five o'clock we will have been driving for six hours."
+      ],
+      "wrong": "By June she will teach for ten years. (use will have been teaching)"
+    },
+    "tenses.future_in_the_past": {
+      "family": "tenses",
+      "displayName": "Future in the Past",
+      "displayNameRu": "будущее в прошедшем",
+      "since": "skill-cards-v3",
+      "inTaxonomy": false,
+      "status": "validated",
+      "rule": "Future in the past (would, was going to, would be -ing, would have + participle) describes what was still in the future from a past point of view, usually in reported or narrative contexts.",
+      "good": [
+        "She said she would call me after the meeting.",
+        "I knew we were going to be late."
+      ],
+      "wrong": "She said she will call me after the meeting. (use would call)"
+    },
+    "comparisons.comparatives": {
+      "family": "comparisons",
+      "displayName": "Comparatives",
+      "displayNameRu": "сравнительная степень",
+      "since": "skill-cards-v3",
+      "inTaxonomy": false,
+      "status": "validated",
+      "rule": "Add -er to short adjectives, use more/less before long ones, and than for the second item. Irregular: better, worse, further.",
+      "good": [
+        "This route is shorter than the old one.",
+        "The new phone is more expensive than mine."
+      ],
+      "wrong": "This route is more short than the old one. (use shorter)"
+    },
+    "comparisons.superlatives": {
+      "family": "comparisons",
+      "displayName": "Superlatives",
+      "displayNameRu": "превосходная степень",
+      "since": "skill-cards-v3",
+      "inTaxonomy": false,
+      "status": "validated",
+      "rule": "Use the + -est or the most/least before an adjective to show the highest or lowest degree in a group; irregular: the best, the worst.",
+      "good": [
+        "It was the coldest night of the year.",
+        "She is the most patient teacher I know."
+      ],
+      "wrong": "It was the most cold night of the year. (use the coldest)"
+    },
+    "comparisons.as_as": {
+      "family": "comparisons",
+      "displayName": "As ... as comparisons",
+      "displayNameRu": "сравнение as ... as",
+      "since": "skill-cards-v3",
+      "inTaxonomy": false,
+      "status": "validated",
+      "rule": "as + adjective/adverb + as shows that two things are equal; not as ... as shows a lower degree.",
+      "good": [
+        "He is as tall as his father.",
+        "The test was not as hard as I expected."
+      ],
+      "wrong": "He is as taller as his father. (use as tall as)"
+    },
+    "possessives.possessive_s": {
+      "family": "possessives",
+      "displayName": "Possessive 's",
+      "displayNameRu": "притяжательный падеж 's",
+      "since": "skill-cards-v3",
+      "inTaxonomy": false,
+      "status": "validated",
+      "rule": "Add 's to a singular noun and ' to a regular plural to show ownership; irregular plurals take 's (children's).",
+      "good": [
+        "That is my sister's bike.",
+        "The teachers' room is upstairs."
+      ],
+      "wrong": "That is my sisters bike. (use my sister's bike)"
+    },
+    "possessives.determiners_pronouns": {
+      "family": "possessives",
+      "displayName": "Possessive determiners and pronouns",
+      "displayNameRu": "притяжательные местоимения",
+      "since": "skill-cards-v3",
+      "inTaxonomy": false,
+      "status": "validated",
+      "rule": "Before a noun use my, your, his, her, our, their, whose; without a noun use mine, yours, his, hers, ours, theirs.",
+      "good": [
+        "Is this your jacket? No, mine is blue.",
+        "Whose bag is this?"
+      ],
+      "wrong": "Is this you jacket? (use your)"
+    },
+    "verb_patterns.gerund_or_infinitive": {
+      "family": "verb_patterns",
+      "displayName": "Gerund or infinitive after a verb",
+      "displayNameRu": "герундий или инфинитив после глагола",
+      "since": "skill-cards-v3",
+      "inTaxonomy": false,
+      "status": "validated",
+      "rule": "Some verbs take -ing (avoid, finish, mind, keep), some take to + verb (decide, afford, refuse, manage); learn each verb's pattern.",
+      "good": [
+        "She avoided answering the question.",
+        "We decided to leave early."
+      ],
+      "wrong": "She avoided to answer the question. (use answering)"
+    },
+    "questions.wh_words": {
+      "family": "questions",
+      "displayName": "Question words",
+      "displayNameRu": "вопросительные слова",
+      "since": "skill-cards-v3",
+      "inTaxonomy": false,
+      "status": "validated",
+      "rule": "Choose the question word that asks for the missing information: who (person), what (thing), where (place), when (time), why (reason), how (manner), which (choice), whose (owner).",
+      "good": [
+        "Where did you leave your keys?",
+        "Why was the flight delayed?"
+      ],
+      "wrong": "What did you leave your keys? (use where)"
+    },
+    "passive.future_modal": {
+      "family": "passive",
+      "displayName": "Passive with will and modals",
+      "displayNameRu": "пассив с will и модальными",
+      "since": "skill-cards-v3",
+      "inTaxonomy": false,
+      "status": "validated",
+      "rule": "Use will/can/must/should + be + past participle for passive meaning about the future or with modals.",
+      "good": [
+        "The results will be announced on Monday.",
+        "The form must be signed by a parent."
+      ],
+      "wrong": "The results will announce on Monday. (use will be announced)"
+    },
+    "passive.continuous": {
+      "family": "passive",
+      "displayName": "Passive continuous",
+      "displayNameRu": "пассив в длительном времени",
+      "since": "skill-cards-v3",
+      "inTaxonomy": false,
+      "status": "validated",
+      "rule": "Use am/is/are/was/were + being + past participle for an action in progress when the doer is unimportant.",
+      "good": [
+        "The road is being repaired this week.",
+        "The cake was being baked when I arrived."
+      ],
+      "wrong": "The road is repairing this week. (use is being repaired)"
+    },
+    "modals.permission": {
+      "family": "modals",
+      "displayName": "Permission with modals",
+      "displayNameRu": "разрешение с модальными",
+      "since": "skill-cards-v3",
+      "inTaxonomy": false,
+      "status": "validated",
+      "rule": "Use can, could and may to ask for or give permission; may is more formal.",
+      "good": [
+        "May I use your phone?",
+        "You can park here after six."
+      ],
+      "wrong": "May I to use your phone? (use may I use)"
+    },
+    "modals.possibility": {
+      "family": "modals",
+      "displayName": "Possibility with modals",
+      "displayNameRu": "возможность с модальными",
+      "since": "skill-cards-v3",
+      "inTaxonomy": false,
+      "status": "validated",
+      "rule": "may, might and could express a present or future possibility; may/might have + participle for a possibility in the past.",
+      "good": [
+        "It might rain this afternoon.",
+        "She may have missed the bus."
+      ],
+      "wrong": "It might to rain this afternoon. (use might rain)"
+    }
+  }
+}

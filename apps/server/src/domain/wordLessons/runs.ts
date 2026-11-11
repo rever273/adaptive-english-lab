@@ -1,6 +1,7 @@
 import { randomInt } from "node:crypto";
 import { WORD_LESSON_STAGES, type WordLessonAttemptView, type WordLessonEventKind, type WordLessonFeedback, type WordLessonItemState, type WordLessonListResponse, type WordLessonRunState, type WordLessonTaskView, type WordLessonVerdictKind } from "@english-lab/contracts";
 import type { Db } from "../../db/open.js";
+import { awardModeXp, XP_WORD_LESSON } from "../sessions/modeXp.js";
 import { ApiError } from "../../errors.js";
 import { enqueue } from "../../queue/jobs.js";
 import { getEntry } from "../vocabulary/repository.js";
@@ -340,6 +341,8 @@ export function completeRun(db: Db, deps: RunDeps, runId: string): { score: numb
       const result = scoreRun(evidenceOf(db, run));
       const stages = result.stages.map((s) => ({ ...s, title: WORD_LESSON_STAGES[s.stage - 1]!.title }));
       db.prepare("UPDATE word_lesson_runs SET status = 'completed', completed_at = ?, score = ?, score_version = ?, score_json = ? WHERE id = ? AND status = 'active'").run(deps.now().toISOString(), result.score, result.version, JSON.stringify({ ...result, stages, activeMs: activeMsOf(db, runId) }), runId);
+      const xp = Math.round((result.score / 100) * XP_WORD_LESSON);
+      if (xp > 0) awardModeXp(db, { id: deps.newId(), source: "wordLesson", sourceId: runId, amount: xp, at: deps.now().toISOString() });
       return { score: result.score };
     })
     .immediate();

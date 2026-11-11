@@ -1,6 +1,8 @@
+import { randomUUID } from "node:crypto";
 import type { Db } from "../../db/open.js";
 import { ApiError } from "../../errors.js";
 import { enqueue } from "../../queue/jobs.js";
+import { awardModeXp, XP_CONVERSATION_ANSWER } from "../sessions/modeXp.js";
 
 export interface ConversationDeps { now: () => Date; newId: () => string }
 
@@ -21,7 +23,7 @@ function accrue(db: Db, id: string, now: string): void {
   const elapsed = s.status === "active" && s.heartbeat_at ? Math.max(0, Math.min(15000, Date.parse(now) - Date.parse(s.heartbeat_at))) : 0;
   if (elapsed) {
     const end = Date.parse(now), start = end - elapsed;
-    const overlaps = db.prepare(`SELECT start_ms AS startMs,end_ms AS endMs FROM practice_activity_intervals WHERE start_ms < ? AND end_ms > ? UNION ALL SELECT start_ms,end_ms FROM journey_typing_intervals WHERE start_ms < ? AND end_ms > ? UNION ALL SELECT start_ms,end_ms FROM word_lesson_activity_intervals WHERE start_ms < ? AND end_ms > ? UNION ALL SELECT start_ms,end_ms FROM conversation_activity_intervals WHERE start_ms < ? AND end_ms > ? ORDER BY startMs`).all(end,start,end,start,end,start,end,start) as Array<{startMs:number;endMs:number}>;
+    const overlaps = db.prepare(`SELECT start_ms AS startMs,end_ms AS endMs FROM practice_activity_intervals WHERE start_ms < ? AND end_ms > ? UNION ALL SELECT start_ms,end_ms FROM journey_typing_intervals WHERE start_ms < ? AND end_ms > ? UNION ALL SELECT start_ms,end_ms FROM word_lesson_activity_intervals WHERE start_ms < ? AND end_ms > ? UNION ALL SELECT start_ms,end_ms FROM conversation_activity_intervals WHERE start_ms < ? AND end_ms > ? UNION ALL SELECT start_ms,end_ms FROM grammar_cloze_activity_intervals WHERE start_ms < ? AND end_ms > ? ORDER BY startMs`).all(end,start,end,start,end,start,end,start,end,start) as Array<{startMs:number;endMs:number}>;
     let cursor = start;
     const insert = db.prepare("INSERT INTO conversation_activity_intervals(session_id,start_ms,end_ms) VALUES (?,?,?)");
     for (const row of overlaps) { if (row.startMs > cursor) insert.run(id,cursor,Math.min(row.startMs,end)); cursor = Math.max(cursor,row.endMs); if (cursor >= end) break; }
@@ -94,6 +96,7 @@ export function submitConversation(db: Db, deps: ConversationDeps, id: string, t
     db.prepare("INSERT INTO conversation_messages(id,session_id,role,text,created_at) VALUES (?,?,'user',?,?)").run(messageId, id, text, now);
     db.prepare("INSERT INTO conversation_analyses(message_id,status,created_at) VALUES (?,'pending',?)").run(messageId, now);
     db.prepare("UPDATE conversation_sessions SET answer_count=answer_count+1,updated_at=? WHERE id=?").run(now, id);
+    awardModeXp(db, { id: randomUUID(), source: "conversation", sourceId: messageId, amount: XP_CONVERSATION_ANSWER, at: now });
     enqueue(db, deps, { kind: "tutor", priority: 1, payload: { conversation: true, sessionId: id, action: "reply", messageId }, idempotencyKey: `conversation:${id}:reply:${messageId}` });
     enqueue(db, deps, { kind: "tutor", priority: 2, payload: { conversation: true, sessionId: id, action: "analysis", messageId }, idempotencyKey: `conversation:${id}:analysis:${messageId}` });
   })();

@@ -116,6 +116,16 @@ describe("planning", () => {
     expect(bare.skills.every((s) => s.id === null)).toBe(true);
     expect(bare.skills).toHaveLength(bare.transformations + 1);
   });
+  it("draws different kinds of rewrite from a wide list, so lessons do not all get the same three tasks", () => {
+    const seen = new Set<string>();
+    for (let seed = 1; seed <= 40; seed++) {
+      const p = buildPlan({ difficultyMin: "B2", difficultyMax: "C1" }, { weak: [], familiar: [] }, seed, seed * 7919);
+      const s3 = p.skills.slice(0, p.transformations).map((s) => s.label);
+      expect(new Set(s3).size).toBe(s3.length);
+      s3.forEach((l) => seen.add(l));
+    }
+    expect(seen.size).toBeGreaterThanOrEqual(10);
+  });
   it("is reproducible from its seed", () => {
     expect(buildPlan({ difficultyMin: "B2", difficultyMax: "C1" }, pool, 2, 777)).toEqual(buildPlan({ difficultyMin: "B2", difficultyMax: "C1" }, pool, 2, 777));
   });
@@ -164,5 +174,20 @@ describe("a construction that made a try fail is swapped for a plain one", () =>
     expect(next.skills[2]!.id).toBeNull();
     expect(new Set(next.skills.map((s) => s.label)).size).toBe(3);
     expect(replanAvoiding(plan, new Set())).toBe(plan);
+  });
+});
+
+describe("phrasal verbs and function words (retry failures)", () => {
+  it("accepts the whole irregular form of a phrasal verb", async () => {
+    const { lessonWord, findTarget } = await import("../../../apps/server/src/domain/wordLessons/validate.js");
+    const w = lessonWord("run into", [], ["run into", "ran into", "run into"]);
+    expect(findTarget("I ran into my old teacher at the market.", w)).not.toBeNull();
+    expect(lessonWord("come up with", [], ["come up with", "came up with"]).forms).toContain("came up with");
+  });
+  it("keeps indirect questions off conjunctions and the passive off phrasal verbs", async () => {
+    const { unsuitableSkill } = await import("../../../apps/server/src/domain/wordLessons/runner.js");
+    expect(unsuitableSkill({ id: "questions.embedded_order", label: "embedded order" }, "conjunction")).toBe(true);
+    expect(unsuitableSkill({ id: null, label: "Passive voice" }, "phrasal verb")).toBe(true);
+    expect(unsuitableSkill({ id: null, label: "Passive voice" }, "verb")).toBe(false);
   });
 });

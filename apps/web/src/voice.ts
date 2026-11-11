@@ -113,6 +113,7 @@ export function useVoice(sessionId: string | null, tabId: string, enabled: boole
   const [state, setState] = useState<VoiceState>({ phase: "idle" });
   const [provider, setProvider] = useState<"groq" | "local" | null>(null);
   const stream = useRef<string | null>(null);
+  const closing = useRef<Promise<unknown> | null>(null);
   const capture = useRef<Capture | null>(null);
   const generation = useRef(0);
   const stateRef = useRef(state);
@@ -129,9 +130,14 @@ export function useVoice(sessionId: string | null, tabId: string, enabled: boole
     if (cap) void cap.stop().catch(() => undefined);
     const id = stream.current;
     stream.current = null;
-    if (id) void sttStop(id).catch(() => undefined);
+    if (id) {
+      const pending = sttStop(id).catch(() => undefined);
+      closing.current = pending;
+      void pending.finally(() => { if (closing.current === pending) closing.current = null; });
+    }
   }, []);
   useEffect(() => () => release(), [release, sessionId]);
+  useEffect(() => { setState({ phase: "idle" }); setProvider(null); }, [sessionId]);
   useEffect(() => {
     const onHide = () => release();
     window.addEventListener("pagehide", onHide);
@@ -166,6 +172,8 @@ export function useVoice(sessionId: string | null, tabId: string, enabled: boole
   const opening = useRef<Promise<void> | null>(null);
   const openingGeneration = useRef<number | null>(null);
   const open = useCallback(async (current: number) => {
+    if (closing.current) await closing.current;
+    if (current !== generation.current) return;
     if (stream.current) return;
     while (opening.current) {
       if (openingGeneration.current === current) return opening.current;
@@ -180,7 +188,7 @@ export function useVoice(sessionId: string | null, tabId: string, enabled: boole
           const started = await starter(sessionRef.current!, tabId);
           const id = started.streamId;
           if (current !== generation.current) {
-            void sttStop(id).catch(() => undefined);
+            await sttStop(id).catch(() => undefined);
             return;
           }
           stream.current = id;

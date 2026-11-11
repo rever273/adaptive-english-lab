@@ -221,6 +221,10 @@ describe("audio dictation", () => {
 
     // 2: clean = 6 XP; 3: only the translation = half; 4: many hints (no limit), then F5 = no credit; 5: clean and the lesson completes
     expect(submitAnswer(d, deps, ids[1]!, { attemptId: randomUUID(), text: texts[1]!, activeMs: 10000 }).xpAwarded).toBe(6);
+    expect(openTranslation(d, deps, ids[1]!).translationRu).toBe(ru);
+    expect((d.prepare("SELECT COUNT(*) AS n FROM typing_dictation_events WHERE exercise_id=? AND kind='translation'").get(ids[1]) as {n:number}).n).toBe(0);
+    recordPlay(d,deps,ids[1]!,"manual");
+    expect((d.prepare("SELECT COUNT(*) AS n FROM typing_dictation_events WHERE exercise_id=? AND kind='play'").get(ids[1]) as {n:number}).n).toBe(0);
     openTranslation(d, deps, ids[2]!);
     expect(openTranslation(d, deps, ids[2]!).translationRu).toBe(ru);
     expect((d.prepare("SELECT COUNT(*) AS n FROM typing_dictation_events WHERE kind='translation'").get() as { n: number }).n).toBe(1);
@@ -237,6 +241,9 @@ describe("audio dictation", () => {
     recordPlay(d, deps, ids[4]!, "manual");
     const last = submitAnswer(d, deps, ids[4]!, { attemptId: randomUUID(), text: texts[4]!, activeMs: 13000 });
     expect(last).toMatchObject({ correct: true, xpAwarded: 6, lessonCompleted: true, nextOrdinal: null });
+    expect(openTranslation(d,deps,ids[4]!).translationRu).toBe(ru);
+    recordPlay(d,deps,ids[4]!,"manual");
+    expect((d.prepare("SELECT COUNT(*) AS n FROM typing_dictation_events WHERE exercise_id=? AND kind='play'").get(ids[4]) as {n:number}).n).toBe(2);
 
     const result = buildDictationResult(d, lesson.id);
     expect(result).toMatchObject({ sentences: 5, xpAwarded: Math.round(6 * c0) + 6 + 3 + 6, noHelp: 2, partial: 2, fullReveal: 1, wrongSubmissions: 1, plays: 2, manualReplays: 1, activeMs: 13000 });

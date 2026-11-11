@@ -63,7 +63,7 @@ export function registerSessionRoutes(app: FastifyInstance, db: Db, deps: Sessio
     const b = parse(z.object({ id: z.string().uuid(), tabId: z.string().min(1).max(64), startMs: z.number().int().nonnegative(), endMs: z.number().int().nonnegative() }).strict(), req.body);
     return recordPracticeActivity(db, deps, req.params.id, b);
   });
-  app.get("/api/v1/activity-progress", async () => ({ grammar: activityProgress(db, "grammar"), vocabulary: activityProgress(db, "vocabulary"), typing: typingProgress(db) }));
+  app.get("/api/v1/activity-progress", async () => ({ grammar: activityProgress(db, "grammar"), vocabulary: activityProgress(db, "vocabulary"), conversation: activityProgress(db, "conversation"), typing: typingProgress(db) }));
   app.post("/api/v1/sessions", async (req, reply): Promise<CreateSessionResponse> => {
     const body = parse(CreateSessionRequestSchema, req.body);
     const r = body.purpose === "diagnostic" ? createDiagnosticBlock(db, deps, body) : body.purpose === "heldout" ? createHeldoutCheck(db, deps, body) : createPracticeSession(db, deps, body, { discovery: opts.discovery, enforceStock: true });

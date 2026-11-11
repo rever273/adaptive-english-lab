@@ -1,5 +1,5 @@
 import type { JourneyData, JourneyMode } from '../api';
-import { MODES } from './Journey';
+import { MODES } from '../journey/model';
 
 /** Least-complete enabled practice first; ties keep the configured base order. */
 export function dailyOrder(

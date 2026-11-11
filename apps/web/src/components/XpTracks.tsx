@@ -12,8 +12,9 @@ const TIERS: Array<{ from: number; name: string; icon: string }> = [
 const tierOf = (level: number) => [...TIERS].reverse().find((t) => level >= t.from)!;
 
 const TRACK = {
-  grammar: { label: "Grammar", icon: "pi-pencil", xpHint: "10 XP for every finished task (also a wrong one or “I don’t know”); nothing for skips. Activity, not a grade." },
-  vocabulary: { label: "Vocabulary", icon: "pi-bookmark-fill", xpHint: "10 XP for every finished task (also a wrong one or “I don’t know”); nothing for skips. Activity, not a grade." },
+  grammar: { label: "Grammar", icon: "pi-pencil", xpHint: "10 XP for every task you get right on the first try, and for every Grammar Cloze sentence you get right; nothing for mistakes, “I don’t know” or skips. Activity, not a grade." },
+  vocabulary: { label: "Vocabulary", icon: "pi-bookmark-fill", xpHint: "10 XP for every task you get right on the first try, and up to 50 XP for a finished One Word lesson (in proportion to its score); Grammar Cloze pays only right answers. Activity, not a grade." },
+  conversation: { label: "Conversation", icon: "pi-comments", xpHint: "10 XP for every answer you write in a conversation. Activity, not a grade." },
   typing: { label: "Typing", icon: "pi-bullseye", xpHint: "XP for every completed Words or Books level, and for every Audio Dictation sentence you type correctly (less with hints or the translation); nothing for losses or interrupted attempts. Activity, not a grade." },
 } as const;
 type TrackKey = keyof typeof TRACK;
@@ -51,7 +52,7 @@ function Track({ p, gained, levelUp }: { p: TrackProgress; gained: number; level
 }
 
 /**
- * Three independent progress tracks in the header: Grammar, Vocabulary and Typing, each from its own server XP ledger.
+ * Independent progress tracks in the header: Grammar, Vocabulary, Typing and Conversation, each from its own server XP ledger.
  * A finished task/level shows a small “+XP” and the bar fills smoothly; a new level makes the badge glow once. No pop-ups, no confetti.
  */
 export function XpTracks() {
@@ -69,7 +70,7 @@ export function XpTracks() {
           const before = prev.current;
           if (before) {
             const next: Record<string, { gained: number; levelUp: boolean }> = {};
-            for (const k of ["grammar", "vocabulary", "typing"] as const) {
+            for (const k of ["grammar", "vocabulary", "typing", "conversation"] as const) {
               const gained = r[k].total - before[k].total;
               if (gained > 0) next[k] = { gained, levelUp: r[k].level > before[k].level };
             }
@@ -100,6 +101,7 @@ export function XpTracks() {
       <Track p={p.grammar} gained={fx.grammar?.gained ?? 0} levelUp={fx.grammar?.levelUp ?? false} />
       <Track p={p.vocabulary} gained={fx.vocabulary?.gained ?? 0} levelUp={fx.vocabulary?.levelUp ?? false} />
       <Track p={p.typing} gained={fx.typing?.gained ?? 0} levelUp={fx.typing?.levelUp ?? false} />
+      <Track p={p.conversation} gained={fx.conversation?.gained ?? 0} levelUp={fx.conversation?.levelUp ?? false} />
     </div>
   );
 }

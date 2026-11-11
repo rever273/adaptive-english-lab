@@ -77,6 +77,7 @@ it("separates conversation and analysis, resumes, and keeps retry submissions id
     submitConversation(db, deps, id, "tab", answer, "I drink coffee yesterday.");
     submitConversation(db, deps, id, "tab", answer, "I drink coffee yesterday.");
     expect((conversationState(db, id).session as { answerCount: number }).answerCount).toBe(1);
+    expect(db.prepare("SELECT track, amount FROM mode_xp_events WHERE source='conversation'").all()).toEqual([{ track: 'conversation', amount: 10 }]); // one answer, one payment
     await run("analysis", answer);
     const annotation = JSON.parse((db.prepare("SELECT text FROM conversation_analyses WHERE message_id=?").get(answer) as { text: string }).text);
     expect(annotation).toMatchObject({ version: "conversation-feedback-v2", corrected: "I drank coffee yesterday.", grammarSkillId: null, status: "tentative" });

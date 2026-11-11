@@ -111,6 +111,8 @@ export const SettingsV1Schema = z
     vocabularyTaskCount: z.number().int().min(5).max(10).optional(),
     /** D64/TASK_020: at most this many words never practised before enter one vocabulary session (default 4) */
     vocabularyNewWordsPerSession: z.number().int().min(1).max(10).optional(),
+    /** TASK_032: sentences in one Grammar Cloze session (default 15); applies to the next session */
+    clozeTaskCount: z.number().int().min(5).max(50).optional(),
     /** D67: warm the local model at start and when the learner arrives (default true) */
     preloadModelOnStart: z.boolean().optional(),
     /** Feedback and completion sounds; missing on older revisions means enabled. */
@@ -126,22 +128,31 @@ export const SettingsV1Schema = z
     difficultyMax: z.enum(CEFR_RANGE).optional(),
     /** TASK_027: typing practice settings; missing on older revisions means the defaults. */
     typingWordsPerLevel: z.number().int().min(10).max(100).optional(),
+    /** TASK_033: word showings in one Finger Drills level (repeats count); missing means 60 */
+    typingDrillWordsPerLevel: z.number().int().min(20).max(200).optional(),
+    /** TASK_033: Piper says every tenth drilled word; missing means off */
+    typingDrillSpeech: z.boolean().optional(),
     typingVocabularyShare: z.number().min(0).max(1).optional(),
     typingSpeedMultiplier: z.number().min(0.5).max(2).optional(),
     typingBookMinutes: z.number().int().min(1).max(30).optional(),
+    /** Books: wrong letters are shown (and must be deleted); when false a wrong key is only counted and nothing appears. Missing means shown. */
+    typingBooksShowMistakes: z.boolean().optional(),
     /** TASK_028: sentences in one Audio Dictation lesson; fixed in the lesson when it is created. Missing means 10. */
     typingDictationExercisesPerLesson: z.number().int().min(5).max(20).optional(),
     /** how many saved words the memory check after a Words level offers (0 = no check); missing means 2 */
     typingRecallWords: z.number().int().min(0).max(3).optional(),
-    dailyOrder: z.array(z.enum(["grammar", "vocabulary", "words", "books", "dictation", "wordLesson", "conversation"])).min(5).max(7).refine(v => new Set(v).size === v.length).optional(),
+    dailyOrder: z.array(z.enum(["grammar", "vocabulary", "words", "books", "dictation", "wordLesson", "grammarCloze", "conversation"])).min(5).max(8).refine(v => new Set(v).size === v.length).optional(),
     journeyHours: z.object({ b2: z.number().int().min(1).max(5000), c1: z.number().int().min(1).max(5000), c2: z.number().int().min(1).max(5000) }).strict().optional(),
-    dailyMinutes: z.object({ grammar: z.number().int().min(0).max(180), vocabulary: z.number().int().min(0).max(180), words: z.number().int().min(0).max(180), books: z.number().int().min(0).max(180), dictation: z.number().int().min(0).max(180), wordLesson: z.number().int().min(0).max(180).optional(), conversation: z.number().min(0).max(180).multipleOf(0.5).optional() }).strict().optional(),
+    dailyMinutes: z.object({ grammar: z.number().int().min(0).max(180), vocabulary: z.number().int().min(0).max(180), words: z.number().int().min(0).max(180), books: z.number().int().min(0).max(180), dictation: z.number().int().min(0).max(180), wordLesson: z.number().int().min(0).max(180).optional(), grammarCloze: z.number().int().min(0).max(180).optional(), conversation: z.number().min(0).max(180).multipleOf(0.5).optional() }).strict().optional(),
   })
   .strict();
 export type SettingsV1 = z.infer<typeof SettingsV1Schema>;
 
 /** Older settings revisions predate vocabulary sessions. */
 export const vocabularyTaskCount = (v: Pick<SettingsV1, "vocabularyTaskCount">): number => v.vocabularyTaskCount ?? 8;
+
+/** TASK_032: sentences per Grammar Cloze session; missing on older revisions means 15. */
+export const clozeTaskCount = (v: Pick<SettingsV1, "clozeTaskCount">): number => v.clozeTaskCount ?? 15;
 
 export const preloadModelOnStart = (v: Pick<SettingsV1, "preloadModelOnStart">): boolean => v.preloadModelOnStart ?? true;
 
@@ -150,6 +161,8 @@ export const reviewNoticeThreshold = (v: Pick<SettingsV1, "reviewNoticeThreshold
 export const vocabularyNewWordsPerSession = (v: Pick<SettingsV1, "vocabularyNewWordsPerSession">): number => v.vocabularyNewWordsPerSession ?? 4;
 
 export const typingWordsPerLevel = (v: Pick<SettingsV1, "typingWordsPerLevel">): number => v.typingWordsPerLevel ?? 30;
+
+export const typingDrillWordsPerLevel = (v: Pick<SettingsV1, "typingDrillWordsPerLevel">): number => v.typingDrillWordsPerLevel ?? 60;
 
 export const typingVocabularyShare = (v: Pick<SettingsV1, "typingVocabularyShare">): number => v.typingVocabularyShare ?? 0.3;
 
@@ -201,3 +214,4 @@ export * from "./typingDictation.js";
 export * from "./dictationCheck.js";
 export * from "./voices.js";
 export * from "./wordLessons.js";
+export * from "./grammarCloze.js";
