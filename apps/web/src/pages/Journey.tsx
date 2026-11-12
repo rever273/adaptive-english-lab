@@ -98,11 +98,15 @@ export function Journey() {
         // reached milestones stay; of the upcoming ones only the next and the one after it are shown
         visible = nextAt < 0 ? milestones : milestones.filter((_, i) => i <= nextAt + 1),
         stages = ['B1', 'B2', 'C1', 'C2'],
-        x = (n: number) => 40 + (920 * n) / p.cuts[3]!;
+        // Equal-size stage segments keep every goal legible, even with unequal hour targets.
+        routeProgress = (p.stage + p.stageProgress) / 3,
+        x = (t: number) => 125 + 750 * t,
+        y = (t: number) => 125 - 280 * t * (1 - t),
+        travelled = `M125 125 Q${125 + 375 * routeProgress} ${125 - 140 * routeProgress} ${x(routeProgress)} ${y(routeProgress)}`;
     return (
         <section className="journey-page">
             <div className="journey-hero">
-                <div className="journey-eyebrow">YOUR ENGLISH JOURNEY</div>
+                <div className="journey-eyebrow"><i className="pi pi-compass" aria-hidden="true" /> YOUR ENGLISH JOURNEY</div>
                 <h2>Every hour moves you forward.</h2>
                 <p className="muted">A personal goal for time spent practising. The milestones are not a CEFR assessment.</p>
                 <div className="journey-metrics">
@@ -122,34 +126,45 @@ export function Journey() {
                     </div>
                 </div>
                 <div className="journey-map">
-                    <svg
-                        viewBox="0 0 1000 130"
-                        role="img"
-                        aria-label={`Your route from B1 to C2. ${Math.round(p.stageProgress * 100)} percent of the current time goal.`}
-                    >
+                    <div className="journey-route-heading">
+                        <span><span className="journey-live-dot" />{p.whole >= 1 ? 'Time goal complete' : `On your way to ${stages[p.stage + 1]}`}</span>
+                        <span>YOUR PRACTICE PATH</span>
+                    </div>
+                    <svg viewBox="0 0 1000 180" role="img"
+                        aria-label={`Your route from B1 to C2. ${Math.round(p.stageProgress * 100)} percent of the ${stages[p.stage]} to ${stages[p.stage + 1]} time goal. Stage spacing is illustrative.`}>
                         <defs>
-                            <linearGradient id="journey-gradient" gradientUnits="userSpaceOnUse" x1="40" y1="0" x2="960" y2="0">
+                            <linearGradient id="journey-gradient" gradientUnits="userSpaceOnUse" x1="125" y1="0" x2="875" y2="0">
                                 <stop stopColor="#6ca9ff" />
-                                <stop offset=".52" stopColor="#9b87fb" />
+                                <stop offset=".5" stopColor="#b79aff" />
                                 <stop offset="1" stopColor="#65dbbd" />
                             </linearGradient>
                         </defs>
-                        <path d="M40 54 H960" className="journey-rail" />
-                        <path d={`M40 54 H${x(Math.min(p.hours, p.cuts[3]!))}`} className="journey-fill" />
-                        <path d={`M40 54 H${x(Math.min(p.hours, p.cuts[3]!))}`} className="journey-shimmer" aria-hidden="true" />
+                        <path d="M125 125 Q500 -15 875 125" className="journey-route-glow" />
+                        <path d="M125 125 Q500 -15 875 125" className="journey-rail" />
+                        <path d={travelled} className="journey-fill" />
+                        <path d={travelled} className="journey-shimmer" aria-hidden="true" />
                         {p.cuts.map((n, i) => (
-                            <g key={n}>
-                                <circle cx={x(n)} cy="54" r="9" className={p.hours >= n ? 'journey-node done' : 'journey-node'} />
-                                <text x={x(n)} y="94" textAnchor="middle">
-                                    {stages[i]}
-                                </text>
-                                <text x={x(n)} y="116" textAnchor="middle" className="journey-small">
-                                    {n}h
-                                </text>
+                            <g key={i} className={p.hours >= n ? 'journey-station reached' : 'journey-station'}>
+                                <circle cx={x(i / 3)} cy={y(i / 3)} r="32" className="journey-node-halo" />
+                                <circle cx={x(i / 3)} cy={y(i / 3)} r="22" className={p.hours >= n ? 'journey-node done' : 'journey-node'} />
+                                <text x={x(i / 3)} y={y(i / 3) + 6} textAnchor="middle">{stages[i]}</text>
                             </g>
                         ))}
-                        <circle cx={x(Math.min(p.hours, p.cuts[3]!))} cy="54" r="15" className="journey-current" />
+                        <g className="journey-position" transform={`translate(${x(routeProgress)} ${y(routeProgress)})`}>
+                            <text y="-66" textAnchor="middle" className="journey-position-label">You are here</text>
+                            <circle r="37" className="journey-current" />
+                            <path d="M0 -43 l-6 -9 h12 Z" className="journey-pointer" />
+                        </g>
                     </svg>
+                    <div className="journey-stops">
+                        {p.cuts.map((hours, i) => (
+                            <div key={i} className={p.hours >= hours ? 'reached' : ''}>
+                                <strong>{stages[i]}</strong>
+                                <span>{hours}h</span>
+                                <small>{i === 0 ? 'Starting point' : p.hours >= hours ? 'Goal reached' : 'Time goal'}</small>
+                            </div>
+                        ))}
+                    </div>
                 </div>
                 <p className="small muted">
                     Time goal only · Grammar and vocabulary history starts when tracking was enabled. Earlier typing totals are included; past daily breakdown

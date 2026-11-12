@@ -121,6 +121,11 @@ textarea {
     color: var(--err-fg);
     border-color: var(--err);
 }
+.feedback-tip {
+    background: var(--warn-bg);
+    color: var(--warn-fg);
+    border-color: #e08a2e;
+}
 .feedback-pending {
     border-color: var(--warn);
 }

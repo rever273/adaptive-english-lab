@@ -16,6 +16,16 @@ function highlighted(text: string, vocabulary: string[]) {
   return [...result.nodes, text.slice(result.at)];
 }
 
+/** an assistant message: a lesson's "RU:" lines are shown as Russian notes, the rest with the learner's words highlighted */
+function assistantText(text: string, vocabulary: string[]): ReactNode {
+  if (!/^RU:/m.test(text)) return highlighted(text, vocabulary);
+  return text.split("\n").map((line, i, all) => {
+    const ru = /^RU:\s*(.*)$/.exec(line);
+    return <span key={i}>{ru ? <span lang="ru" className="conversation-ru">{ru[1]}</span> : highlighted(line, vocabulary)}{i < all.length - 1 ? "\n" : ""}</span>;
+  });
+}
+const KIND_LABEL: Record<api.LessonTargetView["kind"], string> = { grammar: "Grammar", word: "Word", expression: "Expression" };
+
 export function Conversation({ onDailyDone }: { onDailyDone?: () => void }) {
   const [tabId, setTabId] = useState(() => crypto.randomUUID());
   const [home, setHome] = useState<api.ConversationHome | null>(null);
@@ -45,7 +55,7 @@ export function Conversation({ onDailyDone }: { onDailyDone?: () => void }) {
       const url = URL.createObjectURL(blob); audioUrl.current = url;
       const audio = new Audio(url); player.current = audio;
       audio.onended = () => { if (audioUrl.current === url) { URL.revokeObjectURL(url); audioUrl.current = null; player.current = null; } };
-      await audio.play(); setSpeechError(false);
+      setSpeechError(false); await audio.play().catch(() => { /* the browser refused to play (no recent click): the clip is fine, the speaker button plays it */ });
     } catch { if (epoch === audioEpoch.current) { stopAudio(); setSpeechError(true); } }
     finally { if (epoch === audioEpoch.current) setSpeechChecking(false); }
   }, [stopAudio]);
@@ -87,11 +97,12 @@ export function Conversation({ onDailyDone }: { onDailyDone?: () => void }) {
     }, 5000);
     return () => { live = false; clearInterval(poll); clearInterval(heartbeat); clearInterval(idle); for (const e of touchEvents) window.removeEventListener(e, touch); document.removeEventListener("visibilitychange", hide); if (current.current === id) { current.current = null; void api.conversationPause(id, tabId).catch(() => undefined); } };
   }, [state?.session.id, tabId, homeRefresh, stopAudio]);
-  const launch = async (resume: boolean) => {
+  const launch = async (how: "resume" | "topic" | "lesson") => {
+    const resume = how === "resume";
     const nextTabId = crypto.randomUUID();
     setTabId(nextTabId); setError(""); setBusy(true);
-    try { const s = resume && home?.latest ? await api.conversationResume(home.latest.id, nextTabId) : await api.conversationStart(topic, nextTabId); heard.current = new Set(resume ? s.messages.filter(m => m.role === "assistant").map(m => m.id) : []); noted.current = new Set(s.messages.filter(m => m.analysisStatus === "ready").map(m => m.id)); setState(s); }
-    catch { setError("Could not start the conversation. Please try again."); } finally { setBusy(false); }
+    try { const s = resume && home?.latest ? await api.conversationResume(home.latest.id, nextTabId) : how === "lesson" ? await api.conversationStartLesson(nextTabId) : await api.conversationStart(topic, nextTabId); heard.current = new Set(resume ? s.messages.filter(m => m.role === "assistant").map(m => m.id) : []); noted.current = new Set(s.messages.filter(m => m.analysisStatus === "ready").map(m => m.id)); setState(s); }
+    catch (e) { setError(e instanceof api.ApiRequestError && e.code === "NOTHING_TO_PRACTISE" ? e.message : "Could not start the conversation. Please try again."); } finally { setBusy(false); }
   };
   const stop = async () => { if (!state) return; const id = state.session.id; current.current = null; stopAudio(); voice.close(); try { await api.conversationPause(id, tabId); } catch { /* already stopped */ } setState(null); homeRefresh(); checkDailyGoal("conversation"); };
   const send = async () => {
@@ -100,7 +111,7 @@ export function Conversation({ onDailyDone }: { onDailyDone?: () => void }) {
     try { const result = await api.conversationMessage(id, tabId, crypto.randomUUID(), text); if (current.current === id) { setState(result); setInput(""); } api.announceXp(); }
     catch { if (current.current === id) setError("Your answer was not sent. Please try again."); } finally { setBusy(false); }
   };
-  if (!state) return <section className="conversation"><h2><i className="pi pi-comments" /> Conversation</h2><p>Short, relaxed conversations in English.</p>{onDailyDone && <button onClick={onDailyDone}>Continue daily practice <i className="pi pi-arrow-right" /></button>}{error && <p role="alert">{error}</p>}{home?.latest && <div className="conversation-card"><h3>Continue your conversation</h3><p>{home.latest.topic} · {new Date(home.latest.updatedAt).toLocaleString()}</p><button onClick={() => void launch(true)} disabled={busy}>Continue</button></div>}<div className="conversation-card"><h3>Choose a topic</h3><p>Pick one, or try another selection.</p><div className="conversation-topics">{home?.topics.map(t => <button key={t} className={`conversation-topic colour-${topicColour(home.topicGroups[t] ?? t)}${topic === t ? " selected" : ""}`} onClick={() => setTopic(t)}>{t}</button>)}</div><p><button onClick={() => { setTopic(""); homeRefresh(); }}>Other topics</button></p></div><div className="conversation-card conversation-start"><div><h3>Start a new conversation</h3><p>{topic ? `Topic: ${topic}` : "Choose a topic above to begin."}</p></div><button disabled={!topic || busy} onClick={() => void launch(false)}>Start conversation</button></div>{home && <p>{home.statistics.conversations} conversations · {home.statistics.answers} answers · {formatTime(home.statistics.activeMs)} active</p>}</section>;
+  if (!state) return <section className="conversation"><h2><i className="pi pi-comments" /> Conversation</h2><p>Short, relaxed conversations in English.</p>{onDailyDone && <button onClick={onDailyDone}>Continue daily practice <i className="pi pi-arrow-right" /></button>}{error && <p role="alert">{error}</p>}{home?.latest && <div className="conversation-card"><h3>Continue your conversation</h3><p>{home.latest.mode === "lesson" ? `Lesson · ${home.latest.lessonTarget ?? ""}` : home.latest.topic} · {new Date(home.latest.updatedAt).toLocaleString()}</p><button onClick={() => void launch("resume")} disabled={busy}>Continue</button></div>}<div className="conversation-card conversation-lesson-start"><div><h3><i className="pi pi-graduation-cap" /> Practise with a teacher</h3><p>Sam, a cheerful Aussie teacher, picks what you know least: a grammar rule, one of your words and one of your expressions. You practise them one at a time with hints and short tasks; press “Next topic” whenever you want to move on. Topics rotate, so they do not repeat until the others have had a turn.</p><p className="muted small">Practice only: it does not change your Mastery or word statistics.</p></div><button className="btn-primary" disabled={busy} onClick={() => void launch("lesson")} data-testid="conversation-start-lesson">Start a lesson</button></div><div className="conversation-card"><h3>Choose a topic</h3><p>Pick one, or try another selection.</p><div className="conversation-topics">{home?.topics.map(t => <button key={t} className={`conversation-topic colour-${topicColour(home.topicGroups[t] ?? t)}${topic === t ? " selected" : ""}`} onClick={() => setTopic(t)}>{t}</button>)}</div><p><button onClick={() => { setTopic(""); homeRefresh(); }}>Other topics</button></p></div><div className="conversation-card conversation-start"><div><h3>Start a new conversation</h3><p>{topic ? `Topic: ${topic}` : "Choose a topic above to begin."}</p></div><button disabled={!topic || busy} onClick={() => void launch("topic")}>Start conversation</button></div>{home && <p>{home.statistics.conversations} conversations · {home.statistics.answers} answers · {formatTime(home.statistics.activeMs)} active</p>}</section>;
   const last = [...state.messages].reverse().find(m => m.role === "user");
   const lastAssistant = [...state.messages].reverse().find(m => m.role === "assistant");
   const displayedTranslation = translation?.sessionId === state.session.id && translation.messageId === lastAssistant?.id ? translation : null;
@@ -114,19 +125,29 @@ export function Conversation({ onDailyDone }: { onDailyDone?: () => void }) {
   const waiting = state.jobs.some(j => j.action === "reply" && ["queued", "waiting_for_gpu", "running"].includes(j.state));
   const failedReply = state.jobs.find(j => j.action === "reply" && j.state === "failed");
   const failedAnalysis = state.jobs.find(j => j.action === "analysis" && j.messageId === last?.id && j.state === "failed");
-  let feedback: { ok: boolean; explanation: string; corrected: string } | null = null;
+  let feedback: { ok: boolean; level: "ok" | "tip" | "error"; explanation: string; corrected: string } | null = null;
   if (last?.analysisStatus === "ready") {
-    try { const parsed = JSON.parse(last.analysis ?? "") as { version?: unknown; ok?: unknown; explanation?: unknown; corrected?: unknown }; if (parsed.version === "conversation-feedback-v2" && typeof parsed.ok === "boolean" && typeof parsed.explanation === "string" && typeof parsed.corrected === "string") feedback = { ok: parsed.ok, explanation: parsed.explanation, corrected: parsed.corrected }; } catch { /* previous feedback was plain text */ }
-    feedback ??= { ok: !last.analysis, explanation: last.analysis ?? "", corrected: "" };
+    try { const parsed = JSON.parse(last.analysis ?? "") as { version?: unknown; ok?: unknown; explanation?: unknown; corrected?: unknown; level?: unknown }; if (parsed.version === "conversation-feedback-v2" && typeof parsed.ok === "boolean" && typeof parsed.explanation === "string" && typeof parsed.corrected === "string") feedback = { ok: parsed.ok, level: parsed.ok ? "ok" : parsed.level === "tip" ? "tip" : "error", explanation: parsed.explanation, corrected: parsed.corrected }; } catch { /* previous feedback was plain text */ }
+    feedback ??= { ok: !last.analysis, level: last.analysis ? "error" : "ok", explanation: last.analysis ?? "", corrected: "" };
   }
   const retry = (jobId: string) => void api.conversationRetry(state.session.id, jobId).then(() => api.conversationRead(state.session.id)).then(setState).catch(() => setError("Could not retry."));
   const remove = () => { if (!window.confirm("Delete the text of this conversation? Your aggregate statistics will remain.")) return; current.current = null; stopAudio(); voice.close(); void api.conversationDelete(state.session.id).then(() => { setState(null); homeRefresh(); }).catch(() => setError("Could not delete the conversation.")); };
   const v = voice.state;
   const voiceBusy = v.phase === "preparing" || v.phase === "recording" || v.phase === "transcribing";
-  const canSend = !busy && !voiceBusy && !!input.trim() && state.messages.at(-1)?.role === "assistant";
-  return <section className="conversation"><div className="conversation-header"><div><h2>{state.session.topic}</h2><span>Conversation time: {formatTime(state.session.activeMs)}</span></div><div><button onClick={remove}>Delete text</button> <button onClick={() => void stop()}>Stop conversation</button></div></div>
-    <div className="conversation-chat" aria-live="polite">{state.messages.map(m => <div key={m.id} className={`conversation-row ${m.role}`}><i className={`pi ${m.role === "user" ? "pi-user" : "pi-android"}`} /><div>{m.role === "assistant" ? highlighted(m.text, state.vocabulary) : m.text}{m.role === "assistant" && <button className="conversation-replay" aria-label="Play assistant message" onClick={() => void speak(state.session.id, m.id)}><i className="pi pi-volume-up" /></button>}</div></div>)}{waiting && <p><i className="pi pi-spin pi-spinner" /> Waiting for a reply…</p>}{failedReply && <p>Could not get a reply. <button onClick={() => retry(failedReply.id)}>Try again</button></p>}<div ref={chatBottom} /></div>
+  const lessonTargets = state.lesson?.targets ?? [];
+  const currentTarget = lessonTargets.find(t => t.status === "current");
+  const canSwitch = !!state.lesson && !busy && !waiting && state.messages.at(-1)?.role === "assistant" && lessonTargets.length < 6;
+  const nextTopic = async () => {
+    if (!canSwitch) return;
+    const id = state.session.id; setBusy(true); setError("");
+    try { const result = await api.conversationNextTopic(id, tabId); if (current.current === id) setState(result); }
+    catch (e) { if (current.current === id) setError(e instanceof api.ApiRequestError && e.code === "NO_MORE_TOPICS" ? "There are no more topics to practise right now." : "Could not switch the topic. Please try again."); } finally { setBusy(false); }
+  };
+  const canSend = !busy && !waiting && !voiceBusy && !!input.trim() && state.messages.at(-1)?.role === "assistant";
+  return <section className="conversation"><div className="conversation-header"><div>{currentTarget ? <h2 data-testid="lesson-title"><span className={`conversation-kind kind-${currentTarget.kind}`}>{KIND_LABEL[currentTarget.kind]}</span> {currentTarget.label}</h2> : <h2>{state.session.topic}</h2>}<span>{state.lesson ? "Lesson" : "Conversation"} time: {formatTime(state.session.activeMs)}</span>{state.lesson && <div className="lesson-targets" aria-label="Lesson topics">{lessonTargets.map(t => <span key={t.ordinal} className={`lesson-target lesson-target-${t.status}`} title={`${KIND_LABEL[t.kind]} · ${t.status}`}>{t.status === "done" && <i className="pi pi-check" />}{KIND_LABEL[t.kind]}: {t.label}</span>)}</div>}</div><div>{state.lesson && <><button className="btn-primary" disabled={!canSwitch} onClick={() => void nextTopic()} data-testid="lesson-next-topic" title="Close this topic and move on to the next one">Next topic <i className="pi pi-arrow-right" /></button> </>}<button onClick={remove}>Delete text</button> <button onClick={() => void stop()}>Stop conversation</button></div></div>
+    <div className="conversation-chat" aria-live="polite">{state.messages.map(m => <div key={m.id} className={`conversation-row ${m.role}`}><i className={`pi ${m.role === "user" ? "pi-user" : "pi-android"}`} /><div>{m.role === "assistant" ? assistantText(m.text, state.vocabulary) : m.text}{m.role === "assistant" && <button className="conversation-replay" aria-label="Play assistant message" onClick={() => void speak(state.session.id, m.id)}><i className="pi pi-volume-up" /></button>}</div></div>)}{waiting && <p><i className="pi pi-spin pi-spinner" /> Waiting for a reply…</p>}{failedReply && <p>Could not get a reply. <button onClick={() => retry(failedReply.id)}>Try again</button></p>}<div ref={chatBottom} /></div>
     <div className="conversation-translation" aria-live="polite">
+      {displayedTranslation && displayedTranslation.status !== "loading" && <button type="button" className="conversation-translation-clear" onClick={() => setTranslation(null)} title="Clear the translation text">Clear</button>}
       <div className="conversation-translation-body">{displayedTranslation?.status === "loading" ? <span><i className="pi pi-spin pi-spinner" /> Translating the last message…</span> : displayedTranslation?.status === "error" ? <span>{displayedTranslation.text}</span> : displayedTranslation?.status === "ready" ? <span lang="ru">{displayedTranslation.text}</span> : <span className="muted">Translation of the last assistant message appears here.</span>}</div>
       <div className="conversation-speech-status muted small">{speechChecking ? <span><i className="pi pi-spin pi-spinner" /> Checking voice audio…</span> : speechError ? <span>The voice audio could not be verified. You can read the message or try the speaker button again.</span> : null}</div>
     </div>
@@ -135,5 +156,5 @@ export function Conversation({ onDailyDone }: { onDailyDone?: () => void }) {
       {v.phase === "recording" && <div className="voice-live"><span className="rec-dot"><i className="pi pi-microphone" /></span><span className="meter" role="meter" aria-label="Microphone level" aria-valuemin={0} aria-valuemax={100} aria-valuenow={Math.round(v.level * 100)}>{Array.from({ length: 12 }, (_, i) => <span key={i} className={i < Math.round(v.level * 12) ? "on" : ""} />)}</span><span className="muted">Recording… {Math.floor(v.seconds)} s</span></div>}
       {v.phase === "transcribing" && <p className="voice-status muted"><i className="pi pi-spin pi-spinner" /> Writing down what you said…</p>}{v.phase === "draft" && <p className="muted small">Check and edit the transcript before sending.</p>}{v.phase === "unavailable" && <p>{v.message}</p>}
     </div>
-    <div className="conversation-card"><h3>Helpful notes <small> · AI suggestions</small></h3>{!last ? <p>Your answer notes will appear here.</p> : feedback ? <div className={`feedback feedback-${feedback.ok ? "ok" : "again"}`}><p className="feedback-title"><i className={`pi ${feedback.ok ? "pi-check-circle" : "pi-times-circle"}`} /> {feedback.ok ? "Your answer looks good." : "A suggestion"}</p>{!feedback.ok && <><p lang="ru">{feedback.explanation}</p>{feedback.corrected && <p>A possible correction: <strong>{feedback.corrected}</strong></p>}</>}</div> : failedAnalysis ? <p>Notes are unavailable. <button onClick={() => retry(failedAnalysis.id)}>Try again</button></p> : <p><i className="pi pi-spin pi-spinner" /> Checking your answer…</p>}</div>{error && <p role="alert">{error}</p>}</section>;
+    <div className="conversation-card"><h3>Helpful notes <small> · AI suggestions</small></h3>{!last ? <p>Your answer notes will appear here.</p> : feedback ? <div className={`feedback feedback-${feedback.level === "ok" ? "ok" : feedback.level === "tip" ? "tip" : "again"}`}><p className="feedback-title"><i className={`pi ${feedback.level === "ok" ? "pi-check-circle" : feedback.level === "tip" ? "pi-lightbulb" : "pi-times-circle"}`} /> {feedback.level === "ok" ? "Your answer looks good." : feedback.level === "tip" ? "Correct, but it could sound more natural" : "A correction"}</p>{!feedback.ok && <><p lang="ru">{feedback.explanation}</p>{feedback.corrected && <p>A possible correction: <strong>{feedback.corrected}</strong></p>}</>}</div> : failedAnalysis ? <p>Notes are unavailable. <button onClick={() => retry(failedAnalysis.id)}>Try again</button></p> : <p><i className="pi pi-spin pi-spinner" /> Checking your answer…</p>}</div>{error && <p role="alert">{error}</p>}</section>;
 }

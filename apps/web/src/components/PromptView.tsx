@@ -104,10 +104,11 @@ export function PromptView({
     const filled = placed.filter((x) => x !== null).length;
     const lockedCount = locks.filter(Boolean).length;
     const dropOne = (cur: Array<number | null>, at: number) => cur.map((x, i) => (i === at ? null : x));
-    /** Hint with tiles: the first slot not yet opened gets its correct letter and is locked */
+    /** Hint with tiles: the first EMPTY slot (letters the learner placed stay where they are) gets its correct letter and is locked; with no empty slot, the first one not opened yet */
     async function tileHint() {
         if (!build || !onTileHint || hinting || lockedCount >= tileCount) return;
-        const k = locks.findIndex((l) => !l);
+        const empty = placed.findIndex((x, i) => x === null && !locks[i]);
+        const k = empty >= 0 ? empty : locks.findIndex((l) => !l);
         const answerIndex = answerIndexOf(k);
         setHinting(true);
         try {
@@ -420,7 +421,7 @@ export function PromptView({
                                             <button
                                                 key={k}
                                                 type="button"
-                                                className="tile-slot tile-slot-filled"
+                                                className={`tile-slot tile-slot-filled${locks[from + k] ? ' tile-slot-hinted' : ''}`}
                                                 disabled={locked || locks[from + k]}
                                                 onClick={() => setPlaced((cur) => dropOne(cur, from + k))}
                                                 aria-label={`Remove letter ${build.tiles[at]}`}

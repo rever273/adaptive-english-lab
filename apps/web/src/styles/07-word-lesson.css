@@ -680,7 +680,7 @@
     white-space: pre-wrap;
 }
 .conversation-row.user div {
-    background: var(--info-bg);
+    background: var(--con-bg);
 }
 .conversation-compose textarea {
     display: block;
@@ -747,7 +747,9 @@
     font-weight: 650;
 }
 .conversation-translation {
-    height: 5.5rem;
+    position: relative;
+    min-height: 5.5rem;
+    max-height: 18rem;
     margin: 0 0 0.8rem;
     padding: 0.5rem 0.8rem;
     border: 1px solid var(--border);
@@ -761,6 +763,8 @@
     flex: 1;
     min-height: 0;
     overflow-y: auto;
+    padding-right: 5rem;
+    white-space: pre-wrap;
     line-height: 1.35;
 }
 .conversation-speech-status {
@@ -783,7 +787,6 @@
     color: var(--muted);
     cursor: pointer;
 }
-
 
 /* Single Word Practice: the word table (about ten rows visible, the rest loads while scrolling) */
 .wl-table-wrap {
@@ -848,4 +851,81 @@
 }
 .wl-table-end {
     height: 1px;
+}
+
+/* Conversation lessons: the start card, the current target with its kind, the lesson's targets and the teacher's Russian notes */
+.conversation-lesson-start {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    gap: 1rem;
+    border-color: #6f5bd6;
+    background: linear-gradient(120deg, #221f3a, #1c2638);
+}
+.conversation-lesson-start h3 .pi {
+    color: #c6b9ff;
+}
+.conversation-kind {
+    display: inline-block;
+    padding: 0.1rem 0.55rem;
+    margin-right: 0.35rem;
+    border-radius: 999px;
+    font-size: 0.75rem;
+    vertical-align: middle;
+    background: #2c3a55;
+    color: #9ecbff;
+}
+.conversation-kind.kind-word {
+    background: #1f3b30;
+    color: #8fe0b3;
+}
+.conversation-kind.kind-expression {
+    background: #3d2d1c;
+    color: #ffc47a;
+}
+.lesson-targets {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 0.4rem;
+    margin-top: 0.5rem;
+}
+.lesson-target {
+    padding: 0.15rem 0.6rem;
+    border: 1px solid var(--border);
+    border-radius: 999px;
+    font-size: 0.8rem;
+    color: var(--muted);
+}
+.lesson-target .pi {
+    margin-right: 0.3rem;
+    font-size: 0.7rem;
+}
+.lesson-target-current {
+    border-color: #8b7bff;
+    color: var(--text);
+    background: color-mix(in srgb, #8b7bff 18%, transparent);
+}
+.lesson-target-done {
+    border-color: var(--ok);
+    color: var(--ok-fg);
+}
+.conversation-ru {
+    display: block;
+    margin: 0.2rem 0;
+    padding-left: 0.6rem;
+    border-left: 3px solid #e0a35a;
+    color: #f3d6a8;
+    font-style: italic;
+}
+.conversation-lesson-start > button {
+    flex-shrink: 0;
+    white-space: nowrap;
+}
+
+.conversation-translation-clear {
+    position: absolute;
+    top: 0.4rem;
+    right: 0.5rem;
+    padding: 0.1rem 0.6rem;
+    font-size: 0.8rem;
 }

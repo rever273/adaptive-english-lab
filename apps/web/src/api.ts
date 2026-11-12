@@ -268,6 +268,8 @@ export type {
 export {
   conversationHome,
   conversationStart,
+  conversationStartLesson,
+  conversationNextTopic,
   conversationRead,
   conversationResume,
   conversationPause,
@@ -281,5 +283,6 @@ export {
 
 export type {
   ConversationState,
-  ConversationHome
+  ConversationHome,
+  LessonTargetView
 } from "./api/conversation";

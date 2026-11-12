@@ -3,7 +3,7 @@ import { z } from "zod";
 import type { Db } from "../db/open.js";
 import { ApiError } from "../errors.js";
 import type { SttService } from "../domain/stt/sttService.js";
-import { conversationState, heartbeatConversation, pauseConversation, resumeConversation, startConversation, submitConversation, type ConversationDeps } from "../domain/conversation/repository.js";
+import { conversationState, heartbeatConversation, nextLessonTopic, pauseConversation, resumeConversation, startConversation, submitConversation, type ConversationDeps } from "../domain/conversation/repository.js";
 import { applyAction } from "../queue/jobs.js";
 import type { DictationEnv } from "../domain/typing/dictation/lessons.js";
 import { modelShaOpt } from "../domain/voices/model.js";
@@ -33,18 +33,19 @@ export function registerConversationRoutes(app: FastifyInstance, db: Db, deps: C
   app.get(base, async () => ({
     topics: [...opts.topics].sort(() => Math.random() - 0.5).slice(0, 8).map(x => x.name),
     topicGroups: Object.fromEntries(opts.topics.map(t => [t.name, t.group])),
-    latest: db.prepare("SELECT id,topic,updated_at AS updatedAt FROM conversation_sessions WHERE history_deleted=0 ORDER BY updated_at DESC,rowid DESC LIMIT 1").get() ?? null,
+    latest: db.prepare("SELECT id,topic,mode,(SELECT label FROM conversation_lesson_targets t WHERE t.session_id=s.id AND t.started_at IS NOT NULL ORDER BY ordinal DESC LIMIT 1) AS lessonTarget,updated_at AS updatedAt FROM conversation_sessions s WHERE history_deleted=0 ORDER BY updated_at DESC,rowid DESC LIMIT 1").get() ?? null,
     statistics: db.prepare("SELECT count(*) AS conversations,coalesce(sum(answer_count),0) AS answers,coalesce(sum(active_ms),0) AS activeMs FROM conversation_sessions").get(),
   }));
   app.post(base, async (req) => {
-    const b = parse(z.object({ topic: z.string().min(1).max(200), tabId: id }).strict(), req.body);
-    if (!opts.topics.some(t => t.name === b.topic)) throw new ApiError(400, "UNKNOWN_TOPIC", "Choose one of the suggested topics.");
-    const sessionId = startConversation(db, deps, b.topic, b.tabId);
+    const b = parse(z.union([z.object({ topic: z.string().min(1).max(200), tabId: id }).strict(), z.object({ mode: z.literal("lesson"), tabId: id }).strict()]), req.body);
+    if ("topic" in b && !opts.topics.some(t => t.name === b.topic)) throw new ApiError(400, "UNKNOWN_TOPIC", "Choose one of the suggested topics.");
+    const sessionId = "topic" in b ? startConversation(db, deps, b.topic, b.tabId) : startConversation(db, deps, "", b.tabId, "lesson");
     opts.onQueued();
     return conversationState(db, sessionId);
   });
   app.get<{ Params: { id: string } }>(`${base}/:id`, async req => conversationState(db, parse(id, req.params.id)));
   app.post<{ Params: { id: string } }>(`${base}/:id/resume`, async req => { const b = parse(tab, req.body); resumeConversation(db, deps, parse(id, req.params.id), b.tabId); return conversationState(db, req.params.id); });
+  app.post<{ Params: { id: string } }>(`${base}/:id/next-topic`, async req => { const b = parse(tab, req.body); nextLessonTopic(db, deps, parse(id, req.params.id), b.tabId); opts.onQueued(); return conversationState(db, req.params.id); });
   app.post<{ Params: { id: string } }>(`${base}/:id/heartbeat`, async req => { const b = parse(tab, req.body); heartbeatConversation(db, deps, parse(id, req.params.id), b.tabId); return { ok: true }; });
   app.post<{ Params: { id: string } }>(`${base}/:id/pause`, async req => { const b = parse(tab, req.body); pauseConversation(db, deps, parse(id, req.params.id), b.tabId); await opts.stt?.stopForSession(req.params.id); return { ok: true }; });
   app.post<{ Params: { id: string } }>(`${base}/:id/delete-history`, async req => {
@@ -86,7 +87,8 @@ export function registerConversationRoutes(app: FastifyInstance, db: Db, deps: C
     const topicGroup = opts.topics.find(t => t.name === row.topic)?.group;
     const voice = opts.dictation.voices.pickForConversation(db, { purpose: "listening", seed: `conversation:${row.topic}`, ...(topicGroup ? { topicGroup } : {}), ...modelShaOpt(opts.dictation.tts) });
     if (!voice) throw new ApiError(503, "SPEECH_UNAVAILABLE", "No voice is enabled.");
-    const text = speakable(row.text).slice(0, 3000), params = opts.dictation.voices.synthesisParams(voice);
+    // a lesson puts Russian on its own "RU:" lines: the English voice skips them (and Whisper could never confirm them)
+    const text = speakable(row.text.split(/\n+/).filter(line => !/[Ѐ-ӿ]/.test(line)).join("\n")).slice(0, 3000), params = opts.dictation.voices.synthesisParams(voice);
     const key = createHash("sha256").update(JSON.stringify([sessionId, b.messageId, text, params, tts.modelSha256, "conversation-asr-v1"])).digest("hex");
     try {
       let wav = cache.get(key)?.wav;
@@ -105,6 +107,7 @@ export function registerConversationRoutes(app: FastifyInstance, db: Db, deps: C
       return reply.header("Cache-Control", "no-store").type("audio/wav").send(wav);
     } catch (e) {
       const reason = e instanceof AsrError ? e.code : e instanceof Error && ["WAV_INVALID", "WAV_LENGTH", "ASR_MISMATCH", "empty_speech", "message_deleted"].includes(e.message) ? e.message : "unavailable";
+      req.log.warn({ reason, error: e instanceof Error ? e.message : String(e) }, "conversation speech check failed");
       throw new ApiError(502, "SPEECH_CHECK_FAILED", "The voice recording did not pass its check. You can read the message or try again.", { reason });
     }
   });

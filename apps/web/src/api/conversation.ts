@@ -2,13 +2,19 @@ import { SessionBootstrapSchema } from "@english-lab/contracts";
 import { ApiRequestError, csrfState, send } from "./transport";
 import { typed } from "./response";
 
-export type ConversationState = { session: { id: string; topic: string; status: string; activeMs: number; answerCount: number }; messages: Array<{ id: string; role: "user" | "assistant"; text: string; analysisStatus: string | null; analysis: string | null }>; vocabulary: string[]; jobs: Array<{ id: string; state: string; errorCode: string | null; action: string; messageId: string | null }> };
+export type LessonTargetView = { ordinal: number; kind: "grammar" | "word" | "expression"; label: string; status: "done" | "current" | "queued" };
 
-export type ConversationHome = { topics: string[]; topicGroups: Record<string, string>; latest: { id: string; topic: string; updatedAt: string } | null; statistics: { conversations: number; answers: number; activeMs: number } };
+export type ConversationState = { session: { id: string; topic: string; mode: "topic" | "lesson"; status: string; activeMs: number; answerCount: number }; lesson: { targets: LessonTargetView[] } | null; messages: Array<{ id: string; role: "user" | "assistant"; text: string; analysisStatus: string | null; analysis: string | null }>; vocabulary: string[]; jobs: Array<{ id: string; state: string; errorCode: string | null; action: string; messageId: string | null }> };
+
+export type ConversationHome = { topics: string[]; topicGroups: Record<string, string>; latest: { id: string; topic: string; mode: "topic" | "lesson"; lessonTarget: string | null; updatedAt: string } | null; statistics: { conversations: number; answers: number; activeMs: number } };
 
 export const conversationHome = () => send("GET", "/api/v1/conversations", typed<ConversationHome>());
 
 export const conversationStart = (topic: string, tabId: string) => send("POST", "/api/v1/conversations", typed<ConversationState>(), { topic, tabId });
+
+export const conversationStartLesson = (tabId: string) => send("POST", "/api/v1/conversations", typed<ConversationState>(), { mode: "lesson", tabId });
+
+export const conversationNextTopic = (id: string, tabId: string) => send("POST", `/api/v1/conversations/${encodeURIComponent(id)}/next-topic`, typed<ConversationState>(), { tabId });
 
 export const conversationRead = (id: string) => send("GET", `/api/v1/conversations/${encodeURIComponent(id)}`, typed<ConversationState>());
 

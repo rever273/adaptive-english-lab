@@ -2,7 +2,7 @@ import { useEffect, useState } from "react";
 import * as api from "../api";
 import { Chart } from "../components/Chart";
 import { wilson } from "../stats";
-import { LINE_COLORS, MultiLineChart } from "../components/MultiLineChart";
+import { MultiLineChart, type LineSeries } from "../components/MultiLineChart";
 
 const time = (ms: number) => `${Math.floor(ms / 60000)}:${String(Math.floor(ms / 1000) % 60).padStart(2, "0")}`;
 const pct = (x: number | null) => (x === null ? "—" : `${(x * 100).toFixed(1)}%`);
@@ -27,6 +27,21 @@ export function GrammarClozeAnalytics({ days }: { days: "7" | "30" | "90" | "all
   const cur = data.comparison.current, prev = data.comparison.previous;
   const enough = cur.answered >= 10 && prev.answered >= 10;
   const ruleLabels = data.ruleSeries.labels;
+  // the weakest of the most practised rules against the other practised ones, each group as ONE combined accuracy line: do the weak spots catch up?
+  const groupLines = ((): LineSeries[] => {
+    const all = data.ruleSeries.series;
+    if (all.length === 0) return [];
+    const byWeakness = [...all].sort((a, b) => { const acc = (x: typeof a) => { const r = x.accuracy.reduce<number>((n, v, i) => n + (v === null ? 0 : v * x.counts[i]!), 0); return r / Math.max(1, x.answered); }; return acc(a) - acc(b); });
+    const weakCount = all.length === 1 ? 1 : Math.min(3, Math.floor(all.length / 2));
+    const weak = new Set(byWeakness.slice(0, weakCount).map((x) => x.ruleKey));
+    const combine = (key: string, name: string, color: string, group: typeof all): LineSeries => {
+      const counts = ruleLabels.map((_, i) => group.reduce((n, x) => n + x.counts[i]!, 0));
+      const values = ruleLabels.map((_, i) => (counts[i] ? group.reduce((n, x) => n + (x.accuracy[i] === null ? 0 : x.accuracy[i]! * x.counts[i]!), 0) / counts[i]! : null));
+      return { key, name, color, values, counts };
+    };
+    const weakGroup = all.filter((x) => weak.has(x.ruleKey)), rest = all.filter((x) => !weak.has(x.ruleKey));
+    return [combine("weak", `Weakest ${weakGroup.length} (${weakGroup.map((x) => x.name).join(", ")})`, "#ef7777", weakGroup), ...(rest.length ? [combine("rest", `Other ${rest.length} practised rules`, "#3fbf6f", rest)] : [])];
+  })();
   return (
     <div data-testid="cloze-analytics">
       <section className="card">
@@ -62,9 +77,7 @@ export function GrammarClozeAnalytics({ days }: { days: "7" | "30" | "90" | "all
           <section className="card">
             <h2>Practice activity</h2>
             <h3>Practice time per day</h3>
-            <Chart ariaLabel="Grammar Cloze practice time per day" bars={{ color: "#b78bff", format: (v) => `${Math.round(v)} min` }} points={data.byDay.map((d) => ({ key: d.day, label: d.day.slice(5), bar: d.activeMs / 60000, tip: [d.day, `${time(d.activeMs)} active`, `${d.answered} answers`] }))} legend="Recorded active time of Grammar Cloze; learning day in Australia/Brisbane." />
-            <h3>Answers per day</h3>
-            <Chart ariaLabel="Grammar Cloze answers per day" bars={{ color: "#6ab7ff", format: (v) => `${Math.round(v)}` }} points={data.byDay.map((d) => ({ key: d.day, label: d.day.slice(5), bar: d.answered, tip: [d.day, `${d.answered} answers`, `${d.correct} right`] }))} />
+            <Chart ariaLabel="Grammar Cloze practice time per day" bars={{ color: "#b78bff", format: (v) => `${Math.round(v)} min` }} line={{ color: "#6ab7ff", format: (v) => `${Math.round(v)}` }} points={data.byDay.map((d) => ({ key: d.day, label: d.day.slice(5), bar: d.activeMs / 60000, line: d.answered, tip: [d.day, `${time(d.activeMs)} active`, `${d.answered} answers`] }))} legend="Bars: recorded active time (left axis). Line: answers that day (right axis). Learning day in Australia/Brisbane." />
           </section>
 
           <section className="card">
@@ -74,12 +87,6 @@ export function GrammarClozeAnalytics({ days }: { days: "7" | "30" | "90" | "all
               line={{ color: "#3fbf6f", format: (v) => `${Math.round(v * 100)}%`, max: 1 }}
               points={data.byDay.map((d) => ({ key: d.day, label: d.day.slice(5), line: d.answered ? d.correct / d.answered : null, muted: d.answered < 5, band: ((): { low: number; high: number } | null => { const b = wilson(d.correct, d.answered); return b && d.answered >= 5 ? b : null; })(), tip: [d.day, d.answered ? `${pct(d.correct / d.answered)} correct` : "no answers", `${d.correct} of ${d.answered}`] }))}
               legend="One point per day: first choices that were right. Faded points have fewer than 5 answers. Whiskers show the 95% range."
-            />
-            <h3>By week, with 95% ranges</h3>
-            <Chart
-              ariaLabel="Share of correct first choices per week with 95% ranges"
-              line={{ color: "#6ab7ff", format: (v) => `${Math.round(v * 100)}%`, max: 1 }}
-              points={data.weekly.map((x) => { const b = wilson(x.correct, x.answered); return { key: x.week, label: x.week.slice(5), line: x.answered ? x.correct / x.answered : null, muted: x.answered < 10, band: b, tip: [`Week from ${x.week}`, `${pct(x.correct / x.answered)} correct`, `${x.correct} of ${x.answered}`, b ? `95% range ${pct(b.low)}–${pct(b.high)}` : ""].filter(Boolean) }; })}
             />
             <details>
               <summary>Table behind the chart</summary>
@@ -122,21 +129,21 @@ export function GrammarClozeAnalytics({ days }: { days: "7" | "30" | "90" | "all
           )}
 
           <section className="card">
-            <h2>Rules over time (the {data.ruleSeries.series.length} most practised)</h2>
-            {data.ruleSeries.series.length > 0 && (
+            <h2>Weak rules against the rest</h2>
+            {groupLines.length > 0 && (
               <MultiLineChart
-                ariaLabel="Accuracy per rule over time"
+                ariaLabel="Accuracy of the weakest rules against the other practised rules over time"
                 labels={ruleLabels}
-                series={data.ruleSeries.series.map((s, i) => ({ key: s.ruleKey, name: s.name, color: LINE_COLORS[i % LINE_COLORS.length]!, values: s.accuracy, counts: s.counts }))}
-                legend={`Share of correct first choices per rule, by ${data.ruleSeries.bucket}. Only the rules with the most answers in the period are drawn (at most 8); click a name to hide its line. Gaps mean no answers.`}
+                series={groupLines}
+                legend={`Share of correct first choices by ${data.ruleSeries.bucket}, among the 8 most practised rules: the weakest ones together against the rest. If the red line climbs towards the green one, the weak spots are catching up. Click a name to hide a line. Gaps mean no answers.`}
               />
             )}
             <h3>By rule (weakest first)</h3>
-            <div className="table-wrap">
+            <div className="table-wrap" style={{ maxHeight: "26rem", overflowY: "auto" }}>
               <table className="data-table" data-testid="cloze-rules">
-                <thead><tr><th>Rule</th><th>Answers</th><th>Slips</th><th>Accuracy</th><th /></tr></thead>
+                <thead style={{ position: "sticky", top: 0, background: "var(--surface)" }}><tr><th>Rule</th><th>Answers</th><th>Slips</th><th>Accuracy</th><th /></tr></thead>
                 <tbody>
-                  {data.byRule.slice(0, 40).map((r) => (
+                  {data.byRule.map((r) => (
                     <tr key={r.ruleKey}>
                       <td>{r.name}{!r.exact && <span className="muted small"> · {r.ruleKey.slice(6).replace(/_/g, " ")}</span>}{r.answered < 5 && <span className="muted small"> (few)</span>}</td>
                       <td>{r.answered}</td>

@@ -19,6 +19,7 @@
     --err-fg: #f6a9a6;
     --err: #e5534b;
     --info-bg: #172741;
+    --con-bg: #2a5b6f;
     --info-fg: #b6d1ff;
     --idk: #a78bfa;
     --idk-bg: #251d3d;
@@ -131,4 +132,3 @@ code {
         margin-bottom: 0.5rem;
     }
 }
-
