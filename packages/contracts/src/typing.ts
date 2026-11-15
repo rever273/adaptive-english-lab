@@ -182,6 +182,7 @@ export const TypingOverviewSchema = z
         activeSessionId: z.string().nullable(),
         bankWords: z.number().int(),
         drills: z.object({ nextLevel: z.number().int(), stage: z.number().int(), learned: z.number().int(), activeSessionId: z.string().nullable() }).strict(),
+        keys: z.object({ nextLesson: z.number().int(), openKeys: z.number().int(), focused: z.string().nullable() }).strict().nullable(),
       })
       .strict(),
     books: z
@@ -242,7 +243,39 @@ export type TypingResult = z.infer<typeof TypingResultSchema>;
 
 const Point = z.object({ at: z.string(), value: z.number(), status: z.string() }).strict();
 
-export const TypingAnalyticsModeSchema = z.enum(["words", "books", "drills"]);
+export const TypingAnalyticsModeSchema = z.enum(["words", "books", "drills", "keys"]);
+
+/** keybr.com's per-key view, for every typing mode (derived from the raw key and letter-pair facts) */
+export const TypingKeyboardAnalyticsSchema = z
+  .object({
+    goalCpm: z.number().int(),
+    /** the accuracy a key must keep (0..1); the share of wrong presses it may have is 1 minus this */
+    minAccuracy: z.number(),
+    keys: z.array(
+      z
+        .object({
+          letter: z.string(),
+          lessons: z.number().int(),
+          /** smoothed speed now and the best smoothed speed ever, characters per minute */
+          cpm: z.number().nullable(),
+          bestCpm: z.number().nullable(),
+          /** against the goal: 1 = at the goal speed */
+          confidence: z.number().nullable(),
+          bestConfidence: z.number().nullable(),
+          hits: z.number().int(),
+          misses: z.number().int(),
+          errorRate: z.number().nullable(),
+          readiness: z.number(),
+          /** the key's learning curve: raw and smoothed speed per lesson, oldest first */
+          curve: z.array(z.object({ at: z.string(), cpm: z.number(), smoothed: z.number() }).strict()),
+        })
+        .strict(),
+    ),
+    /** straight line through the speed of the last 50 sessions, to the goal */
+    forecast: z.object({ cpmPerLesson: z.number(), lessonsToGoal: z.number().int().nullable(), hoursToGoal: z.number().nullable() }).strict().nullable(),
+  })
+  .strict();
+export type TypingKeyboardAnalytics = z.infer<typeof TypingKeyboardAnalyticsSchema>;
 export type TypingAnalyticsMode = z.infer<typeof TypingAnalyticsModeSchema>;
 
 export const TypingAnalyticsSchema = z
@@ -270,6 +303,8 @@ export const TypingAnalyticsSchema = z
         totalChars: z.number().int().optional(),
         bestCombo: z.number().int().nullable().optional(),
         bestCharStreak: z.number().int().nullable().optional(),
+        /** Key Builder only: the alphabet now and the speeds it is judged by */
+        keyBuilder: z.object({ openKeys: z.number().int(), focused: z.string().nullable(), targetCpm: z.number().int(), goalCpm: z.number().int(), currentCpm: z.number().int(), keys: z.lazy(() => z.array(TypingKeyStateSchema)) }).strict().optional(),
         /** Words only: the memory check after levels (words typed from their translation) */
         recall: z.object({ checks: z.number().int(), words: z.number().int(), withoutHelpRate: z.number().nullable(), avgPoints: z.number().nullable() }).strict().optional(),
         /** Finger Drills only: current stage, learned words and words practised at least once */
@@ -296,6 +331,10 @@ export const TypingAnalyticsSchema = z
                   msPerLetter: z.number().int().nullable(),
                   learned: z.boolean(),
                   nextInLevels: z.number().int().nullable(),
+                  /** time per letter (ms) of every timed showing, oldest first */
+                  speed: z.array(z.number().int()),
+                  /** perfect share (%) of the recent showings after each showing, oldest first */
+                  trend: z.array(z.number().int()),
                 })
                 .strict(),
             ),
@@ -324,9 +363,29 @@ export const TypingAnalyticsSchema = z
         charStreak: z.array(z.object({ at: z.string(), value: z.number().int().nullable(), status: z.string() }).strict()).optional(),
         /** Finger Drills: per finished level, typed words without and with errors, and the learned words after it */
         drillProgress: z.array(z.object({ at: z.string(), status: z.string(), clean: z.number().int(), withErrors: z.number().int(), learned: z.number().int() }).strict()).optional(),
+        /** Key Builder: open keys and the target speed when each lesson was made */
+        keyProgress: z
+          .array(
+            z
+              .object({
+                at: z.string(),
+                open: z.number().int(),
+                targetCpm: z.number().int(),
+                /** the lesson's own speed and accuracy (percent) */
+                wpm: z.number(),
+                accuracy: z.number().nullable(),
+                /** the accuracy limit a key must keep to count as reached, percent */
+                accuracyLimit: z.number(),
+                /** letters that opened since the previous finished lesson */
+                newKeys: z.array(z.string()),
+              })
+              .strict(),
+          )
+          .optional(),
         bookWordAccuracy: z.array(z.object({ at: z.string(), completed: z.number().int(), withErrors: z.number().int(), partial: z.boolean() }).strict()).optional(),
       })
       .strict(),
+    keyboard: TypingKeyboardAnalyticsSchema.optional(),
   })
   .strict();
 export type TypingAnalytics = z.infer<typeof TypingAnalyticsSchema>;
@@ -345,3 +404,118 @@ export const TypingRecallSaveRequestSchema = z
   })
   .strict();
 export type TypingRecallSaveRequest = z.infer<typeof TypingRecallSaveRequestSchema>;
+
+/** Key Builder (keybr.com guided lessons): letters open one by one as the open ones reach the target speed */
+export const TYPING_KEYS_RULES_VERSION = "keys-guided-v2";
+export const TYPING_KEYS_XP_VERSION = "typing-keys-xp-v1";
+
+export const TypingKeyStateSchema = z
+  .object({
+    letter: z.string(),
+    included: z.boolean(),
+    focused: z.boolean(),
+    /** target time / smoothed time per press; 1 = at the target speed */
+    confidence: z.number().nullable(),
+    bestConfidence: z.number().nullable(),
+    /** smoothed speed of this key, characters per minute */
+    cpm: z.number().nullable(),
+    lessons: z.number().int(),
+    /** smoothed share of wrong presses of this key */
+    errorRate: z.number().nullable(),
+    /** speed and accuracy together: 1 or more = the key has reached the target */
+    readiness: z.number(),
+  })
+  .strict();
+export type TypingKeyState = z.infer<typeof TypingKeyStateSchema>;
+
+export const TypingKeyTokenSchema = z.object({ text: z.string(), kind: z.enum(["word", "pseudo"]), translationRu: z.string().nullable() }).strict();
+export type TypingKeyToken = z.infer<typeof TypingKeyTokenSchema>;
+
+export const TypingKeysStartResponseSchema = z
+  .object({
+    lessonId: z.string(),
+    lessonNumber: z.number().int().positive(),
+    /** the target of the current stage: fixed when its letter opened, at the speed then, never above the goal */
+    targetCpm: z.number().int(),
+    goalCpm: z.number().int(),
+    keys: z.array(TypingKeyStateSchema),
+    tokens: z.array(TypingKeyTokenSchema),
+  })
+  .strict();
+export type TypingKeysStartResponse = z.infer<typeof TypingKeysStartResponseSchema>;
+
+const KeyFact = z.object({ letter: z.string().regex(/^[a-z]$/), hits: z.number().int().min(0).max(10000), misses: z.number().int().min(0).max(10000), meanMs: z.number().int().min(0).max(60000) }).strict();
+export const TypingKeysCompleteRequestSchema = z.object({ ...Counters, keys: z.array(KeyFact).max(26), keyStats: KeyStats, bestCharStreak: z.number().int().min(0).max(100000).optional() }).strict();
+export type TypingKeysCompleteRequest = z.infer<typeof TypingKeysCompleteRequestSchema>;
+
+export const TypingKeysGoalForecastSchema = z.object({ cpmPerLesson: z.number(), lessonsToGoal: z.number().int().nullable(), hoursToGoal: z.number().nullable() }).strict();
+
+export const TypingKeysResultSchema = z
+  .object({
+    lessonId: z.string(),
+    lessonNumber: z.number().int(),
+    targetCpm: z.number().int(),
+    goalCpm: z.number().int(),
+    /** median speed of the recent lessons */
+    currentCpm: z.number().int(),
+    goalForecast: TypingKeysGoalForecastSchema.nullable(),
+    cpm: z.number(),
+    wpm: z.number(),
+    accuracy: z.number(),
+    activeMs: z.number().int(),
+    errors: z.number().int(),
+    /** speed of the previous completed lesson, for comparison */
+    previousCpm: z.number().nullable(),
+    xpAwarded: z.number().int(),
+    keys: z.array(TypingKeyStateSchema),
+    /** letters this lesson opened */
+    newKeys: z.array(z.string()),
+    /** what the next letter waits for: every open key against the stage target, with this lesson's numbers and a rough outlook */
+    nextKey: z
+      .object({
+        /** the letter that opens next; null when the whole alphabet is open */
+        letter: z.string().nullable(),
+        targetCpm: z.number().int(),
+        minAccuracy: z.number(),
+        /** 0..1: how close every open key is to the target (mean of each key's weaker part, speed or accuracy); 1 opens the next letter */
+        progress: z.number(),
+        keys: z.array(
+          z
+            .object({
+              letter: z.string(),
+              /** lessons this key has facts from */
+              lessons: z.number().int(),
+              /** 0..1: best speed against the target */
+              speedProgress: z.number(),
+              /** 0..1: how far the key is from the accuracy limit (1 = within it) */
+              accuracyProgress: z.number(),
+              /** the key's smoothed (average) speed now */
+              cpm: z.number().nullable(),
+              /** the best that smoothed speed ever reached: this is what is judged */
+              bestCpm: z.number().nullable(),
+              /** smoothed share of wrong presses, weighted by presses */
+              errorRate: z.number().nullable(),
+              /** its lower bound allowing for chance: what is judged against the limit */
+              errorBound: z.number().nullable(),
+              /** raw share of wrong presses over the key's last 10 lessons */
+              recentErrorRate: z.number().nullable(),
+              speedReached: z.boolean(),
+              accuracyReached: z.boolean(),
+              /** lessons until reached at the recent pace and accuracy; 0 = reached; null = no honest estimate */
+              lessonsLeft: z.number().int().nullable(),
+              /** the fewest lessons for the accuracy part: every one without a mistake on this key */
+              cleanLessonsLeft: z.number().int().nullable(),
+              /** this lesson only */
+              lesson: z.object({ cpm: z.number().nullable(), hits: z.number().int(), misses: z.number().int() }).strict().nullable(),
+            })
+            .strict(),
+        ),
+      })
+      .strict(),
+    /** speed forecast of the focused key (keybr learning rate); null while the data is too thin */
+    forecast: z.object({ letter: z.string(), cpmPerLesson: z.number(), remainingLessons: z.number().int().nullable(), certainty: z.number() }).strict().nullable(),
+    lessonsToday: z.number().int(),
+  })
+  .strict();
+export type TypingKeysResult = z.infer<typeof TypingKeysResultSchema>;
+

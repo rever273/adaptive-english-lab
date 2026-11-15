@@ -400,6 +400,10 @@ export interface DrillWordRow {
     learned: boolean;
     /** learned words: levels until the next review showing (0 = in the next level) */
     nextInLevels: number | null;
+    /** time per letter (ms) of every timed showing, oldest first */
+    speed: number[];
+    /** perfect share (%) of the last ACCURACY_WINDOW showings after each showing, oldest first */
+    trend: number[];
 }
 
 export function drillsSummary(db: Db): {
@@ -414,20 +418,29 @@ export function drillsSummary(db: Db): {
     words: DrillWordRow[];
 } {
     const state = drillState(db);
-    // the most recently practised first, at most 60
+    // every practised word, the most recently practised first (the page sorts and pages them itself)
     const words = [...state.progress]
-        .map(([lemma, p]) => ({
-            lemma,
-            showings: p.showings,
-            accuracy: Math.round(p.accuracy * 1000) / 1000,
-            step: p.step,
-            msPerLetter: p.msPerLetter,
-            learned: p.step > 0,
-            nextInLevels: p.step > 0 ? Math.max(0, REVIEW_INTERVALS[p.step]! - (state.sessions - p.lastSession)) : null,
-            last: p.lastSession,
-        }))
+        .map(([lemma, p]) => {
+            const reps = state.reps.get(lemma) ?? [];
+            return {
+                lemma,
+                showings: p.showings,
+                accuracy: Math.round(p.accuracy * 1000) / 1000,
+                step: p.step,
+                msPerLetter: p.msPerLetter,
+                learned: p.step > 0,
+                nextInLevels: p.step > 0 ? Math.max(0, REVIEW_INTERVALS[p.step]! - (state.sessions - p.lastSession)) : null,
+                // typing time per letter of every timed showing, oldest first
+                speed: reps.filter((r) => r.ms !== null).map((r) => Math.round(r.ms! / lemma.length)),
+                // share of perfect showings (%) among the last ACCURACY_WINDOW after each showing, oldest first
+                trend: reps.map((_, i) => {
+                    const win = reps.slice(Math.max(0, i + 1 - ACCURACY_WINDOW), i + 1);
+                    return Math.round((win.filter((r) => r.errors === 0).length / win.length) * 100);
+                }),
+                last: p.lastSession,
+            };
+        })
         .sort((a, b) => b.last - a.last || Number(a.learned) - Number(b.learned) || (a.lemma < b.lemma ? -1 : 1))
-        .slice(0, 60)
         .map(({ last: _last, ...w }) => w);
     return {
         stage: currentStage(candidates(db), state.learned),

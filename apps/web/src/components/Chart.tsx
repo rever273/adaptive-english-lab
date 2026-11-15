@@ -14,6 +14,8 @@ export interface ChartPoint {
   bar?: number | null;
   bar2?: number | null;
   line?: number | null;
+  /** a second, dashed reference line on the same axis as the line (a target, a limit) */
+  line2?: number | null;
   /** drawn faded (few answers, failed attempt …) */
   muted?: boolean;
   highlight?: boolean;
@@ -26,6 +28,11 @@ export interface ChartSeries {
   format: (v: number) => string;
   /** fixed upper bound of the axis (e.g. 1 for rates); otherwise a "nice" value above the data */
   max?: number;
+  /**
+   * line only: the axis starts at a "nice" value just below the lowest value instead of at 0 (accuracy never reaches 0, so a scale
+   * from 0 would squash the whole line against the top)
+   */
+  floating?: boolean;
 }
 
 /** the chart is drawn at the width it is shown at, so the text is the same size in every chart whatever its width */
@@ -34,23 +41,45 @@ const H = 230;
 const PAD_T = 14;
 const PAD_B = 26;
 
-function niceTicks(max: number, count = 4): { top: number; ticks: number[] } {
+interface Axis {
+  top: number;
+  min: number;
+  ticks: number[];
+}
+
+function niceTicks(max: number, count = 4): Axis {
   const raw = Math.max(max, 1e-9) / count;
   const mag = 10 ** Math.floor(Math.log10(raw));
   const step = ([1, 2, 2.5, 5, 10].find((m) => m * mag >= raw) ?? 10) * mag;
   const top = Math.ceil(max / step - 1e-9) * step || step;
   const ticks: number[] = [];
   for (let v = 0; v <= top + step / 1000; v += step) ticks.push(Math.round(v * 1e6) / 1e6);
-  return { top, ticks };
+  return { top, min: 0, ticks };
 }
 
-function axisOf(values: Array<number | null | undefined>, s: ChartSeries): { top: number; ticks: number[] } {
+/** an axis from a nice value below the lowest value to a nice value above the highest one */
+export function floatingTicks(lo: number, hi: number, count = 4): Axis {
+  const span = Math.max(hi - lo, 1);
+  const step = niceTicks(span, count).ticks[1] ?? 1;
+  // a little room under the lowest value, but never below 0 for values that are not negative
+  const min = Math.max(lo >= 0 ? 0 : -Infinity, Math.floor((lo - span * 0.05) / step + 1e-9) * step);
+  const top = Math.max(Math.ceil(hi / step - 1e-9) * step, min + step);
+  const ticks: number[] = [];
+  for (let v = min; v <= top + step / 1000; v += step) ticks.push(Math.round(v * 1e6) / 1e6);
+  return { top, min, ticks };
+}
+
+function axisOf(values: Array<number | null | undefined>, s: ChartSeries): Axis {
   const present = values.filter((v): v is number => typeof v === "number");
+  if (s.floating && present.length > 0) {
+    const hi = s.max !== undefined ? Math.max(s.max, ...present) : Math.max(...present);
+    return floatingTicks(Math.min(...present), hi);
+  }
   if (s.max !== undefined) return niceTicks(s.max, s.max <= 1 ? 4 : 4);
   return niceTicks(Math.max(1, ...present));
 }
 
-export function Chart({ points, bars, bars2, line, ariaLabel, legend, secondary }: { points: ChartPoint[]; bars?: ChartSeries; bars2?: ChartSeries; line?: ChartSeries; ariaLabel: string; legend?: string; secondary?: { factor: number; color: string; format: (v: number) => string } }) {
+export function Chart({ points, bars, bars2, line, line2, ariaLabel, legend, secondary, connectGaps }: { connectGaps?: boolean; points: ChartPoint[]; bars?: ChartSeries; bars2?: ChartSeries; line?: ChartSeries; line2?: ChartSeries; ariaLabel: string; legend?: string; secondary?: { factor: number; color: string; format: (v: number) => string } }) {
   const id = useId().replace(/:/g, "");
   const [hover, setHover] = useState<number | null>(null);
   const box = useRef<HTMLDivElement>(null);
@@ -75,11 +104,11 @@ export function Chart({ points, bars, bars2, line, ariaLabel, legend, secondary 
   const slot = plotW / n;
   const x = (i: number) => padL + slot * (i + 0.5);
 
-  const barAxis = bars ? axisOf(points.flatMap((p) => [p.bar, ...(bars2 ? [p.bar2] : [])]), bars) : null;
-  const lineAxis = line ? axisOf(points.map((p) => p.line), line) : null;
+  const barAxis = bars ? axisOf(points.flatMap((p) => [p.bar, ...(bars2 ? [p.bar2] : []), ...(!line && line2 ? [p.line2] : [])]), bars) : null;
+  const lineAxis = line ? axisOf(points.flatMap((p) => [p.line, ...(line2 ? [p.line2] : [])]), line) : null;
   const leftAxis = (barAxis ?? lineAxis)!;
   const leftSeries = (bars ?? line)!;
-  const yOf = (v: number, axis: { top: number }) => PAD_T + plotH - (v / axis.top) * plotH;
+  const yOf = (v: number, axis: Axis) => PAD_T + plotH - ((v - axis.min) / (axis.top - axis.min)) * plotH;
   const bw = Math.max(0.4, Math.min(34, slot * 0.8));
 
   // the line is split into runs so gaps stay gaps
@@ -88,11 +117,22 @@ export function Chart({ points, bars, bars2, line, ariaLabel, legend, secondary 
     let cur: Array<{ x: number; y: number }> = [];
     points.forEach((p, i) => {
       if (typeof p.line !== "number") {
-        if (cur.length) runs.push(cur);
-        cur = [];
+        if (cur.length && !connectGaps) runs.push(cur);
+        if (!connectGaps) cur = [];
       } else cur.push({ x: x(i), y: yOf(p.line, lineAxis) });
     });
     if (cur.length) runs.push(cur);
+  }
+  // the reference line is drawn as steps: a target or a limit holds until it changes
+  const ref: Array<{ x: number; y: number }> = [];
+  const refAxis = lineAxis ?? barAxis;
+  if (line2 && refAxis) {
+    points.forEach((p, i) => { if (typeof p.line2 === "number") ref.push({ x: x(i), y: yOf(p.line2, refAxis) }); });
+    // the reference holds from edge to edge of the plot
+    if (ref.length > 0) {
+      ref.unshift({ x: padL, y: ref[0]!.y });
+      ref.push({ x: W - padR, y: ref[ref.length - 1]!.y });
+    }
   }
   const path = (run: Array<{ x: number; y: number }>) => run.map((p, i) => `${i === 0 ? "M" : "L"}${p.x.toFixed(1)},${p.y.toFixed(1)}`).join(" ");
   const base = PAD_T + plotH;
@@ -141,6 +181,7 @@ export function Chart({ points, bars, bars2, line, ariaLabel, legend, secondary 
           {bars2 && barAxis && points.map((p, i) => typeof p.bar2 === "number" && (
             <rect key={`b2-${p.key}`} x={x(i)} y={yOf(p.bar2, barAxis)} width={bw / 2} height={Math.max(1.5, base - yOf(p.bar2, barAxis))} rx={Math.min(3, bw / 4)} fill={bars2.color} opacity={p.muted ? 0.4 : 0.88} />
           ))}
+          {line2 && ref.length > 1 && <path d={ref.map((q, i) => (i === 0 ? `M${q.x.toFixed(1)},${q.y.toFixed(1)}` : `L${q.x.toFixed(1)},${ref[i - 1]!.y.toFixed(1)} L${q.x.toFixed(1)},${q.y.toFixed(1)}`)).join(" ")} fill="none" stroke={line2.color} strokeWidth={1.8} strokeDasharray="6 4" strokeLinejoin="round" opacity={0.9} />}
           {line && lineAxis && runs.map((run, i) => (
             <g key={i}>
               {run.length > 1 && !bars && <path d={`${path(run)} L${run[run.length - 1]!.x},${base} L${run[0]!.x},${base} Z`} fill={`url(#${id}a)`} />}

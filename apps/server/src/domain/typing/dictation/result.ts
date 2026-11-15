@@ -13,7 +13,7 @@ interface Row {
   topic: string;
   target_skill_id: string | null;
   voice_name: string | null;
-  source: "tts";
+  source: "tts" | "real";
 }
 
 /** typing speed from correct characters and the time spent typing; null without timing */

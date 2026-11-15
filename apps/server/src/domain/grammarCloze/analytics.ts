@@ -13,7 +13,7 @@ export interface ClozeAnalytics {
   comparison: { current: Window; previous: Window };
   /** share of Stage 1 answered at the end of each day with answers (all time up to that day, shown for the period) */
   progress: Array<{ day: string; processed: number; percent: number }>;
-  /** the rules that matter most (most answers in the period, at most 8) with their accuracy per bucket; null = no answers in that bucket */
+  /** every rule answered in the period (most answers first) with their accuracy per bucket; null = no answers in that bucket */
   ruleSeries: { bucket: "day" | "week"; labels: string[]; series: Array<{ ruleKey: string; name: string; answered: number; accuracy: Array<number | null>; counts: number[] }> };
   byRule: Array<{ ruleKey: string; name: string; exact: boolean; answered: number; correct: number; accuracy: number }>;
   responseMs: { median: number | null; p75: number | null };
@@ -88,7 +88,7 @@ export function clozeAnalytics(db: Db, days: Days, now: Date): ClozeAnalytics {
   const bucket: "day" | "week" = days === "7" || dayRows.length <= 10 ? "day" : "week";
   const keyOf = (iso: string): string => (bucket === "day" ? learningDate(Date.parse(iso)) : weekStart(learningDate(Date.parse(iso))));
   const labels = [...new Set(attempts.map((a) => keyOf(a.at)))].sort();
-  const top = [...rules.entries()].sort((a, b) => b[1].answered - a[1].answered || a[1].correct / a[1].answered - b[1].correct / b[1].answered).slice(0, 8);
+  const top = [...rules.entries()].sort((a, b) => b[1].answered - a[1].answered || a[1].correct / a[1].answered - b[1].correct / b[1].answered);
   const series = top.map(([ruleKey, v]) => {
     const counts = labels.map(() => 0), right = labels.map(() => 0);
     for (const a of attempts) if (a.ruleKey === ruleKey) { const i = labels.indexOf(keyOf(a.at)); counts[i]!++; right[i]! += a.ok; }

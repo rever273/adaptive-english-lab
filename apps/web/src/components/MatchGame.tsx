@@ -22,8 +22,8 @@ export const MATCH_TITLE: Record<MatchMode, { icon: string; title: string; hint:
  * The matching game after a vocabulary practice (see game/matchEngine.ts). Nothing is saved: it is practice, not evidence.
  * `onDone` is called once, a moment after the last pair (or when the learner skips the game).
  */
-export function MatchGame({ words, mode, soundsEnabled, speechEnabled, onDone }: { words: MatchWord[]; mode: MatchMode; soundsEnabled: boolean; speechEnabled: boolean; onDone: (results: MatchResult[] | null) => void }) {
-    const [state, setState] = useState<MatchState>(() => createMatch(words, mode));
+export function MatchGame({ words, mode, rounds, soundsEnabled, speechEnabled, onDone }: { words: MatchWord[]; mode: MatchMode; rounds: number; soundsEnabled: boolean; speechEnabled: boolean; onDone: (results: MatchResult[] | null) => void }) {
+    const [state, setState] = useState<MatchState>(() => createMatch(words, mode, Math.random, rounds));
     const ref = useRef(state);
     const timers = useRef<number[]>([]);
     const alive = useRef(true);

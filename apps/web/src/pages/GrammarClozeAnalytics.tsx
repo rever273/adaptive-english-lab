@@ -2,7 +2,8 @@ import { useEffect, useState } from "react";
 import * as api from "../api";
 import { Chart } from "../components/Chart";
 import { wilson } from "../stats";
-import { MultiLineChart, type LineSeries } from "../components/MultiLineChart";
+import { ClozeRules } from "./GrammarClozeRules";
+import { fmtDuration } from "../format";
 
 const time = (ms: number) => `${Math.floor(ms / 60000)}:${String(Math.floor(ms / 1000) % 60).padStart(2, "0")}`;
 const pct = (x: number | null) => (x === null ? "—" : `${(x * 100).toFixed(1)}%`);
@@ -26,22 +27,6 @@ export function GrammarClozeAnalytics({ days }: { days: "7" | "30" | "90" | "all
   const w = wilson(t.correct, t.answered);
   const cur = data.comparison.current, prev = data.comparison.previous;
   const enough = cur.answered >= 10 && prev.answered >= 10;
-  const ruleLabels = data.ruleSeries.labels;
-  // the weakest of the most practised rules against the other practised ones, each group as ONE combined accuracy line: do the weak spots catch up?
-  const groupLines = ((): LineSeries[] => {
-    const all = data.ruleSeries.series;
-    if (all.length === 0) return [];
-    const byWeakness = [...all].sort((a, b) => { const acc = (x: typeof a) => { const r = x.accuracy.reduce<number>((n, v, i) => n + (v === null ? 0 : v * x.counts[i]!), 0); return r / Math.max(1, x.answered); }; return acc(a) - acc(b); });
-    const weakCount = all.length === 1 ? 1 : Math.min(3, Math.floor(all.length / 2));
-    const weak = new Set(byWeakness.slice(0, weakCount).map((x) => x.ruleKey));
-    const combine = (key: string, name: string, color: string, group: typeof all): LineSeries => {
-      const counts = ruleLabels.map((_, i) => group.reduce((n, x) => n + x.counts[i]!, 0));
-      const values = ruleLabels.map((_, i) => (counts[i] ? group.reduce((n, x) => n + (x.accuracy[i] === null ? 0 : x.accuracy[i]! * x.counts[i]!), 0) / counts[i]! : null));
-      return { key, name, color, values, counts };
-    };
-    const weakGroup = all.filter((x) => weak.has(x.ruleKey)), rest = all.filter((x) => !weak.has(x.ruleKey));
-    return [combine("weak", `Weakest ${weakGroup.length} (${weakGroup.map((x) => x.name).join(", ")})`, "#ef7777", weakGroup), ...(rest.length ? [combine("rest", `Other ${rest.length} practised rules`, "#3fbf6f", rest)] : [])];
-  })();
   return (
     <div data-testid="cloze-analytics">
       <section className="card">
@@ -57,7 +42,7 @@ export function GrammarClozeAnalytics({ days }: { days: "7" | "30" | "90" | "all
                 ["Sessions", String(t.sessions), ""],
                 ["Answers", String(t.answered), `${t.incorrect} wrong`],
                 ["Excluded sentences", String(t.excluded), ""],
-                ["Active time", time(t.activeMs), t.sessions ? `${time(t.activeMs / t.sessions)} per session` : ""],
+                ["Active time", fmtDuration(t.activeMs), t.sessions ? `${fmtDuration(t.activeMs / t.sessions)} per session` : ""],
                 ["Median answer time", sec(data.responseMs.median), `75% answer within ${sec(data.responseMs.p75)}`],
               ] as const).map(([label, value, note]) => (
                 <div className="stat" key={label}><span className="stat-num">{value}</span><span className="stat-label">{label}{note && <span className="muted"> ({note})</span>}</span></div>
@@ -128,35 +113,7 @@ export function GrammarClozeAnalytics({ days }: { days: "7" | "30" | "90" | "all
             </section>
           )}
 
-          <section className="card">
-            <h2>Weak rules against the rest</h2>
-            {groupLines.length > 0 && (
-              <MultiLineChart
-                ariaLabel="Accuracy of the weakest rules against the other practised rules over time"
-                labels={ruleLabels}
-                series={groupLines}
-                legend={`Share of correct first choices by ${data.ruleSeries.bucket}, among the 8 most practised rules: the weakest ones together against the rest. If the red line climbs towards the green one, the weak spots are catching up. Click a name to hide a line. Gaps mean no answers.`}
-              />
-            )}
-            <h3>By rule (weakest first)</h3>
-            <div className="table-wrap" style={{ maxHeight: "26rem", overflowY: "auto" }}>
-              <table className="data-table" data-testid="cloze-rules">
-                <thead style={{ position: "sticky", top: 0, background: "var(--surface)" }}><tr><th>Rule</th><th>Answers</th><th>Slips</th><th>Accuracy</th><th /></tr></thead>
-                <tbody>
-                  {data.byRule.map((r) => (
-                    <tr key={r.ruleKey}>
-                      <td>{r.name}{!r.exact && <span className="muted small"> · {r.ruleKey.slice(6).replace(/_/g, " ")}</span>}{r.answered < 5 && <span className="muted small"> (few)</span>}</td>
-                      <td>{r.answered}</td>
-                      <td>{r.answered - r.correct}</td>
-                      <td>{pct(r.accuracy)}</td>
-                      <td><span className="bar" aria-hidden="true"><span style={{ width: `${(1 - r.accuracy) * 100}%` }} /></span></td>
-                    </tr>
-                  ))}
-                </tbody>
-              </table>
-            </div>
-            <p className="muted small">The bar shows the share of slips. Rules with fewer than 5 answers are marked “few”: read them with care.</p>
-          </section>
+          <ClozeRules data={data} />
         </>
       )}
     </div>

@@ -14,7 +14,10 @@ export function registerJourneyRoutes(app: FastifyInstance, db: Db): void {
     return db.transaction(() => {
       const old = db.prepare("SELECT session_id AS sessionId,mode,start_ms AS startMs,end_ms AS endMs FROM journey_typing_intervals WHERE id=?").get(b.id) as Omit<typeof b,"id"> | undefined;
       if (old) { if (old.sessionId !== b.sessionId || old.mode !== b.mode || old.startMs !== b.startMs || old.endMs !== b.endMs) throw new ApiError(409,"ACTIVITY_ID_CONFLICT","Interval id already used"); return { recorded: false }; }
-      const row = b.mode === "dictation" ? db.prepare("SELECT started_at AS startedAt,completed_at AS endedAt FROM typing_dictation_lessons WHERE id=?").get(b.sessionId) : db.prepare("SELECT started_at AS startedAt,ended_at AS endedAt FROM typing_sessions WHERE id=? AND mode=?").get(b.sessionId,b.mode);
+      const row = b.mode === "dictation" ? db.prepare("SELECT started_at AS startedAt,completed_at AS endedAt FROM typing_dictation_lessons WHERE id=?").get(b.sessionId)
+        : db.prepare("SELECT started_at AS startedAt,ended_at AS endedAt FROM typing_sessions WHERE id=? AND mode=?").get(b.sessionId,b.mode)
+          // a Key Builder lesson is Words time
+          ?? (b.mode === "words" ? db.prepare("SELECT started_at AS startedAt,ended_at AS endedAt FROM typing_key_lessons WHERE id=?").get(b.sessionId) : undefined);
       const session = row as {startedAt: string|null;endedAt: string|null}|undefined;
       if (!session?.startedAt) throw new ApiError(404,"SESSION_NOT_FOUND","Unknown typing session");
       if (b.endMs <= b.startMs || b.endMs-b.startMs > 15000 || b.startMs < Date.parse(session.startedAt) || b.endMs > Date.now()+2000 || (session.endedAt && b.endMs > Date.parse(session.endedAt)+2000)) throw new ApiError(400,"ACTIVITY_INVALID","Invalid interval");

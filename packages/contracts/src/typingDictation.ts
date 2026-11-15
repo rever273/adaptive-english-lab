@@ -1,10 +1,10 @@
 import { z } from "zod";
 
-export const DICTATION_CHECK_VERSION = "dictation-check-v1";
+export const DICTATION_CHECK_VERSION = "dictation-check-v2";
 export const DICTATION_XP_VERSION = "typing-dictation-xp-v1";
 export const DICTATION_METRICS_VERSION = "dictation-metrics-v1";
 
-export const DictationUnavailableReasonSchema = z.enum(["tts_not_installed", "tts_model_missing", "asr_unavailable"]);
+export const DictationUnavailableReasonSchema = z.enum(["tts_not_installed", "tts_model_missing", "asr_unavailable", "real_speech_unavailable"]);
 
 /** effective state, see lessons.ts: `failed` also covers a lesson whose jobs ended without all sentences */
 export const DictationLessonSummarySchema = z.object({
@@ -32,7 +32,7 @@ export const DictationExerciseStateSchema = z.object({
   /** the sentence came back because it was answered with mistakes before */
   isRepeat: z.boolean(),
   translationRu: z.string().nullable(), // null until opened
-  source: z.literal("tts"),
+  source: z.enum(["tts", "real"]),
   attempts: z.number().int(), plays: z.number().int(), audioMs: z.number().int(),
   /** D128: the learner marked the sound of this sentence as bad */
   soundFlagged: z.boolean(),
@@ -71,7 +71,7 @@ export const DictationResultSchema = z.object({
   metricsVersion: z.string(),
   items: z.array(z.object({
     ordinal: z.number().int(), textEn: z.string(), translationRu: z.string(), topic: z.string(), targetSkillId: z.string().nullable(),
-    voiceName: z.string().nullable(), source: z.literal("tts"), plays: z.number().int(), attempts: z.number().int(),
+    voiceName: z.string().nullable(), source: z.enum(["tts", "real"]), plays: z.number().int(), attempts: z.number().int(),
     maxHintLevel: z.number().int(), outcome: z.enum(["no_help", "partial", "full_reveal"]), firstAnswer: z.string(),
     diff: z.array(z.object({ op: z.enum(["same", "missing", "extra", "wrong"]), expected: z.string().nullable(), typed: z.string().nullable() }).strict()),
     /** what kind of mistakes the first answer had (approximate, from comparing the words; never changes Grammar Mastery) */

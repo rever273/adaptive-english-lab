@@ -4,6 +4,7 @@ import * as api from "../../api";
 import { unconfirmedLabel } from "../../practiceFlow";
 import { watchBlockReview, type ReviewRow } from "../../practiceReview";
 import { DetailDiff, VocabWhy } from "./FeedbackDetails";
+import { useEnterContinue } from "../../components/hotkeys";
 
 /** how one answer is shown in a review: icon, colour and words agree with the summary counts (an AI opinion is never "Correct") */
 function outcome(f: FeedbackResponse): { cls: string; icon: string; label: string } {
@@ -60,6 +61,8 @@ function BlockReview({ sessionId }: { sessionId: string }) {
 export function SummaryScreen({ summary: first, onDone, onNavigate, onDailyDone }: { summary: SessionSummary; onDone: () => void; onNavigate?: (page: "vocabulary" | "analytics") => void; onDailyDone?: () => void }) {
   // T3c: the numbers were fixed at the moment the session ended; while local AI checks of its answers are still running they are re-read, so the counter counts down
   const [summary, setSummary] = useState(first);
+  // Enter on the final statistics continues the daily practice, else closes the summary
+  useEnterContinue(onDailyDone ?? onDone);
   useEffect(() => setSummary(first), [first]);
   const waitingForAi = summary.aiWaiting ?? 0;
   useEffect(() => {

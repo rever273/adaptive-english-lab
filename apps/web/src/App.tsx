@@ -51,11 +51,19 @@ const PRACTICE_PATH: Record<PracticeView, string> = { hub: "/practice", grammar:
  * One small event stream to the server keeps this tab linked to it. When the server stops the browser keeps retrying by itself; the moment a
  * server answers again the page reloads, so a restart updates THIS tab (and `npm start` does not open another one).
  */
-function useServerLink(): boolean {
+function useServerLink(): { down: boolean; replaced: boolean } {
   const [down, setDown] = useState(false);
+  const [replaced, setReplaced] = useState(false);
   useEffect(() => {
     let wasDown = false;
-    const es = new EventSource("/api/v1/ui/stream");
+    const id = crypto.randomUUID();
+    const es = new EventSource(`/api/v1/ui/stream?id=${id}`);
+    // another English Lab tab was opened (or came back): this one steps aside and stops reconnecting, so there is only ever one live tab
+    es.addEventListener("replaced", () => {
+      es.close();
+      setReplaced(true);
+      try { window.close(); } catch { /* only a tab opened by a script can close itself */ }
+    });
     es.onerror = () => {
       wasDown = true;
       setDown(true);
@@ -65,11 +73,11 @@ function useServerLink(): boolean {
     };
     return () => es.close();
   }, []);
-  return down;
+  return { down, replaced };
 }
 
 export function App() {
-  const serverDown = useServerLink();
+  const { down: serverDown, replaced: tabReplaced } = useServerLink();
   const [page, setPage] = useState<Page>(() => pageAtPath(window.location.pathname));
   // a link from one page to a sub-view of another (Vocabulary -> Content Studio's vocabulary category, a vocabulary summary -> its analytics)
   const [focus, setFocus] = useState<"grammar" | "vocabulary" | "journey">("grammar");
@@ -116,6 +124,12 @@ export function App() {
   });
   return (
     <div className="app">
+      {tabReplaced && (
+        <div className="tab-replaced" role="alert" data-testid="tab-replaced">
+          <p><i className="pi pi-clone" aria-hidden="true" /> English Lab is open in another tab. You can close this one.</p>
+          <button type="button" className="btn btn-primary" onClick={() => window.location.reload()}>Use this tab instead</button>
+        </div>
+      )}
       {serverDown && (
         <div className="server-down" role="alert" data-testid="server-down">
           <i className="pi pi-spin pi-spinner" aria-hidden="true" /> The server is not running. This page reconnects and reloads by itself as soon as it starts again.

@@ -1,4 +1,4 @@
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import type { FeedbackResponse } from "@english-lab/contracts";
 import * as api from "../../api";
 import { SpeakButton, isSpeakableSentence } from "../../components/SpeakButton";
@@ -6,6 +6,59 @@ import { Kbd } from "../../components/hotkeys";
 import { firstTranslation } from "../../format";
 import skillLabels from "../../skillLabels.json";
 import { DetailDiff, VocabWhy } from "./FeedbackDetails";
+import { Markdown } from "../Tutor";
+
+/**
+ * "Explain with AI": the tutor's step-by-step Russian explanation of THIS answer (what is wrong, the right pattern, new examples). It is the
+ * same one-per-task "Explain in Russian" answer as in the Tutor page, written by the local model in the background and shown as a draft.
+ */
+function AiExplain({ sessionId, slotId, correct }: { sessionId: string; slotId: string; correct: boolean }) {
+  const [state, setState] = useState<"idle" | "waiting" | "done" | "failed">("idle");
+  const [reply, setReply] = useState<api.TutorMessage | null>(null);
+  const [error, setError] = useState<string | null>(null);
+  const alive = useRef(true);
+  useEffect(() => { alive.current = true; return () => { alive.current = false; }; }, []);
+  useEffect(() => { setState("idle"); setReply(null); setError(null); }, [slotId]);
+  const found = (messages: api.TutorMessage[]) => messages.find(m => m.role === "assistant" && m.kind === "explain_ru" && m.source === "model") ?? null;
+  const run = async () => {
+    if (state === "waiting") return;
+    setState("waiting"); setError(null);
+    try {
+      const first = await api.askTutor({ sessionId, slotId, kind: "explain_ru" });
+      let hit = found(first.messages);
+      for (let i = 0; !hit && i < 60 && alive.current; i++) {
+        await new Promise(r => setTimeout(r, 2500));
+        if (!alive.current) return;
+        const thread = await api.fetchTutorThread(slotId);
+        hit = found(thread.messages);
+        if (!hit && thread.pendingJobs === 0 && i >= 2) break; // nothing is being written any more: the job failed
+      }
+      if (!alive.current) return;
+      if (hit) { setReply(hit); setState("done"); } else { setError("The local model could not write an explanation now. Try again in a moment."); setState("failed"); }
+    } catch (e) {
+      if (!alive.current) return;
+      setError(e instanceof api.ApiRequestError ? e.message : "Could not ask the AI. Please try again."); setState("failed");
+    }
+  };
+  return (
+    <div className="ai-explain" data-testid="ai-explain">
+      {state !== "done" && (
+        <button type="button" className="btn has-kbd" onClick={() => void run()} disabled={state === "waiting"} aria-busy={state === "waiting"} data-testid="ai-explain-button" title={correct ? "The local AI explains the rule behind this answer in Russian, with examples" : "The local AI explains in Russian why your answer is wrong, with examples"}>
+          <i className={`pi ${state === "waiting" ? "pi-spin pi-spinner" : "pi-sparkles"}`} aria-hidden="true" /> {state === "waiting" ? "The AI is thinking…" : correct ? "Explain the rule with AI" : "Explain with AI"}
+        </button>
+      )}
+      {error && <p role="alert" className="small">{error}</p>}
+      {reply && (
+        <div className="tutor-reply tutor-reply-ai" data-testid="ai-explain-text">
+          <p className="small tutor-reply-head"><i className="pi pi-sparkles" aria-hidden="true" /> Local AI — a draft, not checked</p>
+          <div lang="ru" className="ru"><Markdown text={reply.text} /></div>
+          {reply.examples.length > 0 && <ul className="small">{reply.examples.map((e, i) => <li key={i}>{e}</li>)}</ul>}
+          {reply.uncertaintyNoteRu && <p lang="ru" className="ru small muted">{reply.uncertaintyNoteRu}</p>}
+        </div>
+      )}
+    </div>
+  );
+}
 
 /** the first occurrence of `needle` in `text` coloured (case-insensitive); the text as it is when it does not occur */
 function Marked({ text, needle, cls = "hl" }: { text: string; needle: string | null; cls?: string }) {
@@ -78,7 +131,7 @@ function MarkWordLearned({ lemma }: { lemma: string }) {
 
 const SKILL_LABELS = skillLabels as Record<string, { en: string; ru: string }>;
 
-export function FeedbackPanel({ feedback, skill = null, busy, onTryAgain, onContinue, autoAdvance = false, onStay }: { feedback: FeedbackResponse; skill?: string | null; busy: boolean; onTryAgain: () => void; onContinue: () => void; autoAdvance?: boolean; onStay?: () => void }) {
+export function FeedbackPanel({ feedback, sessionId = null, skill = null, busy, onTryAgain, onContinue, autoAdvance = false, onStay }: { feedback: FeedbackResponse; sessionId?: string | null; skill?: string | null; busy: boolean; onTryAgain: () => void; onContinue: () => void; autoAdvance?: boolean; onStay?: () => void }) {
   const incorrect = feedback.verdict === "incorrect" || feedback.verdict === "idk";
   const kind = feedback.state === "pending" && feedback.aiChecked && !incorrect && feedback.verdict !== "correct" ? "pending" : feedback.state === "pending" && !feedback.aiChecked ? "pending" : feedback.detail || feedback.partial ? "detail" : feedback.verdict === "correct" ? "ok" : incorrect ? "again" : "info";
   return (
@@ -107,6 +160,7 @@ export function FeedbackPanel({ feedback, skill = null, busy, onTryAgain, onCont
       {feedback.vocabulary && <VocabWhy v={feedback.vocabulary} />}
       {feedback.vocabulary && feedback.verdict === "correct" && <MarkWordLearned key={`${feedback.slotId}:${feedback.vocabulary.lemma}`} lemma={feedback.vocabulary.lemma} />}
       {autoAdvance && <p className="muted small" data-testid="auto-advance">Next exercise in a moment. <button type="button" className="link" onClick={onStay} data-testid="stay">Stay here</button> (Esc)</p>}
+      {(incorrect || feedback.verdict === "correct") && sessionId && !feedback.vocabulary && feedback.state !== "closed" && <AiExplain key={feedback.slotId} sessionId={sessionId} slotId={feedback.slotId} correct={!incorrect} />}
       <div className="actions">
         {incorrect && (
           <button className="btn has-kbd" disabled={busy} onClick={onTryAgain}>

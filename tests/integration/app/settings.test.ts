@@ -2,7 +2,7 @@
 import type { FastifyInstance } from "fastify";
 import { randomUUID } from "node:crypto";
 import { afterEach, describe, expect, it } from "vitest";
-import { SessionBootstrapSchema, difficultyLevels, reviewNoticeThreshold, vocabularyNewWordsPerSession, vocabularyTaskCount } from "../../../packages/contracts/src/index.js";
+import { SessionBootstrapSchema, difficultyLevels, reviewNoticeThreshold, vocabularyNewWordsPerSession, vocabularyMatchRounds, vocabularyTaskCount } from "../../../packages/contracts/src/index.js";
 import { buildApp } from "../../../apps/server/src/app.js";
 import { freePort, testConfig } from "../helpers.js";
 import { makeEnv, rows, type Env } from "../attempts/fixtures.js";
@@ -65,6 +65,11 @@ describe("settings over HTTP", () => {
     expect(newWords.statusCode).toBe(200);
     expect(newWords.json().values.vocabularyNewWordsPerSession).toBe(2);
     expect(vocabularyNewWordsPerSession((await call("GET")).json().values)).toBe(2);
+    // matching-game repeats: optional, 1..10, default 4
+    expect(vocabularyMatchRounds(first.values)).toBe(4);
+    expect((await call("POST", { vocabularyMatchRounds: 0 })).statusCode).toBe(400);
+    expect((await call("POST", { vocabularyMatchRounds: 11 })).statusCode).toBe(400);
+    expect(vocabularyMatchRounds((await call("POST", { vocabularyMatchRounds: 6 })).json().values)).toBe(6);
 
     // TASK_022: review notice threshold, optional, 1..50, default 5
     expect(reviewNoticeThreshold(first.values)).toBe(5);
@@ -83,5 +88,8 @@ describe("settings over HTTP", () => {
     expect(range.statusCode).toBe(200);
     expect(difficultyLevels(range.json().values)).toEqual(["B2", "C1"]);
     expect(difficultyLevels((await call("GET")).json().values)).toEqual(["B2", "C1"]);
+    expect((await call("POST", { typingDictationSource: "tts" })).json().values.typingDictationSource).toBe("tts");
+    expect((await call("POST", { typingDictationSource: "real" })).json().values.typingDictationSource).toBe("real");
+    expect((await call("POST", { typingDictationSource: "unknown" })).statusCode).toBe(400);
   });
 });

@@ -3,6 +3,11 @@ import type { TypingAnalytics, TypingAnalyticsMode, TypingMode } from "@english-
 import { drillsProgress, drillsSummary } from "./drills.js";
 import { localDateIn } from "../attempts/canonical.js";
 import { keyInsights } from "./keyStats.js";
+import { keyboardAnalytics } from "./keyAnalytics.js";
+import { currentKeys, keyState } from "./keys/lessons.js";
+import type { TypingKeyState } from "@english-lab/contracts";
+import { loadSettings } from "../sessions/policy.js";
+import { DEFAULT_MIN_ACCURACY } from "./keys/guided.js";
 import { recallSummary } from "./recall.js";
 import { buildTypingResult, sessionRow, type TypingSessionRow } from "./result.js";
 
@@ -12,6 +17,43 @@ export interface AnalyticsInput {
   days: number | null;
   timezone: string;
   now: Date;
+  /** content/typing (Key Builder letter order); without it the analytics use a fixed English order */
+  projectRoot?: string;
+}
+
+/** Key Builder lessons in the shape of a typing session row, so every summary and series below is computed the same way */
+function keyLessonRows(db: Db): Array<TypingSessionRow & { keys_json: string; target_cpm: number }> {
+  const rows = db.prepare("SELECT * FROM typing_key_lessons WHERE status <> 'active' ORDER BY ended_at ASC").all() as Array<{ id: string; status: "completed" | "interrupted"; started_at: string; ended_at: string | null; active_ms: number; chars_typed: number; errors: number; best_char_streak: number | null; keys_json: string; target_cpm: number }>;
+  return rows.map((r) => {
+    const correct = Math.max(0, r.chars_typed - r.errors);
+    const minutes = r.active_ms / 60000;
+    const wpm = minutes > 0 ? correct / 5 / minutes : 0;
+    return {
+      id: r.id, mode: "words", variant: "meteors", status: r.status, level_number: 1, settings_revision: 0, settings_json: "{}", plan_json: null,
+      started_at: r.started_at, ended_at: r.ended_at, active_ms: r.active_ms, chars_typed: r.chars_typed, errors: r.errors, chars_correct: correct,
+      wpm, cpm: wpm * 5, accuracy: r.chars_typed > 0 ? (correct / r.chars_typed) * 100 : null, score: null, metrics_version: null,
+      book_id: null, start_offset: null, end_offset: null, current_offset: null, best_combo: null, best_char_streak: r.best_char_streak, current_char_streak: null,
+      keys_json: r.keys_json, target_cpm: r.target_cpm,
+    };
+  });
+}
+
+/**
+ * Key Builder, lesson by lesson: the letters open when the lesson started, the target it was judged by, and its own speed and
+ * accuracy. The letters that opened since the previous finished lesson are the lesson's newKeys (a new letter is the usual reason
+ * for a drop in speed); they are found over all finished lessons, then the window is applied.
+ */
+function keyProgressSeries(db: Db, rows: Array<TypingSessionRow & { keys_json: string; target_cpm: number }>, inWindow: (r: TypingSessionRow) => boolean) {
+  const limit = Math.round(loadSettings(db).values.typingKeysMinAccuracy ?? DEFAULT_MIN_ACCURACY * 100);
+  let before = new Set<string>();
+  const out: Array<{ at: string; open: number; targetCpm: number; wpm: number; accuracy: number | null; accuracyLimit: number; newKeys: string[] }> = [];
+  for (const r of rows.filter((x) => x.status === "completed")) {
+    const open = (JSON.parse(r.keys_json) as { open: string[] }).open;
+    const newKeys = before.size === 0 ? [] : open.filter((l) => !before.has(l));
+    before = new Set([...before, ...open]);
+    if (inWindow(r)) out.push({ at: r.ended_at ?? r.started_at, open: open.length, targetCpm: r.target_cpm, wpm: Math.round((r.wpm ?? 0) * 10) / 10, accuracy: r.accuracy === null ? null : Math.round(r.accuracy * 10) / 10, accuracyLimit: limit, newKeys });
+  }
+  return out;
 }
 
 function dateList(days: number | null, timezone: string, now: Date, minDate: string | null): string[] {
@@ -35,9 +77,10 @@ export function typingAnalytics(db: Db, input: AnalyticsInput): TypingAnalytics 
   const { mode, timezone } = input;
   const dbMode: TypingMode = mode === "books" ? "books" : "words";
   const variant = mode === "drills" ? "drills" : "meteors"; // Books rows carry the default 'meteors'
-  const rows = db
+  const keyRows = mode === "keys" ? keyLessonRows(db) : null;
+  const rows = keyRows ?? (db
     .prepare("SELECT * FROM typing_sessions WHERE mode = ? AND variant = ? AND status <> 'active' ORDER BY ended_at ASC")
-    .all(dbMode, variant) as TypingSessionRow[];
+    .all(dbMode, variant) as TypingSessionRow[]);
 
   const finished = rows.filter((r) => r.status === "completed" || r.status === "failed");
   const completed = rows.filter((r) => r.status === "completed");
@@ -51,7 +94,7 @@ export function typingAnalytics(db: Db, input: AnalyticsInput): TypingAnalytics 
   const maxWpm = completed.length ? Math.max(...completed.map((r) => r.wpm ?? 0)) : null;
   const maxScore = completed.length ? Math.max(...completed.map((r) => r.score ?? 0)) : null;
 
-  const lastRow = rows.length ? sessionRow(db, rows[rows.length - 1]!.id) : null;
+  const lastRow = rows.length && !keyRows ? sessionRow(db, rows[rows.length - 1]!.id) : null;
 
   // series
   const wpm: Array<{ at: string; value: number; status: string }> = finished.filter((r) => r.wpm != null).map((r) => ({ at: r.ended_at ?? r.started_at, value: Math.round((r.wpm ?? 0) * 10) / 10, status: r.status }));
@@ -95,6 +138,8 @@ export function typingAnalytics(db: Db, input: AnalyticsInput): TypingAnalytics 
   // Older Books sessions may have a recorded combo but could have lost earlier
   // visits on reload. Old Words combos count words, not characters.
   const recordedCharStreak = (r: TypingSessionRow): number | null => r.best_char_streak ?? (mode === "books" ? r.best_combo : null);
+  const inWindow = (r: TypingSessionRow) => input.days === null || visibleDatesOf(r);
+  const visibleDatesOf = (r: TypingSessionRow) => dates.includes(localDateIn(timezone, new Date(r.ended_at ?? r.started_at)));
   const values = finished.map(recordedCharStreak).filter((n): n is number => n !== null);
   const visibleDates = new Set(dates);
   const charStreak = finished.filter((r) => input.days === null || visibleDates.has(localDateIn(timezone, new Date(r.ended_at ?? r.started_at))))
@@ -118,16 +163,29 @@ export function typingAnalytics(db: Db, input: AnalyticsInput): TypingAnalytics 
       ? { wordsShown: countWords(db, "shown", "meteors"), wordsDestroyed: countWords(db, "destroyed", "meteors"), recall: recallSummary(db) }
       : mode === "drills"
         ? { wordsShown: countWords(db, "shown", "drills"), wordsDestroyed: countWords(db, "destroyed", "drills"), drills: drillsSummary(db) }
-        : booksProgress(db)),
+        : mode === "keys"
+          ? keyBuilderSummary(db, input.projectRoot)
+          : booksProgress(db)),
   };
 
   return {
     mode,
     window: { days: input.days, timezone },
     summary,
-    series: { wpm, accuracy, score, daily, duration, personalBest, charStreak, ...(mode === "drills" ? { drillProgress: drillSeries(db, finished, (r) => input.days === null || visibleDates.has(localDateIn(timezone, new Date(r.ended_at ?? r.started_at)))) } : {}), ...(mode === "books" ? { bookWordAccuracy: finished.filter(r => input.days === null || visibleDates.has(localDateIn(timezone,new Date(r.ended_at ?? r.started_at)))).flatMap(r => { const w = db.prepare("SELECT tracked_from AS start,completed_words AS completed,error_words AS withErrors,reliable FROM typing_book_word_tracking WHERE session_id=?").get(r.id) as {start:number;completed:number;withErrors:number;reliable:number}|undefined; return w?.reliable ? [{at:r.ended_at ?? r.started_at,completed:w.completed,withErrors:w.withErrors,partial:w.start > (r.start_offset ?? 0)}] : []; }) } : {}) },
+    series: { wpm, accuracy, score, daily, duration, personalBest, charStreak, ...(keyRows ? { keyProgress: keyProgressSeries(db, keyRows, inWindow) } : {}), ...(mode === "drills" ? { drillProgress: drillSeries(db, finished, (r) => input.days === null || visibleDates.has(localDateIn(timezone, new Date(r.ended_at ?? r.started_at)))) } : {}), ...(mode === "books" ? { bookWordAccuracy: finished.filter(r => input.days === null || visibleDates.has(localDateIn(timezone,new Date(r.ended_at ?? r.started_at)))).flatMap(r => { const w = db.prepare("SELECT tracked_from AS start,completed_words AS completed,error_words AS withErrors,reliable FROM typing_book_word_tracking WHERE session_id=?").get(r.id) as {start:number;completed:number;withErrors:number;reliable:number}|undefined; return w?.reliable ? [{at:r.ended_at ?? r.started_at,completed:w.completed,withErrors:w.withErrors,partial:w.start > (r.start_offset ?? 0)}] : []; }) } : {}) },
     keyInsights: keyInsights(db),
+    keyboard: keyboardAnalytics(db, mode, input.projectRoot ?? null),
   };
+}
+
+function keyBuilderSummary(db: Db, projectRoot: string | undefined): { keyBuilder?: { openKeys: number; focused: string | null; targetCpm: number; goalCpm: number; currentCpm: number; keys: TypingKeyState[] } } {
+  if (!projectRoot) return {};
+  try {
+    const k = currentKeys(db, projectRoot);
+    return { keyBuilder: { openKeys: k.keys.filter((x) => x.included).length, focused: k.keys.find((x) => x.focused)?.letter ?? null, targetCpm: k.target, goalCpm: k.goal, currentCpm: k.current, keys: k.keys.map(keyState) } };
+  } catch {
+    return {};
+  }
 }
 
 function drillSeries(db: Db, finished: TypingSessionRow[], visible: (r: TypingSessionRow) => boolean): Array<{ at: string; status: string; clean: number; withErrors: number; learned: number }> {

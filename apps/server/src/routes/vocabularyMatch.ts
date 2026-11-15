@@ -6,6 +6,8 @@ import type { SessionDeps } from "../domain/sessions/policy.js";
 import { lookupWord } from "../domain/vocabulary/repository.js";
 
 export const MATCH_RULE_VERSION = "vocabulary-match-v1";
+/** the rush mode's repeat count when the client does not say (the default of Settings: Matching game repeats) */
+const DEFAULT_ROUNDS = 4;
 
 /**
  * The word list of the matching game that follows a finished vocabulary practice: every tested word of the session once, with its Russian meaning.
@@ -39,12 +41,15 @@ export function registerVocabularyMatchRoutes(app: FastifyInstance, db: Db, deps
   app.get<{ Params: { sessionId: string } }>("/api/v1/vocabulary-sessions/:sessionId/match-words", async (req) => ({ words: matchWords(db, req.params.sessionId) }));
 
   /** the finished game: one raw row per word, saved once per session (a repeated send changes nothing). Not Mastery evidence. */
-  app.post<{ Params: { sessionId: string }; Body: { mode?: unknown; results?: unknown } }>("/api/v1/vocabulary-sessions/:sessionId/match-results", async (req, reply) => {
+  app.post<{ Params: { sessionId: string }; Body: { mode?: unknown; results?: unknown; rounds?: unknown } }>("/api/v1/vocabulary-sessions/:sessionId/match-results", async (req, reply) => {
     const { sessionId } = req.params;
     const mode = req.body?.mode;
     const input = req.body?.results;
     if ((mode !== "once" && mode !== "rush") || !Array.isArray(input) || input.length === 0 || input.length > 50) throw new ApiError(400, "VALIDATION_ERROR", "Expected a mode and one to fifty results");
-    const per = mode === "once" ? 1 : 5;
+    // the rush mode's repeat count is the learner's setting (1-10); the client says which one the game was played with
+    const rounds = req.body?.rounds ?? DEFAULT_ROUNDS;
+    if (!Number.isInteger(rounds) || (rounds as number) < 1 || (rounds as number) > 10) throw new ApiError(400, "VALIDATION_ERROR", "Rounds must be a whole number from 1 to 10");
+    const per = mode === "once" ? 1 : (rounds as number);
     const known = new Set(matchWords(db, sessionId).map((w) => w.id));
     const seen = new Set<string>();
     const rows = (input as Array<{ lemma?: unknown; matched?: unknown; wrong?: unknown }>).map((r) => {

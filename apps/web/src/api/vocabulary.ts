@@ -50,8 +50,8 @@ export type MatchWord = { id: string; en: string; ru: string };
 export const fetchMatchWords = (sessionId: string) => send("GET", `/api/v1/vocabulary-sessions/${encodeURIComponent(sessionId)}/match-words`, typed<{ words: MatchWord[] }>());
 /** the raw result of a played matching game (not Mastery evidence); sent once, a repeat changes nothing */
 
-export const saveMatchResults = (sessionId: string, mode: "once" | "rush", results: Array<{ lemma: string; matched: number; wrong: number }>) =>
-  send("POST", `/api/v1/vocabulary-sessions/${encodeURIComponent(sessionId)}/match-results`, typed<{ saved: boolean }>(), { mode, results });
+export const saveMatchResults = (sessionId: string, mode: "once" | "rush", results: Array<{ lemma: string; matched: number; wrong: number }>, rounds?: number) =>
+  send("POST", `/api/v1/vocabulary-sessions/${encodeURIComponent(sessionId)}/match-results`, typed<{ saved: boolean }>(), { mode, results, ...(mode === "rush" && rounds !== undefined ? { rounds } : {}) });
 
 export const vocabularyWordSpeech = (id: string) => speechRequest(`/api/v1/vocabulary-speech/word/${encodeURIComponent(id)}`);
 

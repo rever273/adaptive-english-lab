@@ -1,7 +1,7 @@
 import { useTypingActivity } from "../typingActivity";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import * as api from "../api";
-import type { DictationResult, DictationState, TypingRecallWord, TypingBookStartResponse, TypingDrillsStartResponse, TypingOverview, TypingResult, TypingWordsStartResponse } from "../api";
+import type { DictationResult, DictationState, TypingRecallWord, TypingBookStartResponse, TypingDrillsStartResponse, TypingKeysResult, TypingKeysStartResponse, TypingKeyToken, TypingOverview, TypingResult, TypingWordsStartResponse } from "../api";
 import { TypingKeyboard } from "../components/TypingKeyboard";
 import { WordsTargetImage } from "../components/WordsTargetImage";
 import { checkDailyGoal, DailyGoalCheck } from "../components/DailyGoalNotice";
@@ -10,16 +10,17 @@ import type { BookSpeedSample } from "../game/bookSpeedSamples";
 import { WordsScene } from "../game/scene";
 import { firstTranslation } from "../format";
 import { playPracticeSound } from "../practiceSounds";
-import { HOTKEYS } from "../components/hotkeys";
+import { HOTKEYS, useEnterContinue } from "../components/hotkeys";
 import { BooksGame } from "./TypingBooks";
 import { DictationGame, DictationResultView } from "./TypingDictation";
 import { TypingRecall } from "./TypingRecall";
 import { DrillsGame } from "./TypingDrills";
+import { KeysGame, KeysResultView } from "./TypingKeys";
 import { LAYOUT_HINT, Toast, useToast } from "./typingShared";
 import { comboMultiplier, createWordsEngine, exportKeyStats, revealTranslation, type WordsEngineState, type WordsEvent } from "../game/wordsEngine";
 import { wordAccuracy } from "../typingWordAccuracy";
 
-type Screen = { kind: "overview" } | { kind: "words"; sessionId: string; level: number; plan: TypingWordsStartResponse; paused: boolean } | { kind: "drills"; plan: TypingDrillsStartResponse } | { kind: "books"; sessionId: string; data: TypingBookStartResponse; paused: boolean } | { kind: "result"; result: TypingResult; struggled?: string[]; bonus?: { points: number }; bookSamples?: BookSpeedSample[] } | { kind: "recall"; result: TypingResult; struggled?: string[]; words: TypingRecallWord[] } | { kind: "dictation"; state: DictationState } | { kind: "dictationResult"; result: DictationResult };
+type Screen = { kind: "overview" } | { kind: "words"; sessionId: string; level: number; plan: TypingWordsStartResponse; paused: boolean } | { kind: "drills"; plan: TypingDrillsStartResponse } | { kind: "keys"; plan: TypingKeysStartResponse } | { kind: "keysResult"; result: TypingKeysResult; tokens: TypingKeyToken[] } | { kind: "books"; sessionId: string; data: TypingBookStartResponse; paused: boolean } | { kind: "result"; result: TypingResult; struggled?: string[]; bonus?: { points: number }; bookSamples?: BookSpeedSample[] } | { kind: "recall"; result: TypingResult; struggled?: string[]; words: TypingRecallWord[] } | { kind: "dictation"; state: DictationState } | { kind: "dictationResult"; result: DictationResult };
 
 const clamp = (n: number, lo: number, hi: number) => Math.min(hi, Math.max(lo, n));
 const fallMs = (len: number, msPerChar: number) => Math.round(clamp(3 * len * msPerChar + 2500, 5000, 22000));
@@ -138,6 +139,11 @@ export function Typing({ onNavigate, dailyStart, onDailyDone }: { onNavigate?: (
     return <section className="typing-page" aria-label="Memory check"><TypingRecall sessionId={screen.result.sessionId} words={screen.words} onDone={(bonus) => setScreen({ kind: "result", result: screen.result, ...(screen.struggled ? { struggled: screen.struggled } : {}), ...(bonus ? { bonus } : {}) })} /></section>;
   }
 
+  if (screen.kind === "keysResult") {
+    const toOverview = () => { load(); setScreen({ kind: "overview" }); };
+    return <><DailyGoalCheck mode="words" /><KeysResultView result={screen.result} tokens={screen.tokens} onNext={() => void startKeys(setScreen, setError).then((ok) => { if (!ok) toOverview(); })} onDone={toOverview} /></>;
+  }
+
   if (screen.kind === "result") {
     const mode = screen.result.mode;
     const toOverview = () => { load(); setScreen({ kind: "overview" }); };
@@ -154,18 +160,19 @@ export function Typing({ onNavigate, dailyStart, onDailyDone }: { onNavigate?: (
       {screen.kind === "overview" && (
         <>
           <h2 id="typing-h"><i className="pi pi-bullseye" aria-hidden="true" /> {dailyStart === "words" ? "Choose your Words practice" : "Typing practice"}</h2>
-          <div className="typing-cards">
+          <div className={`typing-cards${dailyStart === "words" ? " typing-cards-single" : ""}`}>
             <ModeCard
               image="/typing/words.jpg"
               icon="pi-bolt"
               title="Words"
-              desc="Meteor Rain: type words to destroy falling meteors. Finger Drills: a few comfortable words many times, so your fingers learn them."
+              desc="Meteor Rain: type words to destroy falling meteors. Finger Drills: a few comfortable words many times, so your fingers learn them. Key Builder: letters open one by one as you reach the target speed."
               action="Meteor Rain"
               level={overview.words.nextLevel}
               disabled={overview.words.bankWords === 0}
               disabledNote={overview.words.bankWords === 0 ? "The word bank is empty. Run the typing seed first." : null}
               onStart={() => void startWords(setScreen, setError)}
               second={{ action: "Finger Drills", level: overview.words.drills.nextLevel, note: `Stage ${overview.words.drills.stage} · ${overview.words.drills.learned} learned`, onStart: () => void startDrills(setScreen, setError) }}
+              third={overview.words.keys ? { action: "Key Builder", level: overview.words.keys.nextLesson, note: `${overview.words.keys.openKeys} keys${overview.words.keys.focused ? ` · focus ${overview.words.keys.focused.toUpperCase()}` : ""}`, onStart: () => void startKeys(setScreen, setError) } : undefined}
             />
             {dailyStart !== "words" && <><ModeCard
               image="/typing/books.jpg"
@@ -198,6 +205,7 @@ export function Typing({ onNavigate, dailyStart, onDailyDone }: { onNavigate?: (
           )} */}
         </>
       )}
+      {screen.kind === "keys" && <KeysGame plan={screen.plan} onResult={(result, tokens) => setScreen({ kind: "keysResult", result, tokens })} onExit={() => { load(); setScreen({ kind: "overview" }); }} />}
       {screen.kind === "drills" && <DrillsGame plan={screen.plan} onResult={(result) => setScreen({ kind: "result", result })} onExit={() => { load(); setScreen({ kind: "overview" }); }} />}
       {screen.kind === "words" && <WordsGame screen={screen} setScreen={setScreen} onExit={() => setScreen({ kind: "overview" })} />}
       {screen.kind === "books" && <BooksGame sessionId={screen.sessionId} data={screen.data} onResult={(result, struggled, bookSamples) => setScreen({ kind: "result", result, struggled, bookSamples })} onExit={() => setScreen({ kind: "overview" })} />}
@@ -216,6 +224,7 @@ function dictationAction(d: TypingOverview["dictation"]): string {
 function dictationNote(d: TypingOverview["dictation"]): string | null {
   if (d.lesson?.status === "failed") return "Generating this lesson failed. Retry makes only the missing sentences.";
   if (d.available) return null;
+  if (d.reason === "real_speech_unavailable") return "No checked real-voice recordings are available yet. Switch to Piper in Settings or prepare more real recordings.";
   if (d.reason === "asr_unavailable") return "No speech check is available: set a Groq key in .env or install the local Whisper large-v3 model.";
   return "Piper is not installed. Run `npm run dictation:setup`.";
 }
@@ -226,7 +235,7 @@ function bookReason(reason: string | null): string {
   return "The book is not available.";
 }
 
-function ModeCard({ image, icon, title, desc, action, level, subtitle, disabled, disabledNote, onStart, second, children }: { image: string; icon: string; title: string; desc: string; action: string; level: number; subtitle?: string; disabled: boolean; disabledNote: string | null; onStart: () => void; second?: { action: string; level: number; note: string; onStart: () => void }; children?: React.ReactNode }) {
+function ModeCard({ image, icon, title, desc, action, level, subtitle, disabled, disabledNote, onStart, second, third, children }: { image: string; icon: string; title: string; desc: string; action: string; level: number; subtitle?: string; disabled: boolean; disabledNote: string | null; onStart: () => void; second?: { action: string; level: number; note: string; onStart: () => void }; third?: { action: string; level: number; note: string; onStart: () => void }; children?: React.ReactNode }) {
   return (
     <div className={`card typing-mode-card${disabled ? " disabled" : ""}`}>
       <img className="typing-card-image" src={image} alt="" loading="lazy" />
@@ -235,12 +244,14 @@ function ModeCard({ image, icon, title, desc, action, level, subtitle, disabled,
       {subtitle && <p className="muted small">Book: {subtitle}</p>}
       <p className="typing-level">{action} <span className="muted">(Level {String(level).padStart(2, "0")})</span></p>
       {second && <p className="typing-level">{second.action} <span className="muted">(Level {String(second.level).padStart(2, "0")} · {second.note})</span></p>}
+      {third && <p className="typing-level">{third.action} <span className="muted">(Lesson {String(third.level).padStart(2, "0")} · {third.note})</span></p>}
       {disabledNote && <p className="notice notice-warning small" role="status">{disabledNote}</p>}
       {children}
       {second ? (
         <div className="typing-card-actions">
           <button className="btn btn-primary" disabled={disabled} onClick={onStart} data-testid={`typing-${title.toLowerCase()}-start`}>{action}</button>
           <button className="btn btn-primary" disabled={disabled} onClick={second.onStart} data-testid="typing-drills-start">{second.action}</button>
+          {third && <button className="btn btn-primary" onClick={third.onStart} data-testid="typing-keys-start">{third.action}</button>}
         </div>
       ) : (
         <button className="btn btn-primary typing-card-action" disabled={disabled} onClick={onStart} data-testid={`typing-${title.toLowerCase()}-start`}>{action}</button>
@@ -264,6 +275,17 @@ async function startDrills(setScreen: (s: Screen) => void, setError: (e: string 
   try {
     const plan = await api.startTypingDrills();
     setScreen({ kind: "drills", plan });
+    return true;
+  } catch (e) {
+    setError(e instanceof Error ? e.message : String(e));
+    return false;
+  }
+}
+
+async function startKeys(setScreen: (s: Screen) => void, setError: (e: string | null) => void): Promise<boolean> {
+  try {
+    const plan = await api.startTypingKeys();
+    setScreen({ kind: "keys", plan });
     return true;
   } catch (e) {
     setError(e instanceof Error ? e.message : String(e));
@@ -590,6 +612,7 @@ function WordsResult({ result, struggled, bonus, bookSamples, onContinue, onDone
   ];
   const columns = Math.ceil(stats.length / 2); // exactly two rows
   const bookFinished = result.mode === "books" && result.book?.finished === true;
+  useEnterContinue(bookFinished ? onDailyDone ?? null : onContinue);
   const drills = result.variant === "drills";
   // Drills repeat a few words many times: the list groups the showings of each word
   const drillWords = drills && result.words ? [...result.words.reduce((m, w) => {

@@ -274,6 +274,9 @@ describe("bounded export and the Copy Agent Task text", () => {
       expect(t).toContain(sessionId);
       expect(t).toContain("content/review-guidelines.md");
       expect(t).toContain("npm run pack -- check");
+      expect(t).toContain("verdicts --include-ai-correct --limit 500");
+      expect(t).toContain("npm run lab:verdicts -- apply <manifest.json>");
+      expect(t).toContain("npm run lab:export -- exercise <revision-id>");
       if (kind === "progress") {
         expect(t).toContain("npm run pack -- publish");
         expect(t).toContain("DIFFERENT reviewer");
@@ -281,6 +284,8 @@ describe("bounded export and the Copy Agent Task text", () => {
         expect(t).toContain("node scripts/content-pack.mjs publish");
         expect(t).toContain("items: []");
         expect(t).toContain("Do not generate exercises");
+        expect(t).toContain("Published lesson keys in course order:");
+        expect(t).toContain("labelled practice repeats under D68");
         expect(t.endsWith("Number of new lessons: 5")).toBe(true);
       }
       expect(t).not.toMatch(/[A-Za-z]:\\/);

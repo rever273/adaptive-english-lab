@@ -14,6 +14,8 @@ import { LexiconHints } from "./domain/vocabulary/lexiconHint.js";
 import { TutorJobRunner } from "./domain/tutor/runner.js";
 import { GroqWorker } from "./adapters/stt/groqWorker.js";
 import { createDictationEnv } from "./domain/typing/dictation/env.js";
+import { RealAudit } from "./domain/typing/dictation/realAudit.js";
+import { unusedRealClips } from "./domain/typing/dictation/lessons.js";
 import { LocalDictationAsr } from "./domain/typing/dictation/asr.js";
 import { existsSync, readFileSync } from "node:fs";
 import path from "node:path";
@@ -86,6 +88,7 @@ async function main(): Promise<void> {
     fail(EXIT.database, `database not usable: ${(err as Error).message}`);
   }
   const { db } = prepared;
+  const realAudit = new RealAudit(config.projectRoot, config.dataRoot, () => dictation.realSpeech ? unusedRealClips(db, dictation.realSpeech).length : 0);
 
   const logStream = openLogStream(config.logsDir);
   let shuttingDown = false;
@@ -162,6 +165,7 @@ async function main(): Promise<void> {
     shuttingDown = true;
     app?.log.info({ reason }, "shutdown: stop admission");
     try {
+      realAudit.stop();
       await stt.shutdown(); // the voice child first: it holds the card
       await Promise.all([dictation.tts.stop(), dictation.asr.stop(), ...(conversationAsr !== dictation.asr ? [conversationAsr.stop()] : [])]); // our own speech workers only
       residency.halt(); // no new warm-up from here on
@@ -180,6 +184,7 @@ async function main(): Promise<void> {
 
   app = await buildApp({
     config,
+    realAudit,
     db,
     elevenLabsKey,
     elevenLabsVoiceIds,
@@ -226,6 +231,7 @@ async function main(): Promise<void> {
   const levelJobs = queueMissingLevels(db, { now: () => new Date(), newId: randomUUID });
   if (regraded + levelJobs + recoveredVocabulary > 0) app.log.info({ regraded, levelJobs, recoveredVocabulary }, "startup follow-ups");
   scheduler.start();
+  realAudit.start();
   // Model identity + measured profile; until it succeeds, analysis jobs wait as profile_unknown. Retried while the server runs.
   const prepareAnalysis = async (): Promise<void> => {
     if (shuttingDown || config.aiRunners === false) return;

@@ -1,5 +1,5 @@
 import { SessionBootstrapSchema } from "@english-lab/contracts";
-import type { TypingBookStartResponse, TypingOverview, TypingResult, TypingWordsStartResponse, TypingDrillsStartResponse, DictationAnalytics, DictationAnswerResponse, DictationHintResponse, DictationLessonSummary, DictationResult, DictationState } from "@english-lab/contracts";
+import type { TypingBookStartResponse, TypingOverview, TypingResult, TypingWordsStartResponse, TypingDrillsStartResponse, TypingKeysStartResponse, TypingKeysResult, TypingKeysCompleteRequest, DictationAnalytics, DictationAnswerResponse, DictationHintResponse, DictationLessonSummary, DictationResult, DictationState } from "@english-lab/contracts";
 import { ApiRequestError, csrfState, send } from "./transport";
 import { typed, anyOf } from "./response";
 
@@ -16,6 +16,11 @@ export const abortTypingWords = (sessionId: string, body: { activeMs?: number; c
 export const startTypingDrills = () => send("POST", "/api/v1/typing/drills/start", typed<TypingDrillsStartResponse>(), {});
 
 export const completeTypingDrills = (sessionId: string, body: { status: "completed" | "failed"; activeMs: number; charsTyped: number; errors: number; words: Array<{ planIndex: number; errors: number; completed: boolean; typeMs: number | null }>; bestCombo?: number; bestCharStreak?: number; keyStats?: Array<{ pair: string; count: number; totalMs: number; errors: number }> }) => send("POST", `/api/v1/typing/drills/${encodeURIComponent(sessionId)}/complete`, typed<TypingResult>(), body);
+/** Key Builder (keybr.com guided lessons) */
+export const startTypingKeys = () => send("POST", "/api/v1/typing/keys/start", typed<TypingKeysStartResponse>(), {});
+export const completeTypingKeys = (lessonId: string, body: TypingKeysCompleteRequest) => send("POST", `/api/v1/typing/keys/${encodeURIComponent(lessonId)}/complete`, typed<TypingKeysResult>(), body);
+export const abortTypingKeys = (lessonId: string, body: { activeMs?: number; charsTyped?: number; errors?: number }) => send("POST", `/api/v1/typing/keys/${encodeURIComponent(lessonId)}/abort`, typed<{ status: "interrupted" }>(), body);
+
 /** Finger Drills: one word read aloud by a checked Piper voice (WAV), or an error when no voice read it clearly */
 
 export async function fetchDrillSpeech(word: string): Promise<Blob> {
@@ -58,6 +63,10 @@ export const warmBookSpeech = () => send("POST", "/api/v1/typing/books/speech/wa
 
 const DICT = "/api/v1/typing/dictation";
 
+export type RealAuditStatus = { enabled: boolean; running: boolean; checked: number; matched: number; error: string | null; progress: string | null; batch: { total: number; largeDone: number; mediumDone: number; activeModel: string | null; etaSeconds: number | null } | null };
+export const fetchRealAudit = () => send("GET", `${DICT}/real-audit`, typed<RealAuditStatus>());
+export const setRealAudit = (enabled: boolean) => send("POST", `${DICT}/real-audit`, typed<RealAuditStatus>(), { enabled });
+
 export const createDictationLesson = () => send("POST", `${DICT}/lessons`, typed<DictationLessonSummary>(), {});
 
 export const retryDictationLesson = (id: string) => send("POST", `${DICT}/lessons/${encodeURIComponent(id)}/retry`, typed<DictationLessonSummary>(), {});
@@ -95,6 +104,7 @@ export async function fetchDictationAudio(exerciseId: string): Promise<Blob> {
 export const fetchDictationAnalytics = (days: "7" | "30" | "90" | "all") => send("GET", `/api/v1/analytics/typing/dictation?days=${days}&timezone=${encodeURIComponent(Intl.DateTimeFormat().resolvedOptions().timeZone)}`, typed<DictationAnalytics>());
 /** fetch with keepalive for `pagehide`/`visibilitychange` checkpoints (CSRF requires fetch, not sendBeacon) */
 
+export type { TypingKeysStartResponse, TypingKeysResult, TypingKeyState, TypingKeyToken, TypingKeyboardAnalytics } from "@english-lab/contracts";
 export type { TypingAnalytics as TypingAnalyticsData, TypingBookStartResponse, TypingDrillsStartResponse, TypingOverview, TypingResult, TypingWordsStartResponse } from "@english-lab/contracts";
 
 export type { TypingRecallWord, TypingRecallStartResponse } from "@english-lab/contracts";

@@ -1,7 +1,7 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
 import * as api from '../api';
 import { DailyGoalCheck } from '../components/DailyGoalNotice';
-import { HOTKEYS, Kbd, isPressable, isTextField, useKeys } from '../components/hotkeys';
+import { HOTKEYS, Kbd, isPressable, isTextField, useEnterContinue, useKeys } from '../components/hotkeys';
 import { useClozeActivity } from '../grammarClozeActivity';
 import { AI_CHECK_WAIT_S } from '../practiceFlow';
 import { playPracticeSound } from '../practiceSounds';
@@ -78,6 +78,14 @@ export function GrammarCloze({ dailyStart = false, onDailyDone }: { dailyStart?:
         dailyStarted.current = true;
         if (overview.stages[0]?.ready || overview.activeSession) void start();
     }, [dailyStart, overview, start]);
+
+    // Enter on the final statistics continues: the daily practice, else the next session when there is one, else the stages
+    const summary = screen.kind === 'summary' ? screen.summary : null;
+    useEnterContinue(
+        summary
+            ? onDailyDone ?? (summary.stageProgress.ready ? () => void start() : () => setScreen({ kind: 'overview' }))
+            : null,
+    );
 
     if (screen.kind === 'session') {
         return (

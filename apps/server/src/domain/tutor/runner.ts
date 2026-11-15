@@ -18,6 +18,8 @@ export interface TutorPayload {
   slotId: string;
   kind: "more_examples" | "question" | "explain_ru";
   question: string | null;
+  /** the learner answered correctly (maybe by guessing): explain the rule, not a mistake */
+  learnerCorrect?: boolean;
 }
 export interface TutorDraft {
   schema_version: "tutor-v1";
@@ -113,7 +115,7 @@ export class TutorJobRunner implements JobRunner<TutorPayload | ConversationPayl
     }
     const tutorCtx = ctx as RunnerContext<TutorPayload>;
     const m = this.pinned;
-    const { messageId, slotId, kind, question } = tutorCtx.job.payload;
+    const { messageId, slotId, kind, question, learnerCorrect } = tutorCtx.job.payload;
     const installed = await this.o.installedDigest(m.tag);
     if (installed !== m.digest) throw new RunnerError("model_digest_mismatch", `installed digest of ${m.tag} differs from the pinned one`, false);
     const row = this.o.db
@@ -128,6 +130,8 @@ export class TutorJobRunner implements JobRunner<TutorPayload | ConversationPayl
       request:
         kind === "more_examples"
           ? "Give new examples of how this grammar is used in OTHER sentences (examples_en, 3 varied short sentences, in different contexts). explanation_ru is only one or two short Russian sentences introducing them (what to notice in the structure); do NOT explain the rule again. " + TUTOR_FORMAT
+          : kind === "explain_ru" && learnerCorrect
+            ? "The learner answered THIS exercise correctly (possibly by guessing) and wants to know the rule behind it. Explain in simple Russian, in this order: **Правило** (the structure as a short formula), **Почему этот ответ верный** (1-2 sentences about this very sentence), **Чем отличаются другие варианты** (one short line on why the other options do not fit, if the exercise had options), **Запомните** (one short tip). Then give 2 short examples of the same structure in other sentences in examples_en. Do not repeat verified_rule_ru word for word, no long theory. " + TUTOR_FORMAT
           : kind === "explain_ru"
             ? "Explain in simple Russian the mistake or point of THIS exercise (see learner_answer and exercise_prompt_en), in this order: **Что здесь не так** (1-2 sentences), **Как правильно** (the structure as a short formula plus the corrected sentence), **Запомните** (one short tip). Then give 2 short examples of the same structure in other sentences in examples_en. Do not repeat verified_rule_ru word for word, no long theory. " + TUTOR_FORMAT
             : "Answer the learner's question about this rule. " + TUTOR_FORMAT,

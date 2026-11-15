@@ -87,7 +87,7 @@ export interface TrackProgress { track: "grammar" | "vocabulary" | "typing" | "c
 
 export const fetchActivityProgress = () => send("GET", "/api/v1/activity-progress", typed<{ grammar: TrackProgress; vocabulary: TrackProgress; typing: TrackProgress; conversation: TrackProgress }>());
 
-export const fetchTypingAnalytics = (mode: "words" | "books" | "drills", days: "7" | "30" | "90" | "all") => send("GET", `/api/v1/analytics/typing?mode=${mode}&days=${days}&timezone=${encodeURIComponent(Intl.DateTimeFormat().resolvedOptions().timeZone)}`, typed<TypingAnalyticsData>());
+export const fetchTypingAnalytics = (mode: "words" | "books" | "drills" | "keys", days: "7" | "30" | "90" | "all") => send("GET", `/api/v1/analytics/typing?mode=${mode}&days=${days}&timezone=${encodeURIComponent(Intl.DateTimeFormat().resolvedOptions().timeZone)}`, typed<TypingAnalyticsData>());
 
 export interface Rate { correct: number; total: number; rate: number | null; insufficient: boolean }
 

@@ -77,6 +77,12 @@ describe("letter pairs", () => {
 
     const stats2 = typingAnalytics(d, { mode: "words", days: 30, timezone: "UTC", now: new Date() });
     expect(stats2.keyInsights.slowPairs[0]!.pair).toBe("gh");
+    // keybr's per-key view in Meteor Rain: the second letter of a pair is the key pressed, its interval the key's time
+    const h = stats2.keyboard!.keys.find((k) => k.letter === "e")!; // "he": 60 presses at 210 ms
+    expect(h.cpm).toBe(Math.round(60000 / 210));
+    expect(h.hits).toBe(60);
+    expect(h.curve).toHaveLength(1);
+    expect(stats2.keyboard!.keys.find((k) => k.letter === "q")!.cpm).toBeNull();
   });
 });
 

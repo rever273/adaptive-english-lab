@@ -572,6 +572,25 @@ select {
     grid-template-columns: repeat(auto-fit, minmax(12rem, 1fr));
     gap: 0.9rem 1.25rem;
 }
+.typing-settings-group {
+    display: grid;
+    gap: 0.85rem;
+    padding: 1rem;
+    border: 1px solid var(--border);
+    border-radius: 0.65rem;
+    background: var(--surface-2);
+    min-width: 0;
+}
+.settings-card .typing-settings-group h4 {
+    margin: 0;
+    font-size: 1rem;
+    color: var(--accent);
+}
+.typing-settings-group h5 {
+    margin: 0.25rem 0 0;
+    font-size: 0.85rem;
+    color: var(--muted);
+}
 .settings-card label {
     display: flex;
     flex-direction: column;

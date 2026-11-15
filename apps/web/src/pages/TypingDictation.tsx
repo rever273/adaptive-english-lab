@@ -9,7 +9,7 @@ import { playPracticeSound } from "../practiceSounds";
 import { fmtTotalTime } from "../format";
 import { LAYOUT_HINT, Toast, useToast } from "./typingShared";
 import { checkDailyGoal, DailyGoalCheck } from "../components/DailyGoalNotice";
-import { HOTKEYS, hotkeyAction } from "../components/hotkeys";
+import { HOTKEYS, hotkeyAction, useEnterContinue } from "../components/hotkeys";
 import { PauseButton, PauseOverlay, useAutoPause } from "../components/Pause";
 
 const MASK = "•••";
@@ -84,6 +84,7 @@ export function DictationGame({ state, onResult, onExit }: { state: DictationSta
   const playingRef = useRef(false);
   /** sentences played to the end of a start in this session: only a sentence you have heard can be marked */
   const heardRef = useRef(new Set<string>());
+  const machineTranslationsRef = useRef(new Set<string>());
   const [paused, setPaused] = useState(false);
   const pausedRef = useRef(false);
   pausedRef.current = paused;
@@ -158,8 +159,15 @@ export function DictationGame({ state, onResult, onExit }: { state: DictationSta
     const ex = currentExercise(engine);
     if (!ex || busyRef.current || ex.translationRu !== null) return;
     try {
-      const r = await api.openDictationTranslation(ex.id);
-      ex.translationRu = r.translationRu;
+      if (ex.source === "real") {
+        const translated = await api.translateSentence(ex.textEn);
+        await api.openDictationTranslation(ex.id);
+        ex.translationRu = translated.text;
+        machineTranslationsRef.current.add(ex.id);
+      } else {
+        const r = await api.openDictationTranslation(ex.id);
+        ex.translationRu = r.translationRu;
+      }
       bump();
     } catch (e) { setMessage(e instanceof Error ? e.message : "Could not open the translation."); }
     inputRef.current?.focus();
@@ -316,7 +324,7 @@ export function DictationGame({ state, onResult, onExit }: { state: DictationSta
           <p className="dictation-words" aria-live="polite" aria-label="Revealed words" data-word-selection>
             {ex.words.map((w) => <span key={w.index} className={w.text === null ? "dictation-masked" : w.index === focus ? "dictation-shown dictation-focus" : "dictation-shown"}>{w.text ?? MASK}</span>)}
           </p>
-          {ex.translationRu !== null && <p className="dictation-translation" lang="ru">{ex.translationRu}</p>}
+          {ex.translationRu !== null && <p className="dictation-translation" lang="ru">{ex.translationRu}{machineTranslationsRef.current.has(ex.id) && <span className="muted small"> (machine translation)</span>}</p>}
           <div className="dictation-field">
             <div className="dictation-mirror" aria-hidden="true">
               {marked.map((s, i) => (s.wrong ? <span key={i} className="dictation-wrong">{s.text}</span> : <span key={i}>{s.text}</span>))}
@@ -362,7 +370,7 @@ export function DictationGame({ state, onResult, onExit }: { state: DictationSta
             <button className="btn" onClick={() => void showTranslation()} disabled={(busy && !reviewing) || ex.translationRu !== null} title={reviewing ? "Review translation without changing credit" : "Counts as help: the sentence is then worth at most half"}>Show Russian Translation ({HOTKEYS.translate})</button>
             <button className="btn" onClick={() => void hint()} disabled={busy} title="Shows the sentence up to the first word you got wrong. A hint costs a little of the credit.">Hint ({HOTKEYS.hint})</button>
             <button className="btn" onClick={() => void reveal()} disabled={busy} title="Shows the whole sentence; you still type it, but it earns no credit">Show answer ({HOTKEYS.showAnswer})</button>
-            <button className="btn" onClick={() => void toggleSoundFlag()} disabled={busy || (ex.plays === 0 && !heardRef.current.has(ex.id))} aria-pressed={ex.soundFlagged} title="Tell us this voice sounded unclear or unpleasant here. It lowers how often this voice is used.">{ex.soundFlagged ? "Marked as bad sound — undo" : "Sounds bad"}</button>
+            <button className="btn" onClick={() => void toggleSoundFlag()} disabled={busy || (ex.plays === 0 && !heardRef.current.has(ex.id))} aria-pressed={ex.soundFlagged} title={ex.source === "real" ? "Mark this recording as unclear or unpleasant." : "Tell us this voice sounded unclear or unpleasant here. It lowers how often this voice is used."}>{ex.soundFlagged ? "Marked as bad sound — undo" : "Sounds bad"}</button>
             <button className="btn btn-primary" onClick={() => void submit()} disabled={busy}>Check (Enter)</button>
           </div>
         </>
@@ -393,6 +401,7 @@ export function DictationResultView({ result, onNext, onDone, onDailyDone }: { r
     ["Time", fmtTotalTime(result.activeMs / 1000), "Active time: listening and typing, not pauses."],
   ];
   const columns = Math.ceil(stats.length / 2); // exactly two rows, like Words and Books
+  useEnterContinue(onDailyDone ?? onNext);
   return (
     <section className="typing-result card" aria-label="Audio Dictation result">
       <DailyGoalCheck mode="dictation" />

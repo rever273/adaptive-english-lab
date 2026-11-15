@@ -1,9 +1,11 @@
-import { useEffect, useState } from 'react';
+import { useEffect, useMemo, useState } from 'react';
 import { fetchTypingAnalytics, type TypingAnalyticsData as Data } from '../api';
 import { Chart } from '../components/Chart';
 import { CumulativeCharacters } from '../components/CharacterCharts';
 import { fmtTotalTime } from '../format';
 import { TypingDictationAnalytics } from './TypingDictationAnalytics';
+import { KeyboardSection } from './TypingKeyboardAnalytics';
+import { KeyChips } from './TypingKeys';
 import { MODE_INFO } from '../journey/model';
 import { wordAccuracy } from '../typingWordAccuracy';
 
@@ -39,7 +41,7 @@ function LineChart({
             <h4 className="chart-title">{title}</h4>
             <Chart
                 ariaLabel={title}
-                line={{ color: SERIES_COLOR[color], format: fmt }}
+                line={{ color: SERIES_COLOR[color], format: fmt, floating: color === 'accuracy' }}
                 points={points.map((p, i) => ({
                     key: `${p.at}-${i}`,
                     label: fmtDay(p.at),
@@ -65,18 +67,18 @@ function LineChart({
     );
 }
 
-type Mode = 'words' | 'drills' | 'books' | 'dictation';
+type Mode = 'words' | 'drills' | 'keys' | 'books' | 'dictation';
 type Days = '7' | '30' | '90' | 'all';
 
 function Toolbar({ mode, setMode }: { mode: Mode; setMode: (m: Mode) => void }) {
     return (
         <div className="analytics-toolbar">
             <div className="segmented" role="radiogroup" aria-label="Typing mode">
-                {(['words', 'drills', 'books', 'dictation'] as const).map((m) => (
+                {(['words', 'drills', 'keys', 'books', 'dictation'] as const).map((m) => (
                     <label key={m} className={mode === m ? 'on' : ''}>
                         <input type="radio" name="typing-mode" checked={mode === m} onChange={() => setMode(m)} />{' '}
-                        <i className={`pi ${m === 'drills' ? 'pi-th-large' : MODE_INFO[m].icon}`} aria-hidden="true" />{' '}
-                        {m === 'words' ? 'Meteor Rain' : m === 'drills' ? 'Finger Drills' : m === 'books' ? 'Books' : 'Audio Dictation'}
+                        <i className={`pi ${m === 'drills' ? 'pi-th-large' : m === 'keys' ? 'pi-key' : MODE_INFO[m].icon}`} aria-hidden="true" />{' '}
+                        {m === 'words' ? 'Meteor Rain' : m === 'drills' ? 'Finger Drills' : m === 'keys' ? 'Key Builder' : m === 'books' ? 'Books' : 'Audio Dictation'}
                     </label>
                 ))}
             </div>
@@ -142,8 +144,9 @@ export function TypingAnalytics({ days = '30' }: { days?: Days }) {
     return <ClassicAnalytics mode={mode} days={days} toolbar={toolbar} />;
 }
 
-function ClassicAnalytics({ mode, days, toolbar }: { mode: 'words' | 'drills' | 'books'; days: Days; toolbar: React.ReactNode }) {
-    const words = mode !== 'books'; // Meteor Rain and Finger Drills are both Words variants
+function ClassicAnalytics({ mode, days, toolbar }: { mode: 'words' | 'drills' | 'keys' | 'books'; days: Days; toolbar: React.ReactNode }) {
+    const words = mode === 'words' || mode === 'drills'; // Meteor Rain and Finger Drills are both Words variants
+    const keys = mode === 'keys';
     const [data, setData] = useState<Data | null>(null);
     const [error, setError] = useState<string | null>(null);
 
@@ -181,7 +184,7 @@ function ClassicAnalytics({ mode, days, toolbar }: { mode: 'words' | 'drills' | 
                 </div>
                 <div className="stat">
                     <span className="stat-num">{s.completed}</span>
-                    <span className="stat-label">completed levels</span>
+                    <span className="stat-label">{keys ? 'completed lessons' : 'completed levels'}</span>
                 </div>
                 <div className="stat">
                     <span className="stat-num">{s.attempts}</span>
@@ -201,12 +204,19 @@ function ClassicAnalytics({ mode, days, toolbar }: { mode: 'words' | 'drills' | 
                 </div>
                 <div className="stat">
                     <span className="stat-num">{s.avgAccuracy === null ? '—' : `${Math.round(s.avgAccuracy)}%`}</span>
-                    <span className="stat-label">{words ? 'average key accuracy' : 'average accuracy'}</span>
+                    <span className="stat-label">{words || keys ? 'average key accuracy' : 'average accuracy'}</span>
                 </div>
-                <div className="stat">
-                    <span className="stat-num">{s.maxScore ?? '—'}</span>
-                    <span className="stat-label">best score</span>
-                </div>
+                {keys ? (
+                    <div className="stat" title="Letters open in Key Builder, out of 26">
+                        <span className="stat-num">{s.keyBuilder ? `${s.keyBuilder.openKeys} / 26` : '—'}</span>
+                        <span className="stat-label">open keys</span>
+                    </div>
+                ) : (
+                    <div className="stat">
+                        <span className="stat-num">{s.maxScore ?? '—'}</span>
+                        <span className="stat-label">best score</span>
+                    </div>
+                )}
                 <div className="stat" title="Every key pressed in finished attempts, wrong ones included">
                     <span className="stat-num">{(s.totalChars ?? 0).toLocaleString('en-AU')}</span>
                     <span className="stat-label">characters typed</span>
@@ -215,6 +225,18 @@ function ClassicAnalytics({ mode, days, toolbar }: { mode: 'words' | 'drills' | 
                     <div className="stat" title="Most words in a row typed without a wrong key">
                         <span className="stat-num">{s.bestCombo ?? '?'}</span>
                         <span className="stat-label">best combo (words)</span>
+                    </div>
+                )}
+                {keys && (
+                    <div className="stat" title="Most consecutive correct keys in one lesson. Lessons before this was recorded are not counted.">
+                        <span className="stat-num">{s.bestCharStreak ?? '?'}</span>
+                        <span className="stat-label">best character streak</span>
+                    </div>
+                )}
+                {keys && s.keyBuilder && (
+                    <div className="stat" title="Median speed of your last 10 lessons; the next stage target is fixed at it when a letter opens, never above the goal">
+                        <span className="stat-num">{Math.round(s.keyBuilder.currentCpm / 5)}</span>
+                        <span className="stat-label">current WPM · goal {Math.round(s.keyBuilder.goalCpm / 5)}</span>
                     </div>
                 )}
                 {mode === 'books' && (
@@ -243,6 +265,13 @@ function ClassicAnalytics({ mode, days, toolbar }: { mode: 'words' | 'drills' | 
                 </p>
             )}
             {mode === 'drills' && s.drills && <DrillsProgress drills={s.drills} typed={s.wordsDestroyed ?? 0} />}
+            {keys && s.keyBuilder && (
+                <p className="muted small" data-testid="keys-summary">
+                    {s.keyBuilder.openKeys} of 26 keys open{s.keyBuilder.focused ? ` · focus ${s.keyBuilder.focused.toUpperCase()}` : ''} · target {s.keyBuilder.targetCpm} CPM
+                    (fixed for this stage; your speed now {s.keyBuilder.currentCpm} CPM) · goal {s.keyBuilder.goalCpm} CPM. A new key opens when every open key has once been at the
+                    target with at least the set accuracy; the open key furthest from that is the focus of the next lesson (keybr.com method).
+                </p>
+            )}
             {mode === 'books' && s.currentLevel !== undefined && (
                 <p className="muted small">
                     Current level {s.currentLevel}
@@ -259,12 +288,22 @@ function ClassicAnalytics({ mode, days, toolbar }: { mode: 'words' | 'drills' | 
                 </p>
             )}
 
-            <div className="charts-grid">
-                <LineChart title="Typing speed over time" points={data.series.wpm} unit=" wpm" color="wpm" cpm />
-                <LineChart title={words ? 'Key accuracy over time' : 'Accuracy over time'} points={data.series.accuracy} unit="%" color="accuracy" />
-                <LineChart title="Score over time" points={data.series.score} unit="" color="score" />
-                <LineChart title="Practice duration" points={data.series.duration} unit=" min" color="duration" />
-            </div>
+            {keys ? (
+                <>
+                    <KeyBuilderCharts series={data.series.keyProgress ?? []} />
+                    <div className="charts-grid">
+                        <LineChart title="Practice duration" points={data.series.duration} unit=" min" color="duration" />
+                        <StreakChart series={data.series.charStreak} mode={mode} />
+                    </div>
+                </>
+            ) : (
+                <div className="charts-grid">
+                    <LineChart title="Typing speed over time" points={data.series.wpm} unit=" wpm" color="wpm" cpm />
+                    <LineChart title={words ? 'Key accuracy over time' : 'Accuracy over time'} points={data.series.accuracy} unit="%" color="accuracy" />
+                    <LineChart title="Score over time" points={data.series.score} unit="" color="score" />
+                    <LineChart title="Practice duration" points={data.series.duration} unit=" min" color="duration" />
+                </div>
+            )}
             {mode === 'books' && (
                 <div className="card">
                     <h3>Words typed in Books</h3>
@@ -303,37 +342,18 @@ function ClassicAnalytics({ mode, days, toolbar }: { mode: 'words' | 'drills' | 
                 </div>
             )}
 
-            <div>
-                <h4 className="chart-title">Longest error-free character streak</h4>
-                {!data.series.charStreak?.some((point) => point.value !== null) ? (
-                    <p className="muted small">No recorded character streaks in this period yet.</p>
-                ) : (
-                    <Chart
-                        ariaLabel="Longest error-free character streak per attempt"
-                        line={{ color: '#b78bff', format: (v) => `${Math.round(v)} chars` }}
-                        points={data.series.charStreak.map((point, i) => ({
-                            key: `${point.at}-${i}`,
-                            label: fmtDay(point.at),
-                            line: point.value,
-                            muted: point.status !== 'completed',
-                            tip: [
-                                fmtDay(point.at),
-                                point.value === null ? 'Not recorded' : `Longest streak: ${point.value} characters`,
-                                `Attempt: ${point.status}`,
-                            ],
-                        }))}
-                        legend={
-                            mode === 'books'
-                                ? 'Longest recorded streak per attempt; older sessions may only cover the final visit after a restart. Gaps are unrecorded sessions.'
-                                : 'Longest streak of correct characters per attempt, across words. Failed attempts are hollow; gaps are unrecorded sessions.'
-                        }
-                    />
-                )}
-            </div>
+            {!keys && <StreakChart series={data.series.charStreak} mode={mode} />}
             <DailyActivity data={data.series.daily} />
             <CumulativeCharacters data={data.series.daily} />
             {mode === 'drills' && <DrillsCharts series={data.series.drillProgress ?? []} />}
             {mode === 'drills' && s.drills && <DrillsWords drills={s.drills} />}
+            {keys && s.keyBuilder && (
+                <div>
+                    <h4 className="chart-title">Keys in opening order, against the current target</h4>
+                    <KeyChips keys={s.keyBuilder.keys} targetCpm={s.keyBuilder.targetCpm} />
+                </div>
+            )}
+            {data.keyboard && <KeyboardSection data={data.keyboard} mode={mode} />}
 
             <KeyInsights data={data.keyInsights} />
 
@@ -364,6 +384,92 @@ function ClassicAnalytics({ mode, days, toolbar }: { mode: 'words' | 'drills' | 
                 </div>
             )}
         </section>
+    );
+}
+
+function StreakChart({ series, mode }: { series: Data['series']['charStreak']; mode: Mode }) {
+    return (
+        <div>
+            <h4 className="chart-title">Longest error-free character streak</h4>
+            {!series || !series.some((point) => point.value !== null) ? (
+                <p className="muted small">No recorded character streaks in this period yet.</p>
+            ) : (
+                <Chart
+                    ariaLabel="Longest error-free character streak per attempt"
+                    line={{ color: '#b78bff', format: (v) => `${Math.round(v)} chars` }}
+                    points={series.map((point, i) => ({
+                        key: `${point.at}-${i}`,
+                        label: fmtDay(point.at),
+                        line: point.value,
+                        muted: point.status !== 'completed',
+                        tip: [
+                            fmtDay(point.at),
+                            point.value === null ? 'Not recorded' : `Longest streak: ${point.value} characters`,
+                            `Attempt: ${point.status}`,
+                        ],
+                    }))}
+                    legend={
+                        mode === 'books'
+                            ? 'Longest recorded streak per attempt; older sessions may only cover the final visit after a restart. Gaps are unrecorded sessions.'
+                            : 'Longest streak of correct characters per attempt, across words. Failed attempts are hollow; gaps are unrecorded sessions.'
+                    }
+                />
+            )}
+        </div>
+    );
+}
+
+/**
+ * Key Builder progress, lesson by lesson, in two full-width charts that share the letters open (bars): the lesson's speed against the
+ * target it was judged by, and its accuracy against the limit. A lesson that opened a new letter is the orange point: speed and
+ * accuracy usually drop there, because the new key is the slowest and the least accurate one.
+ */
+function KeyBuilderCharts({ series }: { series: NonNullable<Data['series']['keyProgress']> }) {
+    if (series.length === 0)
+        return <p className="muted small">No finished lessons in this period yet.</p>;
+    const opened = (p: (typeof series)[number]) => (p.newKeys.length ? [`New key: ${p.newKeys.map((k) => k.toUpperCase()).join(', ')} opened`] : []);
+    return (
+        <>
+            <div>
+                <h4 className="chart-title">Speed, target and open keys</h4>
+                <Chart
+                    ariaLabel="Speed of each lesson against its target, and the letters open"
+                    bars={{ color: '#51b788', format: (v) => `${Math.round(v)} keys`, max: 26 }}
+                    line={{ color: '#6ab7ff', format: (v) => `${Math.round(v)} WPM` }}
+                    line2={{ color: '#f3c94d', format: (v) => `${Math.round(v)} WPM` }}
+                    points={series.map((p, i) => ({
+                        key: `${p.at}-${i}`,
+                        label: fmtDay(p.at),
+                        bar: p.open,
+                        line: p.wpm,
+                        line2: Math.round((p.targetCpm / 5) * 10) / 10,
+                        highlight: p.newKeys.length > 0,
+                        tip: [fmtDay(p.at), `Speed: ${p.wpm} WPM`, `Target: ${Math.round((p.targetCpm / 5) * 10) / 10} WPM`, `Open keys: ${p.open} / 26`, ...opened(p)],
+                    }))}
+                    legend="Blue line: speed of the lesson (right axis) · yellow dashed: the target it was judged by (it is set when a letter opens) · green bars: letters open (left axis) · orange point: a new letter opened, so a dip there is expected."
+                />
+            </div>
+            <div>
+                <h4 className="chart-title">Accuracy, limit and open keys</h4>
+                <Chart
+                    ariaLabel="Accuracy of each lesson against the limit, and the letters open"
+                    bars={{ color: '#51b788', format: (v) => `${Math.round(v)} keys`, max: 26 }}
+                    line={{ color: '#7bd88f', format: (v) => `${Math.round(v)}%`, max: 100, floating: true }}
+                    line2={{ color: '#ef7777', format: (v) => `${Math.round(v)}%` }}
+                    connectGaps
+                    points={series.map((p, i) => ({
+                        key: `${p.at}-${i}`,
+                        label: fmtDay(p.at),
+                        bar: p.open,
+                        line: p.accuracy,
+                        line2: p.accuracyLimit,
+                        highlight: p.newKeys.length > 0,
+                        tip: [fmtDay(p.at), `Accuracy: ${p.accuracy === null ? '—' : `${p.accuracy}%`}`, `Limit per key: ${p.accuracyLimit}%`, `Open keys: ${p.open} / 26`, ...opened(p)],
+                    }))}
+                    legend="Green line: accuracy of the lesson (right axis) · red dashed: the limit a key must keep (set in Settings; it applies to each key, the lesson as a whole is usually a little better) · green bars: letters open · orange point: a new letter opened."
+                />
+            </div>
+        </>
     );
 }
 
@@ -439,56 +545,185 @@ function DrillsCharts({ series }: { series: NonNullable<Data['series']['drillPro
     );
 }
 
-/** Finger Drills: the words being practised (after all the charts) */
-function DrillsWords({ drills }: { drills: NonNullable<Data['summary']['drills']> }) {
-    if (drills.words.length === 0) return null;
+type DrillWord = NonNullable<Data['summary']['drills']>['words'][number];
+type SortKey = 'lemma' | 'showings' | 'accuracy' | 'msPerLetter' | 'step';
+const PAGE = 20;
+const SPARK_W = 220;
+const SPARK_H = 30;
+/** typing speed in letters per second (higher = faster), so a rising line is progress */
+const lettersPerSecond = (ms: number) => 1000 / Math.max(ms, 1);
+
+/** shared scale for every sparkline: the 3rd to 97th percentile of all speeds, so one outlier does not flatten the rest */
+function speedBounds(words: readonly DrillWord[]): { lo: number; hi: number } {
+    const all = words.flatMap((w) => w.speed.map(lettersPerSecond)).sort((a, b) => a - b);
+    if (all.length === 0) return { lo: 0, hi: 1 };
+    const at = (q: number) => all[Math.min(all.length - 1, Math.max(0, Math.round(q * (all.length - 1))))]!;
+    let lo = at(0.03);
+    let hi = at(0.97);
+    if (hi - lo < 0.2) {
+        const mid = (hi + lo) / 2;
+        lo = mid - 0.1;
+        hi = mid + 0.1;
+    }
+    return { lo, hi };
+}
+
+function Sparkline({ values, lo, hi }: { values: number[]; lo: number; hi: number }) {
+    if (values.length === 0) return <span className="muted">—</span>;
+    const y = (v: number) => SPARK_H - 3 - ((Math.min(hi, Math.max(lo, v)) - lo) / (hi - lo)) * (SPARK_H - 6);
+    const x = (i: number) => (values.length === 1 ? SPARK_W / 2 : 2 + (i / (values.length - 1)) * (SPARK_W - 4));
+    const d = values.map((v, i) => `${i === 0 ? 'M' : 'L'}${x(i).toFixed(1)} ${y(v).toFixed(1)}`).join(' ');
     return (
-                <div className="card">
-                    <h4 className="chart-title"></h4>
-                    <div className="table-wrap">
-                        <table className="data-table small">
-                            <thead>
-                                <tr>
-                                    <th>Word</th>
-                                    <th>Typed</th>
-                                    <th>Perfect (recent)</th>
-                                    <th>Time per letter</th>
-                                    <th>Status</th>
-                                </tr>
-                            </thead>
-                            <tbody>
-                                {drills.words.map((w) => (
-                                    <tr key={w.lemma}>
-                                        <td>
-                                            <strong>{w.lemma}</strong>
-                                        </td>
-                                        <td>{w.showings}</td>
-                                        <td className={w.accuracy >= drills.accuracyNeeded ? 'typing-compare faster' : undefined}>
-                                            {Math.round(w.accuracy * 100)}%
-                                        </td>
-                                        <td
-                                            className={
-                                                w.msPerLetter !== null && w.msPerLetter <= drills.targetMsPerLetter ? 'typing-compare faster' : undefined
-                                            }
-                                        >
-                                            {w.msPerLetter === null ? '—' : `${w.msPerLetter} ms`} <span className="muted">/ {drills.targetMsPerLetter}</span>
-                                        </td>
-                                        <td>
-                                            {w.learned
-                                                ? `Learned · step ${w.step}/${drills.maxStep} · ${w.nextInLevels === 0 ? 'next level' : `in ${w.nextInLevels} levels`}`
-                                                : 'Practising'}
-                                        </td>
-                                    </tr>
-                                ))}
-                            </tbody>
-                        </table>
-                    </div>
-                    <p className="muted small">
-                        Perfect (recent) is the share of the last {drills.accuracyWindow} showings without a wrong key. Time per letter is the median of the
-                        recent perfect showings, from the first letter to the space. Learned words never disappear: at the top step they come back every
-                        few levels.
-                    </p>
+        <svg className="word-spark" viewBox={`0 0 ${SPARK_W} ${SPARK_H}`} preserveAspectRatio="none" aria-hidden="true">
+            <path d={d} fill="none" stroke="#6ab7ff" strokeWidth="2" strokeLinejoin="round" strokeLinecap="round" vectorEffect="non-scaling-stroke" />
+            <circle cx={x(values.length - 1)} cy={y(values[values.length - 1]!)} r="2.6" fill="#6ab7ff" />
+        </svg>
+    );
+}
+
+function WordProgressDialog({ word, onClose }: { word: DrillWord; onClose: () => void }) {
+    useEffect(() => {
+        const onKey = (e: KeyboardEvent) => e.key === 'Escape' && onClose();
+        window.addEventListener('keydown', onKey);
+        return () => window.removeEventListener('keydown', onKey);
+    }, [onClose]);
+    return (
+        <div className="word-dialog-backdrop" onClick={onClose} data-testid="word-progress-dialog">
+            <div className="word-dialog" role="dialog" aria-modal="true" aria-label={`Progress for ${word.lemma}`} onClick={(e) => e.stopPropagation()}>
+                <div className="word-dialog-head">
+                    <h4 className="chart-title">{word.lemma}</h4>
+                    <button type="button" className="btn-small" onClick={onClose} autoFocus>
+                        Close
+                    </button>
                 </div>
+                <h5 className="chart-title">Typing speed (letters per second, higher is faster)</h5>
+                {word.speed.length === 0 ? (
+                    <p className="muted small">No timed showings yet.</p>
+                ) : (
+                    <Chart
+                        ariaLabel={`Typing speed of ${word.lemma} over all showings`}
+                        line={{ color: '#6ab7ff', format: (v) => `${v.toFixed(1)} letters/s` }}
+                        points={word.speed.map((ms, i) => ({
+                            key: `s${i}`,
+                            label: String(i + 1),
+                            line: Math.round(lettersPerSecond(ms) * 100) / 100,
+                            tip: [`Showing ${i + 1}`, `${(Math.round(lettersPerSecond(ms) * 10) / 10).toFixed(1)} letters/s`, `${ms} ms per letter`],
+                        }))}
+                    />
+                )}
+                <h5 className="chart-title">Accuracy (share of perfect showings among the recent ones)</h5>
+                <Chart
+                    ariaLabel={`Accuracy of ${word.lemma} over all showings`}
+                    line={{ color: '#51b788', format: (v) => `${Math.round(v)}%`, max: 100 }}
+                    points={word.trend.map((pct, i) => ({
+                        key: `a${i}`,
+                        label: String(i + 1),
+                        line: pct,
+                        tip: [`Showing ${i + 1}`, `${pct}% perfect`],
+                    }))}
+                />
+            </div>
+        </div>
+    );
+}
+
+/** Finger Drills: the words being practised (after all the charts): sortable, loaded 20 at a time while scrolling */
+function DrillsWords({ drills }: { drills: NonNullable<Data['summary']['drills']> }) {
+    const [sort, setSort] = useState<{ key: SortKey; dir: 1 | -1 }>({ key: 'accuracy', dir: 1 });
+    const [shown, setShown] = useState(PAGE);
+    const [open, setOpen] = useState<DrillWord | null>(null);
+    const bounds = useMemo(() => speedBounds(drills.words), [drills.words]);
+    const rows = useMemo(() => {
+        const val = (w: DrillWord): number | string => {
+            switch (sort.key) {
+                case 'lemma':
+                    return w.lemma;
+                case 'showings':
+                    return w.showings;
+                case 'accuracy':
+                    return w.accuracy;
+                case 'msPerLetter':
+                    return w.msPerLetter ?? Number.POSITIVE_INFINITY;
+                case 'step':
+                    return w.step;
+            }
+        };
+        return [...drills.words].sort((a, b) => {
+            const x = val(a);
+            const y = val(b);
+            const c = typeof x === 'string' ? x.localeCompare(y as string) : x === y ? 0 : x < (y as number) ? -1 : 1;
+            return c * sort.dir || a.lemma.localeCompare(b.lemma);
+        });
+    }, [drills.words, sort]);
+    if (drills.words.length === 0) return null;
+    const sortBy = (key: SortKey) => {
+        setSort((s) => (s.key === key ? { key, dir: s.dir === 1 ? -1 : 1 } : { key, dir: 1 }));
+        setShown(PAGE);
+    };
+    const th = (key: SortKey, label: string) => (
+        <th aria-sort={sort.key === key ? (sort.dir === 1 ? 'ascending' : 'descending') : 'none'}>
+            <button type="button" className="th-sort" onClick={() => sortBy(key)}>
+                {label}
+                <span aria-hidden="true">{sort.key === key ? (sort.dir === 1 ? ' ▲' : ' ▼') : ''}</span>
+            </button>
+        </th>
+    );
+    return (
+        <div className="card">
+            <h4 className="chart-title"></h4>
+            <div
+                className="table-wrap drills-words-scroll"
+                data-testid="drills-words-scroll"
+                onScroll={(e) => {
+                    const el = e.currentTarget;
+                    if (el.scrollHeight - el.scrollTop - el.clientHeight < 160) setShown((n) => Math.min(rows.length, n + PAGE));
+                }}
+            >
+                <table className="data-table small">
+                    <thead>
+                        <tr>
+                            {th('lemma', 'Word')}
+                            {th('showings', 'Typed')}
+                            {th('accuracy', 'Perfect (recent)')}
+                            {th('msPerLetter', 'Time per letter')}
+                            {th('step', 'Status')}
+                            <th>Speed progress</th>
+                        </tr>
+                    </thead>
+                    <tbody>
+                        {rows.slice(0, shown).map((w) => (
+                            <tr key={w.lemma}>
+                                <td>
+                                    <strong>{w.lemma}</strong>
+                                </td>
+                                <td>{w.showings}</td>
+                                <td className={w.accuracy >= drills.accuracyNeeded ? 'typing-compare faster' : undefined}>{Math.round(w.accuracy * 100)}%</td>
+                                <td className={w.msPerLetter !== null && w.msPerLetter <= drills.targetMsPerLetter ? 'typing-compare faster' : undefined}>
+                                    {w.msPerLetter === null ? '—' : `${w.msPerLetter} ms`} <span className="muted">/ {drills.targetMsPerLetter}</span>
+                                </td>
+                                <td>
+                                    {w.learned
+                                        ? `Learned · step ${w.step}/${drills.maxStep} · ${w.nextInLevels === 0 ? 'next level' : `in ${w.nextInLevels} levels`}`
+                                        : 'Practising'}
+                                </td>
+                                <td className="spark-cell">
+                                    <button type="button" className="spark-btn" aria-label={`Show the progress charts for ${w.lemma}`} onClick={() => setOpen(w)}>
+                                        <Sparkline values={w.speed.map(lettersPerSecond)} lo={bounds.lo} hi={bounds.hi} />
+                                    </button>
+                                </td>
+                            </tr>
+                        ))}
+                    </tbody>
+                </table>
+            </div>
+            <p className="muted small">
+                Showing {Math.min(shown, rows.length)} of {rows.length} words; more load as you scroll. Perfect (recent) is the share of the last{' '}
+                {drills.accuracyWindow} showings without a wrong key. Time per letter is the median of the recent perfect showings, from the first letter to
+                the space. The blue line is your typing speed (letters per second) over every showing of the word, on one scale for all words; click it for
+                the large charts. Learned words never disappear: at the top step they come back every few levels.
+            </p>
+            {open && <WordProgressDialog word={open} onClose={() => setOpen(null)} />}
+        </div>
     );
 }
 

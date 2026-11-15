@@ -5,6 +5,7 @@ import type { ChatClient, ChatMessage } from "../ai/clients.js";
 import { AI_CONFIG_V3, RESIDENT_NUM_CTX } from "../ai/config.js";
 import { conversationTarget } from "./practiceTargets.js";
 import { lessonContext } from "./lessons.js";
+import { freeLessonReply, hasTargets } from "./lessonFree.js";
 import { LESSON_START, LESSON_SWITCH, lessonSystemPrompt } from "./lessonPrompt.js";
 
 export interface ConversationPayload { conversation: true; sessionId: string; action: "reply" | "analysis"; messageId: string | null }
@@ -32,6 +33,13 @@ export async function runConversation(db: Db, chat: ChatClient, ctx: RunnerConte
     let budget = 12000;
     const bounded: typeof history = [];
     for (const item of history.slice().reverse()) { if (item.text.length > budget) break; budget -= item.text.length; bounded.unshift(item); }
+    if (session.mode === "lesson" && !hasTargets(db, sessionId)) {
+      // a lesson on the learner's own topic that has no target yet: find out what they want to practise
+      const settings = db.prepare("SELECT values_json AS v FROM settings_revisions ORDER BY revision DESC LIMIT 1").get() as { v: string } | undefined;
+      let cefr: { difficultyMin?: string; difficultyMax?: string } = {};
+      try { cefr = settings ? JSON.parse(settings.v) as typeof cefr : {}; } catch { /* defaults */ }
+      return freeLessonReply({ db, chat, sessionId, messageId, cefr: { cefrMin: cefr.difficultyMin ?? (cefr.difficultyMax ? "A2" : "B1"), cefrMax: cefr.difficultyMax ?? "C1" }, signal: ctx.signal });
+    }
     if (session.mode === "lesson") {
       const lesson = lessonContext(db, sessionId);
       if (!lesson.current) throw new RunnerError("lesson_without_target", "The lesson has no current target", false);

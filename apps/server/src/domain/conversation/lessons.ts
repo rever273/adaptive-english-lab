@@ -5,6 +5,7 @@ import { wordEvents } from "../vocabulary/practice.js";
 import { wordState } from "../vocabulary/schedule.js";
 import { normalizeWord } from "../vocabulary/forms.js";
 import { currentTranslations } from "../vocabulary/repository.js";
+import { WRAP_UP_AFTER } from "./lessonPrompt.js";
 
 /**
  * Conversation lessons: a teacher works through up to three targets, one at a time: the weakest grammar rule, a saved word and a saved
@@ -16,7 +17,8 @@ export type LessonKind = "grammar" | "word" | "expression";
 export interface LessonTarget { kind: LessonKind; key: string; label: string; brief: Record<string, unknown> }
 export interface LessonTargetView { ordinal: number; kind: LessonKind; label: string; status: "done" | "current" | "queued" }
 
-export const LESSON_TARGETS = 3;
+/** one target per lesson (grammar rule, word or expression; the kind rotates from lesson to lesson) */
+export const LESSON_TARGETS = 1;
 const MAX_ORDINAL = 5;
 
 /** when each target was last started in any lesson */
@@ -31,6 +33,13 @@ export function rotate<T extends { key: string }>(kind: LessonKind, ordered: rea
   return pool.find((c) => !used.has(`${kind}\0${c.key}`)) ?? [...pool].sort((a, b) => (used.get(`${kind}\0${a.key}`)! < used.get(`${kind}\0${b.key}`)! ? -1 : 1))[0];
 }
 
+/** a grammar target from a skill card; null for an unknown id or a card without a rule */
+export function grammarTargetFromCard(id: string): LessonTarget | null {
+  const c = skillCard(id);
+  if (!c?.rule) return null;
+  return { kind: "grammar", key: id, label: c.displayName ?? id, brief: { grammar_point: c.displayName ?? id, name_ru: c.displayNameRu ?? null, rule: c.rule, good_examples: c.good ?? [], typical_mistake: c.wrong ?? null } };
+}
+
 function grammarCandidates(db: Db, now: Date): LessonTarget[] {
   let ids: string[] = [];
   try {
@@ -41,11 +50,7 @@ function grammarCandidates(db: Db, now: Date): LessonTarget[] {
   }
   const all = Object.entries(canonicalCards().skills).filter(([, c]) => c.inTaxonomy && c.rule).map(([id]) => id);
   const ordered = [...new Set([...ids, ...all])];
-  return ordered.flatMap((id) => {
-    const c = skillCard(id);
-    if (!c?.rule) return [];
-    return [{ kind: "grammar" as const, key: id, label: c.displayName ?? id, brief: { grammar_point: c.displayName ?? id, name_ru: c.displayNameRu ?? null, rule: c.rule, good_examples: c.good ?? [], typical_mistake: c.wrong ?? null } }];
-  });
+  return ordered.flatMap((id) => { const t = grammarTargetFromCard(id); return t ? [t] : []; });
 }
 
 function wordCandidates(db: Db, now: Date): LessonTarget[] {
@@ -124,6 +129,13 @@ export function startNextTarget(db: Db, sessionId: string, now: Date): number | 
   }
   db.prepare("UPDATE conversation_lesson_targets SET started_at=? WHERE session_id=? AND ordinal=? AND started_at IS NULL").run(now.toISOString(), sessionId, next);
   return next;
+}
+
+/** the teacher has closed the lesson: the current target got WRAP_UP_AFTER answers and the last message is the teacher's closing one */
+export function lessonFinished(db: Db, sessionId: string): boolean {
+  const cur = lessonContext(db, sessionId).current;
+  if (!cur || cur.answers < WRAP_UP_AFTER) return false;
+  return (db.prepare("SELECT role FROM conversation_messages WHERE session_id=? ORDER BY rowid DESC LIMIT 1").get(sessionId) as { role: string } | undefined)?.role === "assistant";
 }
 
 /** what the reply prompt needs: the current target with its brief, how many answers were given on it, and the other targets' names */

@@ -111,6 +111,8 @@ export const SettingsV1Schema = z
     vocabularyTaskCount: z.number().int().min(5).max(10).optional(),
     /** D64/TASK_020: at most this many words never practised before enter one vocabulary session (default 4) */
     vocabularyNewWordsPerSession: z.number().int().min(1).max(10).optional(),
+    /** how many times every word must be matched in the matching game's rush mode that closes a vocabulary practice (default 4) */
+    vocabularyMatchRounds: z.number().int().min(1).max(10).optional(),
     /** TASK_032: sentences in one Grammar Cloze session (default 15); applies to the next session */
     clozeTaskCount: z.number().int().min(5).max(50).optional(),
     /** D67: warm the local model at start and when the learner arrives (default true) */
@@ -132,6 +134,12 @@ export const SettingsV1Schema = z
     typingDrillWordsPerLevel: z.number().int().min(20).max(200).optional(),
     /** TASK_033: Piper says every tenth drilled word; missing means off */
     typingDrillSpeech: z.boolean().optional(),
+    /** unused (Key Builder's first fixed target); kept so a saved revision with it stays valid */
+    typingKeysTargetCpm: z.number().int().min(75).max(750).optional(),
+    /** Key Builder: the speed you are working towards, WPM; the opening target follows your real speed up to it. Missing means 55 */
+    typingKeysGoalWpm: z.number().int().min(20).max(150).optional(),
+    /** Key Builder: a key counts as reached only with at least this accuracy, percent; missing means 95 */
+    typingKeysMinAccuracy: z.number().int().min(80).max(100).optional(),
     typingVocabularyShare: z.number().min(0).max(1).optional(),
     typingSpeedMultiplier: z.number().min(0.5).max(2).optional(),
     typingBookMinutes: z.number().int().min(1).max(30).optional(),
@@ -139,6 +147,7 @@ export const SettingsV1Schema = z
     typingBooksShowMistakes: z.boolean().optional(),
     /** TASK_028: sentences in one Audio Dictation lesson; fixed in the lesson when it is created. Missing means 10. */
     typingDictationExercisesPerLesson: z.number().int().min(5).max(20).optional(),
+    typingDictationSource: z.enum(["real", "tts"]).optional(),
     /** how many saved words the memory check after a Words level offers (0 = no check); missing means 2 */
     typingRecallWords: z.number().int().min(0).max(3).optional(),
     dailyOrder: z.array(z.enum(["grammar", "vocabulary", "words", "books", "dictation", "wordLesson", "grammarCloze", "conversation"])).min(5).max(8).refine(v => new Set(v).size === v.length).optional(),
@@ -159,6 +168,8 @@ export const preloadModelOnStart = (v: Pick<SettingsV1, "preloadModelOnStart">):
 export const reviewNoticeThreshold = (v: Pick<SettingsV1, "reviewNoticeThreshold">): number => v.reviewNoticeThreshold ?? 5;
 
 export const vocabularyNewWordsPerSession = (v: Pick<SettingsV1, "vocabularyNewWordsPerSession">): number => v.vocabularyNewWordsPerSession ?? 4;
+
+export const vocabularyMatchRounds = (v: Pick<SettingsV1, "vocabularyMatchRounds">): number => v.vocabularyMatchRounds ?? 4;
 
 export const typingWordsPerLevel = (v: Pick<SettingsV1, "typingWordsPerLevel">): number => v.typingWordsPerLevel ?? 30;
 

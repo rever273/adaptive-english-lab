@@ -46,6 +46,25 @@ export function useKeys(onDown: (e: KeyboardEvent) => void, onUp?: (e: KeyboardE
 }
 
 /**
+ * The final statistics window of a lesson: Enter does what its main "continue" button does. It is ignored while a button, link or
+ * text field has the focus (that element reacts to Enter itself), on a held key, and for a moment after the window opens, so the
+ * Enter that closed the last exercise cannot skip the statistics unseen. `action` null = the window is not on screen.
+ */
+export const RESULT_ENTER_GRACE_MS = 500;
+export function useEnterContinue(action: (() => void) | null): void {
+  const shownAt = useRef(0);
+  const was = useRef(false);
+  if (action && !was.current) shownAt.current = Date.now();
+  was.current = action !== null;
+  useKeys((e) => {
+    if (!action || e.key !== "Enter" || e.repeat || e.ctrlKey || e.metaKey || e.altKey || e.shiftKey || e.isComposing) return;
+    if (isTextField(e.target) || isPressable(e.target) || Date.now() - shownAt.current < RESULT_ENTER_GRACE_MS) return;
+    e.preventDefault();
+    action();
+  });
+}
+
+/**
  * The function keys mean the same thing on every practice screen (Words, Books, Dictation, Grammar cloze, Word lesson, Memory check).
  * A screen uses only the ones it has; nothing else may bind these keys. Change a key here and every screen, label and hint follows.
  *   F2 pause / resume · F3 Russian translation · F4 listen again · F5 hint · F6 show the answer

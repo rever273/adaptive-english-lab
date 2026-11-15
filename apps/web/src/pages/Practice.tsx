@@ -330,12 +330,16 @@ export function Practice({ category = "grammar", onExit, onNavigate, dailyStart 
   }
 
   // a finished vocabulary practice ends with a matching game (one of two modes, 50/50) when it had at least 3 different words; any problem skips it
-  const [match, setMatch] = useState<{ words: api.MatchWord[]; mode: MatchMode; speech: boolean } | null>(null);
+  const [match, setMatch] = useState<{ words: api.MatchWord[]; mode: MatchMode; speech: boolean; rounds: number } | null>(null);
   async function openMatchGame(id: string) {
     try {
-      const [{ words }, speech] = await Promise.all([api.fetchMatchWords(id), api.fetchVocabularySpeech().then((s) => s.enabled && s.configured).catch(() => false)]);
+      const [{ words }, speech, rounds] = await Promise.all([
+        api.fetchMatchWords(id),
+        api.fetchVocabularySpeech().then((s) => s.enabled && s.configured).catch(() => false),
+        api.fetchSettings().then((s) => s.values.vocabularyMatchRounds ?? 4).catch(() => 4),
+      ]);
       if (words.length >= MIN_WORDS) {
-        setMatch({ words, mode: Math.random() < 0.5 ? "once" : "rush", speech });
+        setMatch({ words, mode: Math.random() < 0.5 ? "once" : "rush", speech, rounds });
         return;
       }
     } catch {
@@ -400,7 +404,7 @@ export function Practice({ category = "grammar", onExit, onNavigate, dailyStart 
   }
 
   if (match) {
-    return <MatchGame words={match.words} mode={match.mode} soundsEnabled={soundsEnabled} speechEnabled={match.speech} onDone={(results) => { const played = match; setMatch(null); if (results && sessionId) void api.saveMatchResults(sessionId, played.mode, results).catch(() => {}).finally(() => void finish("completed")); else void finish("completed"); }} />;
+    return <MatchGame words={match.words} mode={match.mode} rounds={match.rounds} soundsEnabled={soundsEnabled} speechEnabled={match.speech} onDone={(results) => { const played = match; setMatch(null); if (results && sessionId) void api.saveMatchResults(sessionId, played.mode, results, played.rounds).catch(() => {}).finally(() => void finish("completed")); else void finish("completed"); }} />;
   }
 
   const session = view.session;
@@ -487,7 +491,7 @@ export function Practice({ category = "grammar", onExit, onNavigate, dailyStart 
             onShowAnswer={() => void showAnswerAndContinue()}
           />
           {slotUi.checking && <p className="notice notice-info small" role="status" data-testid="ai-checking"><i className="pi pi-spin pi-spinner" aria-hidden="true" /> Checking your answer…</p>}
-          {slotUi.feedback && <><DailyGoalCheck mode={category} trigger={slotUi.feedback} /><FeedbackPanel feedback={slotUi.feedback} skill={category === "vocabulary" ? null : slotUi.reveal.skill} busy={slotUi.busy} onTryAgain={tryAgain} onContinue={goOn} autoAdvance={autoPending} onStay={() => setStay(slotUi.feedback!.slotId)} /></>}
+          {slotUi.feedback && <><DailyGoalCheck mode={category} trigger={slotUi.feedback} /><FeedbackPanel feedback={slotUi.feedback} sessionId={sessionId} skill={category === "vocabulary" ? null : slotUi.reveal.skill} busy={slotUi.busy} onTryAgain={tryAgain} onContinue={goOn} autoAdvance={autoPending} onStay={() => setStay(slotUi.feedback!.slotId)} /></>}
           {slotUi.error && (
             <div className="notice notice-error" role="alert" data-testid="error">
               {slotUi.error}

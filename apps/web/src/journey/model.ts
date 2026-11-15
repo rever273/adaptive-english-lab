@@ -16,8 +16,9 @@ export const formatTime = (ms: number) => {
     return m >= 60 ? `${Math.floor(m / 60)}h ${String(m % 60).padStart(2, '0')}m` : `${m} min`;
 };
 export function journeyProgress(d: api.JourneyData) {
+    // All recorded time is shown, but typing Words (Words, Finger Drills, Key Builder) trains the keyboard, not English: it does not move the route.
     const ms = Object.values(d.totals).reduce((a, b) => a + b, 0),
-        hours = ms / 3600000;
+        hours = (ms - d.totals.words) / 3600000;
     const targets: [number, number, number] = [d.journeyHours.b2, d.journeyHours.c1, d.journeyHours.c2];
     const cuts: [number, number, number, number] = [0, targets[0], targets[0] + targets[1], targets[0] + targets[1] + targets[2]];
     const stage = hours < cuts[1]! ? 0 : hours < cuts[2]! ? 1 : 2;

@@ -3,7 +3,7 @@ import type { Db } from "../../db/open.js";
 import { ApiError } from "../../errors.js";
 import { enqueue } from "../../queue/jobs.js";
 import { awardModeXp, XP_CONVERSATION_ANSWER } from "../sessions/modeXp.js";
-import { insertTargets, lessonTargets, planLesson, startNextTarget } from "./lessons.js";
+import { insertTargets, lessonFinished, lessonTargets, planLesson, startNextTarget } from "./lessons.js";
 
 export interface ConversationDeps { now: () => Date; newId: () => string }
 
@@ -49,7 +49,7 @@ export function conversationState(db: Db, id: string) {
   const head = db.prepare("SELECT id, topic, mode, status, started_at AS startedAt, updated_at AS updatedAt, active_ms AS activeMs, answer_count AS answerCount FROM conversation_sessions WHERE id=?").get(id) as { mode: string };
   return {
     session: head,
-    lesson: head.mode === "lesson" ? { targets: lessonTargets(db, id) } : null,
+    lesson: head.mode === "lesson" ? { targets: lessonTargets(db, id), finished: lessonFinished(db, id) } : null,
     messages: db.prepare("SELECT m.id, m.role, m.text, m.created_at AS createdAt, a.status AS analysisStatus, a.text AS analysis FROM conversation_messages m LEFT JOIN conversation_analyses a ON a.message_id=m.id WHERE m.session_id=? ORDER BY m.rowid").all(id),
     vocabulary: [
       ...(db.prepare("SELECT lemma,surface_forms_json AS forms FROM vocabulary_entries e WHERE (SELECT kind FROM vocabulary_entry_events ev WHERE ev.entry_id=e.id ORDER BY ev.created_at DESC,ev.rowid DESC LIMIT 1) IS NOT 'removed'").all() as Array<{ lemma: string; forms: string }>).flatMap(r => { try { const v: unknown = JSON.parse(r.forms); return [r.lemma, ...(Array.isArray(v) ? v.filter((x): x is string => typeof x === 'string') : [])]; } catch { return [r.lemma]; } }),
@@ -62,14 +62,15 @@ export function conversationState(db: Db, id: string) {
 /** the title of every lesson; what it teaches is in its targets */
 export const LESSON_TOPIC = "Lesson with a teacher";
 
-export function startConversation(db: Db, deps: ConversationDeps, topic: string, tab: string, mode: "topic" | "lesson" = "topic"): string {
+export function startConversation(db: Db, deps: ConversationDeps, topic: string, tab: string, mode: "topic" | "lesson" = "topic", free = false): string {
   const id = deps.newId(), now = deps.now().toISOString();
-  const plan = mode === "lesson" ? planLesson(db, deps.now()) : [];
-  if (mode === "lesson" && plan.length === 0) throw new ApiError(409, "NOTHING_TO_PRACTISE", "There is nothing to practise yet: add words or practise grammar first.");
+  // a free-topic lesson starts with no target: the teacher asks what the learner wants to practise
+  const plan = mode === "lesson" && !free ? planLesson(db, deps.now()) : [];
+  if (mode === "lesson" && !free && plan.length === 0) throw new ApiError(409, "NOTHING_TO_PRACTISE", "There is nothing to practise yet: add words or practise grammar first.");
   db.transaction(() => {
     pauseActive(db, now);
     db.prepare("INSERT INTO conversation_sessions(id,topic,mode,status,tab_id,started_at,updated_at,heartbeat_at) VALUES (?,?,?,'active',?,?,?,?)").run(id, mode === "lesson" ? LESSON_TOPIC : topic, mode, tab, now, now, now);
-    if (mode === "lesson") insertTargets(db, id, 0, plan, now);
+    if (plan.length) insertTargets(db, id, 0, plan, now);
     enqueue(db, deps, { kind: "tutor", priority: 1, payload: { conversation: true, sessionId: id, action: "reply", messageId: null }, idempotencyKey: `conversation:${id}:opening` });
   })();
   return id;
@@ -106,6 +107,7 @@ export function submitConversation(db: Db, deps: ConversationDeps, id: string, t
     }
     const last = db.prepare("SELECT role FROM conversation_messages WHERE session_id=? ORDER BY rowid DESC LIMIT 1").get(id) as { role: string } | undefined;
     if (!last || last.role !== "assistant" || replyPending(db, id)) throw new ApiError(409, "WAITING_FOR_REPLY", "Please wait for the next question.");
+    if (lessonFinished(db, id)) throw new ApiError(409, "LESSON_FINISHED", "This lesson is finished. Start a new lesson to practise another topic.");
     const now = deps.now().toISOString();
     db.prepare("INSERT INTO conversation_messages(id,session_id,role,text,created_at) VALUES (?,?,'user',?,?)").run(messageId, id, text, now);
     db.prepare("INSERT INTO conversation_analyses(message_id,status,created_at) VALUES (?,'pending',?)").run(messageId, now);
@@ -124,6 +126,7 @@ export function nextLessonTopic(db: Db, deps: ConversationDeps, id: string, tab:
     if (mode !== "lesson") throw new ApiError(409, "NOT_A_LESSON", "Only a lesson has topics to switch.");
     const last = db.prepare("SELECT role FROM conversation_messages WHERE session_id=? ORDER BY rowid DESC LIMIT 1").get(id) as { role: string } | undefined;
     if (!last || last.role !== "assistant" || replyPending(db, id)) throw new ApiError(409, "WAITING_FOR_REPLY", "Please wait for the teacher's reply.");
+    if (lessonFinished(db, id)) throw new ApiError(409, "LESSON_FINISHED", "This lesson is finished. Start a new lesson to practise another topic.");
     const ordinal = startNextTarget(db, id, deps.now());
     if (ordinal === null) throw new ApiError(409, "NO_MORE_TOPICS", "There are no more topics for this lesson.");
     db.prepare("UPDATE conversation_sessions SET updated_at=? WHERE id=?").run(deps.now().toISOString(), id);

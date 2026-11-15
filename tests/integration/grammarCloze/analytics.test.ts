@@ -46,7 +46,7 @@ describe("analytics and journey", () => {
     expect(a.comparison.current.answered).toBe(15);
     expect(a.comparison.previous.answered).toBe(0);
     expect(a.progress.at(-1)).toMatchObject({ processed: 15 });
-    expect(a.ruleSeries.series.length).toBeLessThanOrEqual(8);
+    expect(a.ruleSeries.series.length).toBe(a.byRule.length);
     expect(a.ruleSeries.series[0]!.counts.reduce((n, x) => n + x, 0)).toBe(a.ruleSeries.series[0]!.answered);
     expect(a.ruleSeries.series.every((x) => x.accuracy.length === a.ruleSeries.labels.length)).toBe(true);
   });

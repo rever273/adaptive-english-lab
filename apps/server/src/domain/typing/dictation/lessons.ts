@@ -1,4 +1,5 @@
-import { existsSync, readFileSync } from "node:fs";
+import { copyFileSync, existsSync, mkdirSync, readFileSync } from "node:fs";
+import { createHash } from "node:crypto";
 import path from "node:path";
 import {
   DICTATION_CHECK_VERSION,
@@ -24,7 +25,10 @@ import { loadSettings } from "../../sessions/policy.js";
 import { buildItems, mulberry32, targetWordsFor, VOCABULARY_SHARE, weakGrammarSkills, type DictationTopic, type PlanItem } from "./planning.js";
 import type { DictationAsr } from "./asr.js";
 import { isCorrect, rawTokens, tokenize, wordDistance } from "./check.js";
-import { displayWords, revealedSet, stuckWord } from "./hints.js";
+import { attemptedAnswerWords, displayWords, revealedSet, stuckWord, wrongAnswerWords } from "./hints.js";
+import { loadRealClips, type RealSpeechConfig } from "./realSpeech.js";
+import { dictationFingerprint } from "./check.js";
+import { fingerprintOf, normalizeSentence } from "../../content/normalize.js";
 
 /** Everything the dictation mode needs from outside the database. Tests replace the clients with fakes. */
 export interface DictationEnv {
@@ -34,6 +38,7 @@ export interface DictationEnv {
   voices: VoiceService;
   topics: DictationTopic[];
   audioDir: string;
+  realSpeech?: RealSpeechConfig;
 }
 
 export interface Deps {
@@ -90,7 +95,7 @@ interface ExerciseRow {
   topic: string;
   target_skill_id: string | null;
   word_count: number;
-  source: "tts";
+  source: "tts" | "real";
   voice_name: string | null;
   audio_file: string;
   audio_ms: number;
@@ -136,10 +141,26 @@ function summary(db: Db, lesson: LessonRow): DictationLessonSummary {
 
 const openLesson = (db: Db): LessonRow | undefined => db.prepare("SELECT * FROM typing_dictation_lessons WHERE status <> 'completed'").get() as LessonRow | undefined;
 
+export function unusedRealClips(db: Db, config: RealSpeechConfig) {
+  const seen = new Set<string>();
+  return loadRealClips(config).filter((c) => {
+    const fp = dictationFingerprint(c.text);
+    if (seen.has(fp) || db.prepare("SELECT 1 FROM typing_dictation_exercises WHERE fingerprint = ?").get(fp) || db.prepare("SELECT 1 FROM typing_dictation_pool WHERE fingerprint = ?").get(fp) || db.prepare("SELECT 1 FROM prompt_units WHERE fingerprint = ? LIMIT 1").get(fingerprintOf(normalizeSentence(c.text)))) return false;
+    seen.add(fp);
+    return true;
+  });
+}
+
 export function dictationOverview(db: Db, env: DictationEnv): DictationOverview {
   const open = openLesson(db);
   const nextLevel = open ? open.level_number : (db.prepare("SELECT COALESCE(MAX(level_number), 0) + 1 AS n FROM typing_dictation_lessons").get() as { n: number }).n;
-  const a = dictationAvailability(env);
+  const source = loadSettings(db).values.typingDictationSource ?? (env.realSpeech ? "real" : "tts");
+  let availableReal = false;
+  if (source === "real" && !open && env.realSpeech) {
+    availableReal = unusedRealClips(db, env.realSpeech).length >= typingDictationExercisesPerLesson(loadSettings(db).values);
+  }
+  const openIsReal = !!open && !!db.prepare("SELECT 1 FROM typing_dictation_exercises WHERE lesson_id = ? AND source = 'real' LIMIT 1").get(open.id);
+  const a = openIsReal ? { available: true, reason: null } : source === "real" && !open ? { available: availableReal, reason: availableReal ? null : "real_speech_unavailable" as const } : dictationAvailability(env);
   const prepared = (db.prepare("SELECT COUNT(*) AS n FROM typing_dictation_pool p WHERE NOT EXISTS (SELECT 1 FROM typing_dictation_pool_use u WHERE u.pool_id = p.id)").get() as { n: number }).n;
   const generating = (db.prepare(`SELECT COUNT(*) AS n FROM jobs WHERE kind = 'generation' AND json_extract(payload_json, '$.dictationPool') = 1 AND state IN ${OPEN_JOB_STATES}`).get() as { n: number }).n;
   return { available: a.available, reason: a.reason, nextLevel, lesson: open ? summary(db, open) : null, pool: { prepared, generating } };
@@ -184,6 +205,7 @@ function repeatCandidates(db: Db, limit: number): Array<{ id: string }> {
       `SELECT e.id AS id FROM typing_dictation_exercises e
         JOIN typing_dictation_lessons l ON l.id = e.lesson_id AND l.status = 'completed'
        WHERE e.repeat_of IS NULL
+         AND e.source = 'tts'
          AND (EXISTS (SELECT 1 FROM typing_dictation_attempts a WHERE a.exercise_id = e.id AND a.correct = 0)
               OR EXISTS (SELECT 1 FROM typing_dictation_events v WHERE v.exercise_id = e.id AND v.reveal_all = 1))
          AND (SELECT COUNT(*) FROM typing_dictation_exercises r WHERE r.repeat_of = e.id) < 2
@@ -210,6 +232,32 @@ export function createLesson(db: Db, deps: Deps, env: DictationEnv): DictationLe
   const settings = loadSettings(db);
   const count = typingDictationExercisesPerLesson(settings.values);
   const level = (db.prepare("SELECT COALESCE(MAX(level_number), 0) + 1 AS n FROM typing_dictation_lessons").get() as { n: number }).n;
+  if ((settings.values.typingDictationSource ?? (env.realSpeech ? "real" : "tts")) === "real") {
+    if (!env.realSpeech) throw new ApiError(409, "TYPING_DICTATION_UNAVAILABLE", "Real speech recordings are not configured");
+    const config = env.realSpeech;
+    return db.transaction(() => {
+      const again = openLesson(db);
+      if (again) return summary(db, again);
+      const selected = unusedRealClips(db, config).slice(0, count);
+      if (selected.length < count) throw new ApiError(409, "TYPING_DICTATION_REAL_SHORTAGE", `Only ${selected.length} checked real-speech sentences remain; ${count} are needed.`);
+      const id = deps.newId();
+      const plan: LessonPlan = { version: 1, voicesVersion: 0, items: [] };
+      db.prepare("INSERT INTO typing_dictation_lessons(id, level_number, status, exercise_count, settings_revision, settings_json, plan_json, generation_attempt, created_at) VALUES (?,?,?,?,?,?,?,?,?)").run(id, level, "generating", count, settings.revision, JSON.stringify(settings.values), JSON.stringify(plan), 1, asOf);
+      mkdirSync(env.audioDir, { recursive: true });
+      selected.forEach((c, ordinal) => {
+        const exId = deps.newId();
+        const filename = `real-${c.sha256}.mp3`;
+        const dest = path.join(env.audioDir, filename);
+        if (!existsSync(dest)) copyFileSync(path.join(config.audioDir, c.file), dest);
+        if (createHash("sha256").update(readFileSync(dest)).digest("hex") !== c.sha256) throw new ApiError(409, "TYPING_DICTATION_AUDIO_CHANGED", "A checked real recording has changed");
+        db.prepare(`INSERT INTO typing_dictation_exercises(id, lesson_id, ordinal, text_en, translation_ru, topic, target_skill_id, word_count, fingerprint, source, voice_id, voice_name, length_scale, tts_model_sha256, audio_file, audio_ms, asr_model, asr_text, status, job_result_id, created_at)
+          VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)`).run(exId, id, ordinal, c.text, c.translationRu, "Everyday English", null, tokenize(c.text).length, dictationFingerprint(c.text), "real", null, null, null, null, filename, c.audioMs, c.validation.asrModels.join("+"), c.validation.asrTexts[0], "validated", null, asOf);
+        db.prepare("INSERT INTO typing_dictation_real_provenance(exercise_id, corpus, sentence_id, clip_file, audio_sha256, validation_json, created_at) VALUES (?,?,?,?,?,?,?)").run(exId, c.validation.source, c.sentenceId, c.file, c.sha256, JSON.stringify(c.validation), asOf);
+      });
+      markReadyIfComplete(db, env, id);
+      return summary(db, lessonRow(db, id));
+    }).immediate();
+  }
   const items = buildItems(db, env, { count, seed: level * 7919 + count, topicOffset: level, asOf });
   const a = dictationAvailability(env);
   return db
@@ -315,6 +363,16 @@ export function startLesson(db: Db, deps: Deps, env: DictationEnv, lessonId: str
       const status = effectiveStatus(db, lesson);
       if (status !== "ready") throw new ApiError(409, "TYPING_DICTATION_NOT_READY", `The lesson is ${status}, not ready`);
       if (readyCount(db, lesson.id) < lesson.exercise_count) throw new ApiError(409, "TYPING_DICTATION_NOT_READY", "The lesson is incomplete");
+      const realMissing = db.prepare("SELECT e.audio_file AS audioFile, p.clip_file AS clipFile, p.audio_sha256 AS sha FROM typing_dictation_exercises e JOIN typing_dictation_real_provenance p ON p.exercise_id = e.id WHERE e.lesson_id = ? AND e.source = 'real'").all(lesson.id) as Array<{ audioFile: string; clipFile: string; sha: string }>;
+      for (const r of realMissing) {
+        const dest = audioPathFor(env, r.audioFile);
+        if (existsSync(dest)) continue;
+        if (!env.realSpeech || path.basename(r.clipFile) !== r.clipFile) throw new ApiError(409, "TYPING_DICTATION_AUDIO_MISSING", "A real recording is missing and its source is unavailable");
+        const source = path.join(env.realSpeech.audioDir, r.clipFile);
+        if (!existsSync(source) || createHash("sha256").update(readFileSync(source)).digest("hex") !== r.sha) throw new ApiError(409, "TYPING_DICTATION_AUDIO_MISSING", "The original checked recording is missing or changed");
+        mkdirSync(env.audioDir, { recursive: true });
+        copyFileSync(source, dest);
+      }
       const work = missingWork(db, env, lesson);
       if (work.audio.length > 0) {
         // the audio is not in a database backup: it is voiced again from the saved text, voice and speed (committed, then reported)
@@ -339,6 +397,14 @@ interface HintEvent {
 }
 
 const hintEvents = (db: Db, exerciseId: string): HintEvent[] => db.prepare("SELECT reveal_from, reveal_to FROM typing_dictation_events WHERE exercise_id = ? AND kind = 'hint' ORDER BY rowid").all(exerciseId) as HintEvent[];
+// Reconstruct feedback from submitted answers; existing hint events and raw attempts remain unchanged.
+function visibleHintWords(db: Db, e: ExerciseRow, hints: HintEvent[]): Set<number> {
+  const shown = revealedSet(hints.map((h) => [h.reveal_from, h.reveal_to] as const));
+  const attempts = db.prepare("SELECT answer_text FROM typing_dictation_attempts WHERE exercise_id = ? AND correct = 0 AND check_version = 'dictation-check-v2'").all(e.id) as Array<{ answer_text: string }>;
+  const words = displayWords(e.text_en);
+  for (const attempt of attempts) for (const index of attemptedAnswerWords(words, attempt.answer_text)) shown.add(index);
+  return shown;
+}
 const hasEvent = (db: Db, exerciseId: string, kind: string): boolean => db.prepare("SELECT 1 FROM typing_dictation_events WHERE exercise_id = ? AND kind = ?").get(exerciseId, kind) !== undefined;
 const isDone = (db: Db, exerciseId: string): boolean => db.prepare("SELECT 1 FROM typing_dictation_attempts WHERE exercise_id = ? AND correct = 1").get(exerciseId) !== undefined;
 
@@ -350,7 +416,7 @@ function exerciseState(db: Db, e: ExerciseRow, currentOrdinal: number | null): D
   const done = isDone(db, e.id);
   const hints = hintEvents(db, e.id);
   const isCurrent = currentOrdinal === e.ordinal;
-  const shown = done ? "all" : isCurrent ? revealedSet(hints.map((h) => [h.reveal_from, h.reveal_to] as const)) : new Set<number>();
+  const shown = done ? "all" : isCurrent ? visibleHintWords(db, e, hints) : new Set<number>();
   return {
     id: e.id,
     ordinal: e.ordinal,
@@ -359,12 +425,12 @@ function exerciseState(db: Db, e: ExerciseRow, currentOrdinal: number | null): D
     words: wordsFor(e.text_en, shown),
     hintLevel: hints.length,
     isRepeat: e.repeat_of !== null,
-    translationRu: hasEvent(db, e.id, "translation") ? e.translation_ru : null,
+    translationRu: hasEvent(db, e.id, "translation") && e.translation_ru.trim() ? e.translation_ru : null,
     source: e.source,
     attempts: (db.prepare("SELECT COUNT(*) AS n FROM typing_dictation_attempts WHERE exercise_id = ?").get(e.id) as { n: number }).n,
     plays: (db.prepare("SELECT COUNT(*) AS n FROM typing_dictation_events WHERE exercise_id = ? AND kind = 'play'").get(e.id) as { n: number }).n,
     audioMs: e.audio_ms,
-    soundFlagged: isSoundFlagged(db, e.id),
+    soundFlagged: e.source === "real" ? (db.prepare("SELECT action FROM typing_dictation_real_flags WHERE exercise_id = ? ORDER BY created_at DESC, rowid DESC LIMIT 1").get(e.id) as { action: string } | undefined)?.action === "flag" : isSoundFlagged(db, e.id),
   };
 }
 
@@ -391,6 +457,10 @@ export function exerciseAudio(db: Db, env: DictationEnv, exerciseId: string): { 
   const e = exerciseRow(db, exerciseId);
   const file = audioPathFor(env, e.audio_file);
   if (!existsSync(file)) throw new ApiError(409, "TYPING_DICTATION_AUDIO_MISSING", "The audio file is missing");
+  if (e.source === "real") {
+    const provenance = db.prepare("SELECT audio_sha256 AS sha FROM typing_dictation_real_provenance WHERE exercise_id = ?").get(exerciseId) as { sha: string } | undefined;
+    if (!provenance || createHash("sha256").update(readFileSync(file)).digest("hex") !== provenance.sha) throw new ApiError(409, "TYPING_DICTATION_AUDIO_CHANGED", "The checked recording has changed");
+  }
   return { file };
 }
 
@@ -436,19 +506,26 @@ export function openTranslation(db: Db, deps: Deps, exerciseId: string): { trans
 /* ------------------------------------------------------------------ hints */
 
 /**
- * A hint shows the sentence from its start up to and including the first word that does not match what was typed (the correct words before
- * it come for free). Hints are not limited; the words shown earlier stay shown. Nothing happens when the answer already looks complete or
- * everything up to the stuck word is already visible.
+ * Manual hints reveal through the first stuck word. An incorrect submitted answer records only its first
+ * missing or substituted word; visibleHintWords also reveals the other errors in that answer.
  */
 function writeHint(db: Db, deps: Deps, e: ExerciseRow, typedText: string, source: "manual" | "wrong_answer"): boolean {
   const words = displayWords(e.text_en);
+  if (source === "wrong_answer") {
+    const firstWrong = wrongAnswerWords(words, typedText)[0];
+    if (firstWrong === undefined) return false; // an extra typed word has no corresponding answer word to reveal
+    // The current answer is already stored, so check recorded events rather than its derived display.
+    const recorded = revealedSet(hintEvents(db, e.id).map((h) => [h.reveal_from, h.reveal_to] as const));
+    if (recorded.has(firstWrong)) return false;
+    db.prepare("INSERT INTO typing_dictation_events(id, exercise_id, kind, source, typed_text, reveal_from, reveal_to, created_at) VALUES (?,?,?,?,?,?,?,?)").run(deps.newId(), e.id, "hint", source, typedText, firstWrong, firstWrong, deps.now().toISOString());
+    return true;
+  }
   let k = stuckWord(words, tokenize(typedText), rawTokens(typedText));
   if (k === null) {
-    // a hint on an already complete answer is not spent; after a wrong answer this cannot happen, but the last word is revealed rather than nothing
-    if (source === "manual") return false;
-    k = words.length - 1;
+    return false;
   }
-  const shown = revealedSet(hintEvents(db, e.id).map((h) => [h.reveal_from, h.reveal_to] as const));
+  const hints = hintEvents(db, e.id);
+  const shown = visibleHintWords(db, e, hints);
   if (Array.from({ length: k + 1 }, (_, i) => i).every((i) => shown.has(i))) return false;
   db.prepare("INSERT INTO typing_dictation_events(id, exercise_id, kind, source, typed_text, reveal_from, reveal_to, created_at) VALUES (?,?,?,?,?,?,?,?)").run(deps.newId(), e.id, "hint", source, typedText, 0, k, deps.now().toISOString());
   return true;
@@ -456,7 +533,7 @@ function writeHint(db: Db, deps: Deps, e: ExerciseRow, typedText: string, source
 
 function hintView(db: Db, e: ExerciseRow): { hintLevel: number; words: DictationWord[] } {
   const hints = hintEvents(db, e.id);
-  return { hintLevel: hints.length, words: wordsFor(e.text_en, revealedSet(hints.map((h) => [h.reveal_from, h.reveal_to] as const))) };
+  return { hintLevel: hints.length, words: wordsFor(e.text_en, visibleHintWords(db, e, hints)) };
 }
 
 export function requestHint(db: Db, deps: Deps, exerciseId: string, typedText: string): DictationHintResponse {

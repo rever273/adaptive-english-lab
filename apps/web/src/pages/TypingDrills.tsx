@@ -15,7 +15,7 @@ import { LAYOUT_HINT, Toast, useToast } from "./typingShared";
  * order the words are first spoken: the stored word pronunciation of the word panel (ElevenLabs, each word made once), else Piper (which
  * says bare single words badly, so it is only the fallback). Without a clip the game goes on silently.
  */
-function useDrillSpeech(plan: TypingDrillsStartResponse["words"], enabled: boolean): (lemma: string, stillWanted: () => boolean) => void {
+export function useDrillSpeech(plan: ReadonlyArray<{ lemma: string; speak?: boolean }>, enabled: boolean): (lemma: string, stillWanted: () => boolean) => void {
   const clips = useRef(new Map<string, Promise<string | null>>());
   const playing = useRef<HTMLAudioElement | null>(null);
   useEffect(() => {

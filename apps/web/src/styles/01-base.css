@@ -132,3 +132,18 @@ code {
         margin-bottom: 0.5rem;
     }
 }
+
+/* a second English Lab tab: this one is covered and stops, so there is only ever one live page */
+.tab-replaced {
+    position: fixed;
+    inset: 0;
+    z-index: 1000;
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    justify-content: center;
+    gap: 1rem;
+    background: rgba(10, 13, 20, 0.96);
+    color: var(--text);
+    text-align: center;
+}

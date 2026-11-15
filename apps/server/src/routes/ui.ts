@@ -8,12 +8,19 @@ import type { ServerResponse } from "node:http";
  */
 export function registerUiRoutes(app: FastifyInstance): void {
   const clients = new Set<ServerResponse>();
+  /** the page that connected last owns the app: a page that was open before is told it was replaced (one tab only) */
+  const owner = { res: null as ServerResponse | null, id: "" };
 
-  app.get("/api/v1/ui/stream", (req, reply) => {
+  app.get<{ Querystring: { id?: string } }>("/api/v1/ui/stream", (req, reply) => {
+    const id = typeof req.query.id === "string" ? req.query.id.slice(0, 64) : "";
     reply.hijack();
     const res = reply.raw;
     res.writeHead(200, { "Content-Type": "text/event-stream", "Cache-Control": "no-store", Connection: "keep-alive", "X-Content-Type-Options": "nosniff" });
     res.write("retry: 1500\n\n");
+    // the same page reconnecting after a restart keeps its place; any other page takes over, and the others are told
+    if (!(owner.id && id === owner.id)) for (const c of clients) if (c !== res) c.write("event: replaced\ndata: 1\n\n");
+    owner.res = res;
+    owner.id = id;
     clients.add(res);
     const timer = setInterval(() => res.write(": keepalive\n\n"), 15_000);
     const gone = () => {

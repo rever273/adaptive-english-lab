@@ -51,8 +51,10 @@ import type { ModelResidency } from "./queue/modelResidency.js";
 import { registerSecurity } from "./security.js";
 import { registerConversationRoutes } from "./routes/conversation.js";
 import { LocalDictationAsr, type DictationAsr } from "./domain/typing/dictation/asr.js";
+import type { RealAudit } from "./domain/typing/dictation/realAudit.js";
 
 export interface AppDeps {
+  realAudit?: RealAudit;
   config: AppConfig;
   db: Db;
   instanceId: string;
@@ -142,10 +144,10 @@ export async function buildApp(deps: AppDeps): Promise<FastifyInstance> {
   const conversationAsr = deps.conversationAsr ?? (deps.groqKey ? dictation.asr : new LocalDictationAsr({ script: path.join(config.projectRoot, "workers", "dictation_asr", "check.py"), device: "cpu" }));
   if (!deps.groqKey) app.addHook("onClose", async () => { await conversationAsr.stop(); });
   registerConversationRoutes(app, db, base, { topics: dictation.topics, onQueued: () => deps.scheduler?.kick(), stt: deps.stt, dictation, asr: conversationAsr });
-  registerTypingRoutes(app, db, base, { booksDir: path.join(config.dataRoot, "typing-books"), dictation });
+  registerTypingRoutes(app, db, base, { booksDir: path.join(config.dataRoot, "typing-books"), projectRoot: config.projectRoot, dictation });
   registerTypingBookSpeechRoutes(app, db, dictation);
   registerVoiceRoutes(app, db, { env: dictation, sampleDir: path.join(config.dataRoot, "voice-samples") });
-  registerTypingDictationRoutes(app, db, base, { env: dictation, onQueued: () => deps.scheduler?.kick() });
+  registerTypingDictationRoutes(app, db, base, { env: dictation, onQueued: () => deps.scheduler?.kick(), ...(deps.realAudit ? { realAudit: deps.realAudit } : {}) });
   registerTranslateRoutes(app, { ...(deps.translateEmail ? { email: deps.translateEmail } : {}), ...(deps.deeplKey ? { deeplKey: deps.deeplKey } : {}) });
   registerVocabularyImageRoutes(app, config.vocabularyImagesDir, db);
   registerVocabularySpeechRoutes(app, db, base, { key: deps.elevenLabsKey, voiceId: deps.elevenLabsVoiceId, voiceIds: deps.elevenLabsVoiceIds, cacheDir: path.join(config.dataRoot, "vocabulary-speech") });

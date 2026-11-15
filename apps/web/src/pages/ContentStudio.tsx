@@ -23,7 +23,6 @@ const THOUGHTS_AGENT_TASK = `English Lab: choose the grammar skills for my saved
 3. Write the manifest (template in thoughts.json) and apply it: npm run lab:thoughts -- apply <manifest.json>.
 4. Reply in Russian, briefly: how many thoughts got skills, how many patterns were dropped and why.`;
 
-
 const VIEWS = [
     ['grammar', 'Grammar exercises'],
     ['vocabulary', 'Vocabulary exercises'],
@@ -69,20 +68,47 @@ function CreateLessonsTask() {
             if (!/Number of new lessons:\s*\d+\s*$/.test(result.text)) throw new Error('The lesson task has an unexpected format.');
             const text = result.text.replace(/Number of new lessons:\s*\d+\s*$/, `Number of new lessons: ${count}`);
             let copied = true;
-            try { await navigator.clipboard.writeText(text); } catch { copied = false; }
+            try {
+                await navigator.clipboard.writeText(text);
+            } catch {
+                copied = false;
+            }
             setTask({ text, copied });
-        } catch (e) { setError(e instanceof Error ? e.message : String(e)); }
+        } catch (e) {
+            setError(e instanceof Error ? e.message : String(e));
+        }
     };
-    return <section className="card">
-        <h2><i className="pi pi-sitemap" aria-hidden="true" /> Plan new lessons</h2>
-        <p className="small muted">Create lesson structures from your progress. Exercises are created and reviewed separately.</p>
-        <div className="actions"><label className="inline"><span>Number of new lessons</span><input type="number" min={1} max={50} value={count} onChange={(e) => setCount(Number(e.target.value))} /></label>
-        <button className="btn" data-testid="copy-lessons" disabled={!Number.isInteger(count) || count < 1 || count > 50} onClick={() => void copy()}><i className="pi pi-plus-circle" aria-hidden="true" /> Copy task: create new lessons</button></div>
-        {error && <p className="notice notice-error small" role="alert">{error}</p>}
-        {task && <div><p className="small" role="status">{task.copied ? "Copied. Paste it into your agent's chat." : 'Could not use the clipboard. Select and copy the text below.'}</p><textarea readOnly rows={6} value={task.text} aria-label="Agent lesson task" style={{ width: '100%' }} /></div>}
-    </section>;
+    return (
+        <section className="card">
+            <h2>
+                <i className="pi pi-sitemap" aria-hidden="true" /> Plan new lessons
+            </h2>
+            <p className="small muted">Create lesson structures from your progress. Exercises are created and reviewed separately.</p>
+            <div className="actions">
+                <label className="inline">
+                    <span>Number of new lessons</span>
+                    <input type="number" min={1} max={50} value={count} onChange={(e) => setCount(Number(e.target.value))} />
+                </label>
+                <button className="btn" data-testid="copy-lessons" disabled={!Number.isInteger(count) || count < 1 || count > 50} onClick={() => void copy()}>
+                    <i className="pi pi-plus-circle" aria-hidden="true" /> Copy task: create new lessons
+                </button>
+            </div>
+            {error && (
+                <p className="notice notice-error small" role="alert">
+                    {error}
+                </p>
+            )}
+            {task && (
+                <div>
+                    <p className="small" role="status">
+                        {task.copied ? "Copied. Paste it into your agent's chat." : 'Could not use the clipboard. Select and copy the text below.'}
+                    </p>
+                    <textarea readOnly rows={6} value={task.text} aria-label="Agent lesson task" style={{ width: '100%' }} />
+                </div>
+            )}
+        </section>
+    );
 }
-
 
 function BatchStudio({ category, onCategoryChange }: { category: 'grammar' | 'vocabulary'; onCategoryChange: (category: 'grammar' | 'vocabulary') => void }) {
     const [batches, setBatches] = useState<StudioBatchSummary[]>(() =>
@@ -325,9 +351,9 @@ function BatchStudio({ category, onCategoryChange }: { category: 'grammar' | 'vo
                             aria-label="Batch size"
                         />
                     </label>
-                    <button className="btn btn-primary" disabled={busy || !Number.isInteger(count) || count < 1 || count > 500} onClick={() => void start()}>
+                    {/* <button className="btn btn-primary" disabled={busy || !Number.isInteger(count) || count < 1 || count > 500} onClick={() => void start()}>
                         Start batch
-                    </button>
+                    </button> */}
                     <button
                         className="btn"
                         disabled={busy || !Number.isInteger(count) || count < 1 || count > 500}

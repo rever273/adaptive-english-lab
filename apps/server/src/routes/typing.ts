@@ -7,6 +7,7 @@ import {
   TypingBookCheckpointRequestSchema,
   TypingBookCompleteRequestSchema,
   TypingDrillsCompleteRequestSchema,
+  TypingKeysCompleteRequestSchema,
   TypingRecallSaveRequestSchema,
   TypingWordsCompleteRequestSchema,
 } from "@english-lab/contracts";
@@ -20,6 +21,7 @@ import { recallSave, recallStart } from "../domain/typing/recall.js";
 import { abortBook, booksOverview, checkpointBook, completeBook, startBook } from "../domain/typing/books.js";
 import { buildTypingResult, sessionRow } from "../domain/typing/result.js";
 import { completeDrills, startDrills } from "../domain/typing/drills.js";
+import { abortKeysLesson, completeKeysLesson, keysOverview, startKeysLesson } from "../domain/typing/keys/lessons.js";
 import { abortWords, completeWords, recordAppearances, startWords, wordsOverview } from "../domain/typing/words.js";
 
 function parse<T>(schema: ZodType<T>, body: unknown): T {
@@ -30,17 +32,28 @@ function parse<T>(schema: ZodType<T>, body: unknown): T {
   return r.data;
 }
 
+/** Key Builder needs content/typing; without it the rest of the overview still works and the mode is shown as unavailable */
+function safeKeysOverview(db: Db, projectRoot: string): ReturnType<typeof keysOverview> | null {
+  try {
+    return keysOverview(db, projectRoot);
+  } catch {
+    return null;
+  }
+}
+
 const idParams = { type: "object", properties: { id: { type: "string", minLength: 1, maxLength: 64 } }, required: ["id"] } as const;
 
-const AnalyticsQuery = z.object({ mode: z.enum(["words", "books", "drills"]), days: z.enum(["7", "30", "90", "all"]).optional(), timezone: z.string().min(1).max(64).optional() }).strict();
+const AnalyticsQuery = z.object({ mode: z.enum(["words", "books", "drills", "keys"]), days: z.enum(["7", "30", "90", "all"]).optional(), timezone: z.string().min(1).max(64).optional() }).strict();
 
 export interface TypingRouteOptions {
   booksDir: string;
+  /** content/typing (Key Builder model and word list) is read from here */
+  projectRoot: string;
   dictation: DictationEnv;
 }
 
 export function registerTypingRoutes(app: FastifyInstance, db: Db, deps: SessionDeps, opts: TypingRouteOptions): void {
-  app.get("/api/v1/typing/overview", async () => ({ words: wordsOverview(db), books: booksOverview(db, opts.booksDir), dictation: dictationOverview(db, opts.dictation) }));
+  app.get("/api/v1/typing/overview", async () => ({ words: { ...wordsOverview(db), keys: safeKeysOverview(db, opts.projectRoot) }, books: booksOverview(db, opts.booksDir), dictation: dictationOverview(db, opts.dictation) }));
 
   app.post("/api/v1/typing/words/start", async (req, reply) => {
     reply.code(201);
@@ -71,6 +84,22 @@ export function registerTypingRoutes(app: FastifyInstance, db: Db, deps: Session
   app.post<{ Params: { id: string } }>("/api/v1/typing/drills/:id/complete", { schema: { params: idParams } }, async (req) => {
     const b = parse(TypingDrillsCompleteRequestSchema, req.body);
     return completeDrills(db, deps, req.params.id, b);
+  });
+
+  // Key Builder (keybr.com guided lessons)
+  app.post("/api/v1/typing/keys/start", async (req, reply) => {
+    reply.code(201);
+    return startKeysLesson(db, deps, opts.projectRoot);
+  });
+
+  app.post<{ Params: { id: string } }>("/api/v1/typing/keys/:id/complete", { schema: { params: idParams } }, async (req) => {
+    const b = parse(TypingKeysCompleteRequestSchema, req.body);
+    return completeKeysLesson(db, deps, opts.projectRoot, req.params.id, b);
+  });
+
+  app.post<{ Params: { id: string } }>("/api/v1/typing/keys/:id/abort", { schema: { params: idParams } }, async (req) => {
+    const b = parse(TypingAbortRequestSchema, req.body);
+    return abortKeysLesson(db, deps, req.params.id, b);
   });
 
   app.post("/api/v1/typing/books/start", async (req, reply) => {
@@ -112,6 +141,6 @@ export function registerTypingRoutes(app: FastifyInstance, db: Db, deps: Session
     } catch {
       throw new ApiError(422, "TIMEZONE_INVALID", `Unknown time zone ${timezone}`);
     }
-    return typingAnalytics(db, { mode: q.data.mode, days, timezone, now: deps.now() });
+    return typingAnalytics(db, { mode: q.data.mode, days, timezone, now: deps.now(), projectRoot: opts.projectRoot });
   });
 }

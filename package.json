@@ -14,8 +14,8 @@
   "scripts": {
     "build": "npm run build -w @english-lab/contracts && npm run build -w @english-lab/learning && npm run build -w @english-lab/server && npm run build -w @english-lab/web",
     "typecheck": "npm run build -w @english-lab/contracts && npm run build -w @english-lab/learning && tsc -p apps/server --noEmit && tsc -p apps/web --noEmit",
-    "test:unit": "vitest --config vitest.unit.config.ts",
-    "test:integration": "vitest",
+    "test:unit": "node scripts/vitest.mjs --config vitest.unit.config.ts",
+    "test:integration": "node scripts/vitest.mjs",
     "watch:web": "npm run build -w @english-lab/web -- --watch",
     "start": "node scripts/start.mjs",
     "lab": "node scripts/start.mjs --attached",
@@ -31,6 +31,7 @@
     "dictation:setup": "node scripts/dictation-setup.mjs",
     "voices:evaluate": "node scripts/voices-evaluate.mjs",
     "typing:prepare-book": "node scripts/typing-prepare-book.mjs",
+    "typing:build-wordlist": "node scripts/typing-build-wordlist.mjs",
     "content:agent": "node scripts/content-agent.mjs",
     "content:validate": "node scripts/content-validate.mjs",
     "trial:generate": "node scripts/generation-trial.mjs",
@@ -48,7 +49,7 @@
     "verify:backup-restore": "node scripts/verify-windows.mjs --backup-restore",
     "benchmark:ai": "node scripts/benchmark-ai.mjs",
     "slice:stop": "node scripts/slice-stop.mjs",
-    "test:e2e": "vitest --config vitest.e2e.config.ts",
+    "test:e2e": "node scripts/vitest.mjs --config vitest.e2e.config.ts",
     "skills:labels": "node scripts/skill-labels-sync.mjs",
     "cloze:prepare": "node scripts/grammar-cloze-prepare.mjs",
     "cloze:import": "node scripts/grammar-cloze-import.mjs"

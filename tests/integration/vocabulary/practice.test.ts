@@ -265,12 +265,18 @@ describe("Vocabulary Practice (vocabulary TZ)", () => {
     expect(new Set(words.map((w) => w.id)).size).toBe(words.length);
     const body = (mode: string, results: unknown) => ({ method: "POST" as const, url: `${url}/match-results`, payload: { mode, results } });
     const [weak, ...others] = words;
-    const good = [{ lemma: weak!.id, matched: 1, wrong: 3 }, ...others.map((w) => ({ lemma: w.id, matched: 5, wrong: 0 }))];
+    const good = [{ lemma: weak!.id, matched: 1, wrong: 3 }, ...others.map((w) => ({ lemma: w.id, matched: 4, wrong: 0 }))];
     expect((await app.inject(body("rush", [{ lemma: "nonsense", matched: 1, wrong: 0 }]))).statusCode).toBe(400);
-    expect((await app.inject(body("rush", [{ lemma: weak!.id, matched: 6, wrong: 0 }]))).statusCode).toBe(400); // more than the 5 needed
+    expect((await app.inject(body("rush", [{ lemma: weak!.id, matched: 5, wrong: 0 }]))).statusCode).toBe(400); // more than the 4 needed (the default)
     expect((await app.inject(body("once", [{ lemma: weak!.id, matched: 2, wrong: 0 }]))).statusCode).toBe(400);
     expect(count(env, "SELECT COUNT(*) AS n FROM vocabulary_match_results")).toBe(0);
-    expect((await app.inject(body("rush", good))).statusCode).toBe(201);
+    const withRounds = (rounds: unknown) => ({ ...body("rush", good), payload: { mode: "rush", results: good, rounds } });
+    expect((await app.inject(withRounds(0))).statusCode).toBe(400);
+    expect((await app.inject(withRounds(11))).statusCode).toBe(400);
+    expect((await app.inject(body("rush", good.map((r) => ({ ...r, matched: 5 }))))).statusCode).toBe(400); // the default is 4
+    expect((await app.inject({ ...body("rush", good), payload: { mode: "rush", results: good.map((r) => ({ ...r, matched: r.matched === 4 ? 6 : r.matched })), rounds: 6 } })).statusCode).toBe(201); // a learner who set 6 repeats
+    expect(count(env, "SELECT COUNT(*) AS n FROM vocabulary_match_results WHERE needed = 6")).toBe(words.length);
+    expect((await app.inject(body("rush", good))).statusCode).toBe(200); // saved once: a repeat changes nothing
     expect((await app.inject(body("rush", good.map((r) => ({ ...r, matched: 0 }))))).statusCode).toBe(200); // a repeat changes nothing
     expect(count(env, "SELECT COUNT(*) AS n FROM vocabulary_match_results")).toBe(words.length);
     expect(() => env!.db.prepare("UPDATE vocabulary_match_results SET matched = 0").run()).toThrow(/append-only/);

@@ -9,6 +9,7 @@ import { dictationAnalytics } from "../domain/typing/dictation/analytics.js";
 import { createLesson, dictationState, exerciseAudio, openTranslation, prepareTracks, recordPlay, recordTime, requestHint, retryLesson, revealAnswer, startLesson, submitAnswer, type DictationEnv, type Deps } from "../domain/typing/dictation/lessons.js";
 import { modelShaOpt } from "../domain/voices/model.js";
 import { buildDictationResult } from "../domain/typing/dictation/result.js";
+import type { RealAudit } from "../domain/typing/dictation/realAudit.js";
 
 function parse<T>(schema: ZodType<T>, body: unknown): T {
   const r = schema.safeParse(body);
@@ -24,12 +25,23 @@ export interface TypingDictationRouteOptions {
   env: DictationEnv;
   /** called after a lesson has been queued so the dispatcher starts at once */
   onQueued?: () => void;
+  realAudit?: RealAudit;
 }
 
 /** Audio Dictation (TASK_028). Mutations run in their own transactions inside the domain functions. */
 export function registerTypingDictationRoutes(app: FastifyInstance, db: Db, deps: Deps, opts: TypingDictationRouteOptions): void {
   const base = "/api/v1/typing/dictation";
   const { env } = opts;
+
+  app.get(`${base}/real-audit`, async () => {
+    if (!opts.realAudit) throw new ApiError(503, "REAL_AUDIT_UNAVAILABLE", "Real speech audit is unavailable");
+    return opts.realAudit.status();
+  });
+  app.post(`${base}/real-audit`, async (req) => {
+    if (!opts.realAudit) throw new ApiError(503, "REAL_AUDIT_UNAVAILABLE", "Real speech audit is unavailable");
+    const b = parse(z.object({ enabled: z.boolean() }).strict(), req.body);
+    return opts.realAudit.setEnabled(b.enabled);
+  });
 
   app.post(`${base}/lessons`, async (req, reply) => {
     parse(Empty, req.body ?? {});
@@ -64,7 +76,7 @@ export function registerTypingDictationRoutes(app: FastifyInstance, db: Db, deps
 
   app.get<{ Params: { id: string } }>(`${base}/exercises/:id/audio`, { schema: { params: idParams } }, async (req, reply) => {
     const { file } = exerciseAudio(db, env, req.params.id);
-    reply.header("content-type", "audio/wav").header("cache-control", "private, max-age=3600");
+    reply.header("content-type", file.endsWith(".mp3") ? "audio/mpeg" : "audio/wav").header("cache-control", "private, max-age=3600");
     return reply.send(createReadStream(file));
   });
 
@@ -76,6 +88,12 @@ export function registerTypingDictationRoutes(app: FastifyInstance, db: Db, deps
   // D128: "Sounds bad" mark on the sound of a voiced sentence; changes nothing about the answer, XP or Mastery
   app.post<{ Params: { id: string } }>(`${base}/exercises/:id/sound-flag`, { schema: { params: idParams } }, async (req) => {
     const b = parse(SoundFlagRequestSchema, req.body);
+    const exercise = db.prepare("SELECT source FROM typing_dictation_exercises WHERE id = ?").get(req.params.id) as { source: string } | undefined;
+    if (exercise?.source === "real") {
+      const last = db.prepare("SELECT action FROM typing_dictation_real_flags WHERE exercise_id = ? ORDER BY created_at DESC, rowid DESC LIMIT 1").get(req.params.id) as { action: string } | undefined;
+      if ((last?.action === "flag") !== b.flagged) db.prepare("INSERT INTO typing_dictation_real_flags(id, exercise_id, action, created_at) VALUES (?,?,?,?)").run(deps.newId(), req.params.id, b.flagged ? "flag" : "unflag", deps.now().toISOString());
+      return { flagged: b.flagged };
+    }
     return env.voices.setFlag(db, { exerciseId: req.params.id, flagged: b.flagged });
   });
 

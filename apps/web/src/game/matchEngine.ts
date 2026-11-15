@@ -4,7 +4,7 @@
  *
  * Two modes:
  *  - once: every word is matched one time; matched buttons stay green and become unclickable.
- *  - rush: every word must be matched ROUNDS times; a matched pair is replaced by another word's pair, and a word does not come back
+ *  - rush: every word must be matched `rounds` times (the setting; ROUNDS is the default); a matched pair is replaced by another word's pair, and a word does not come back
  *    until about COOLDOWN other pairs were matched (relaxed only when there are too few words to wait that long).
  */
 export type Side = "left" | "right";
@@ -40,7 +40,8 @@ export interface MatchState {
 }
 export type MatchEvent = { kind: 'match'; wordId: string; leftKey: number; rightKey: number } | { kind: 'wrong' } | null;
 
-export const ROUNDS = 5;
+/** the default repeat count of the rush mode (Settings: Matching game repeats) */
+export const ROUNDS = 4;
 export const COOLDOWN = 3;
 export const MAX_ROWS = 5;
 export const MIN_WORDS = 3;
@@ -61,7 +62,7 @@ export function rushRows(wordCount: number): number {
     return Math.min(MAX_ROWS, Math.max(2, wordCount - 1));
 }
 
-export function createMatch(words: readonly MatchWord[], mode: MatchMode, rng: Rng = Math.random): MatchState {
+export function createMatch(words: readonly MatchWord[], mode: MatchMode, rng: Rng = Math.random, rounds: number = ROUNDS): MatchState {
     const rows = mode === 'once' ? words.length : rushRows(words.length);
     const chosen = shuffle(words, rng).slice(0, rows);
     let key = 0;
@@ -70,7 +71,7 @@ export function createMatch(words: readonly MatchWord[], mode: MatchMode, rng: R
     let right = make();
     // never start with a column pair already lined up row for row
     for (let tries = 0; tries < 8 && chosen.length > 1 && left.every((c, i) => c.wordId === right[i]!.wordId); tries++) right = shuffle(right, rng);
-    const per = mode === 'once' ? 1 : ROUNDS;
+    const per = mode === 'once' ? 1 : rounds;
     return {
         mode,
         left,
@@ -177,7 +178,7 @@ export interface MatchResult {
     wrong: number;
 }
 
-/** the raw outcome per word of a finished game: pairs matched (of ROUNDS, or 1) and wrong pairs it was part of */
+/** the raw outcome per word of a finished game: pairs matched (of the repeat count, or 1) and wrong pairs it was part of */
 export function matchResults(state: MatchState): MatchResult[] {
     return Object.entries(state.stats).map(([lemma, s]) => ({ lemma, matched: s.matched, wrong: s.wrong }));
 }

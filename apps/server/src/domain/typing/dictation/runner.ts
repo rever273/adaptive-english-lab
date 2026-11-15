@@ -8,7 +8,7 @@ import { RunnerError, type RunnerContext, type RunnerOutput } from "../../../que
 import type { ChatClient } from "../../ai/clients.js";
 import { runStructured } from "../../ai/structured.js";
 import { fingerprintOf, jaccard, normalizeSentence, trigrams } from "../../content/normalize.js";
-import { AsrError } from "./asr.js";
+import { AsrError, type DictationTranscript } from "./asr.js";
 import { dictationFingerprint, tokenize, wordDistance } from "./check.js";
 import { markReadyIfComplete, type DictationEnv, type Deps, type LessonPlan, type PlanItem } from "./lessons.js";
 import type { Voice } from "../../voices/catalog.js";
@@ -211,7 +211,7 @@ async function produceSentence(
       if (ctx.signal.aborted) throw new DOMException("aborted", "AbortError");
       let wav: Buffer;
       let audioMs: number;
-      let heard: { text: string; model: string };
+      let heard: DictationTranscript;
       try {
         o.progress("audio");
         const raw = await env.tts.synthesize({ text: textEn, ...env.voices.synthesisParams(voice), signal: ctx.signal });
@@ -231,6 +231,10 @@ async function produceSentence(
       // the check may write "10" for the spoken "ten" (D127)
       if (wordDistance(expected, tokenize(spellNumbers(heard.text))) !== 0) {
         rejected.push({ code: "ASR_MISMATCH", voice: voice.name, voiceKey: voice.key, sentenceTry, asrText: heard.text.slice(0, 300) });
+        continue;
+      }
+      if (heard.crossCheck && wordDistance(expected, tokenize(spellNumbers(heard.crossCheck.text))) !== 0) {
+        rejected.push({ code: "ASR_MISMATCH", voice: voice.name, voiceKey: voice.key, sentenceTry, asrText: heard.crossCheck.text.slice(0, 300) });
         continue;
       }
       const file = audioFileName(textEn, voice, tts.modelSha256);

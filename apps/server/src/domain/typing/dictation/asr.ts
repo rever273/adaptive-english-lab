@@ -5,9 +5,10 @@ import path from "node:path";
 import { createInterface } from "node:readline";
 
 /** The check every synthesised sentence must pass (D97): the audio is transcribed and compared with the text. Synthetic audio only, never the learner's voice. */
+export type DictationTranscript = { text: string; model: string; crossCheck?: { text: string; model: string } };
 export interface DictationAsr {
   available(): boolean;
-  transcribe(wav: Buffer, signal: AbortSignal): Promise<{ text: string; model: string }>;
+  transcribe(wav: Buffer, signal: AbortSignal): Promise<DictationTranscript>;
   stop(): Promise<void>;
 }
 
@@ -85,6 +86,15 @@ export function findLargeV3(env: NodeJS.ProcessEnv = process.env): string | null
   return null;
 }
 
+/** Only an already-cached second model is used; the app never downloads one. */
+export function findMedium(env: NodeJS.ProcessEnv = process.env): string | null {
+  const hub = path.join(env.HF_HOME ?? path.join(os.homedir(), ".cache", "huggingface"), "hub", "models--Systran--faster-whisper-medium", "snapshots");
+  try {
+    for (const snap of readdirSync(hub)) if (existsSync(path.join(hub, snap, "model.bin"))) return path.join(hub, snap);
+  } catch { /* no cached second model */ }
+  return null;
+}
+
 /** Local fallback: workers/dictation_asr/check.py (faster-whisper large-v3), one JSON line each way. Small is not accurate enough for this check. */
 export class LocalDictationAsr implements DictationAsr {
   private child: ChildProcessWithoutNullStreams | null = null;
@@ -94,17 +104,18 @@ export class LocalDictationAsr implements DictationAsr {
   private chain: Promise<unknown> = Promise.resolve();
   private idle: NodeJS.Timeout | null = null;
 
-  constructor(private readonly o: { script: string; env?: NodeJS.ProcessEnv; idleMs?: number; device?: "cpu" | "cuda" }) {}
+  constructor(private readonly o: { script: string; env?: NodeJS.ProcessEnv; idleMs?: number; device?: "cpu" | "cuda"; modelPath?: string; modelName?: string }) {}
 
   available(): boolean {
-    return existsSync(this.o.script) && findLargeV3(this.o.env) !== null;
+    return existsSync(this.o.script) && (this.o.modelPath ? existsSync(path.join(this.o.modelPath, "model.bin")) : findLargeV3(this.o.env) !== null);
   }
 
   private start(): Promise<void> {
     const custom = (this.o.env ?? process.env).ENGLISHLAB_PYTHON;
     const [command, ...pre] = custom ? [custom] : process.platform === "win32" ? ["py", "-3.11"] : ["python3.11"];
     const cpuArgs = this.o.device === "cpu" ? ["--device", "cpu", "--compute-type", "int8"] : [];
-    const child = spawn(command!, [...pre, this.o.script, ...cpuArgs], { stdio: ["pipe", "pipe", "pipe"], windowsHide: true, env: { ...process.env, ...this.o.env, HF_HUB_OFFLINE: "1", PYTHONUNBUFFERED: "1" } });
+    const modelArgs = this.o.modelPath ? ["--model-path", this.o.modelPath] : [];
+    const child = spawn(command!, [...pre, this.o.script, ...cpuArgs, ...modelArgs], { stdio: ["pipe", "pipe", "pipe"], windowsHide: true, env: { ...process.env, ...this.o.env, HF_HUB_OFFLINE: "1", PYTHONUNBUFFERED: "1" } });
     this.child = child;
     child.stderr.resume();
     return new Promise<void>((resolve, reject) => {
@@ -152,7 +163,7 @@ export class LocalDictationAsr implements DictationAsr {
         const m = await answer;
         if (signal.aborted) throw new DOMException("aborted", "AbortError");
         if (m.ok !== true) throw new AsrError("asr_failed", String(m.error ?? "the local checker failed"), true);
-        return { text: String(m.text ?? ""), model: "faster-whisper-large-v3" };
+        return { text: String(m.text ?? ""), model: this.o.modelName ?? "faster-whisper-large-v3" };
       } finally {
         signal.removeEventListener("abort", onAbort);
         if (id !== null) this.waiting.delete(id);
@@ -193,11 +204,19 @@ export class LocalDictationAsr implements DictationAsr {
 export function chooseDictationAsr(o: { groqKey?: string; script: string }): DictationAsr {
   const groq = o.groqKey ? new GroqDictationAsr(o.groqKey) : null;
   const local = new LocalDictationAsr({ script: o.script });
+  const mediumPath = findMedium();
+  const second = mediumPath ? new LocalDictationAsr({ script: o.script, modelPath: mediumPath, modelName: "faster-whisper-medium", device: "cpu" }) : null;
   return {
     available: () => groq !== null || local.available(),
-    transcribe: (wav, signal) => (groq ?? local).transcribe(wav, signal),
+    transcribe: async (wav, signal) => {
+      const first = await (groq ?? local).transcribe(wav, signal);
+      if (!second?.available()) return first;
+      const crossCheck = await second.transcribe(wav, signal);
+      return { ...first, model: `${first.model}+${crossCheck.model}`, crossCheck };
+    },
     stop: async () => {
       await local.stop();
+      await second?.stop();
     },
   };
 }

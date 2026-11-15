@@ -153,6 +153,7 @@ export function Journey() {
                         <g className="journey-position" transform={`translate(${x(routeProgress)} ${y(routeProgress)})`}>
                             <text y="-66" textAnchor="middle" className="journey-position-label">You are here</text>
                             <circle r="37" className="journey-current" />
+                            <circle r="6" className="journey-dot" />
                             <path d="M0 -43 l-6 -9 h12 Z" className="journey-pointer" />
                         </g>
                     </svg>

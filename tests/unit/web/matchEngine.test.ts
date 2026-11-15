@@ -62,6 +62,16 @@ describe("matching game: selection", () => {
 });
 
 describe("matching game: rush mode", () => {
+  it("the repeat count is the setting: 4 by default, another value changes the total and nothing else", () => {
+    expect(ROUNDS).toBe(4);
+    for (const rounds of [1, 3, 7, 10]) {
+      const s = createMatch(words(6), "rush", seeded(11), rounds);
+      expect(s.total).toBe(6 * rounds);
+      expect(Object.values(s.remaining).every((n) => n === rounds)).toBe(true);
+    }
+    expect(createMatch(words(6), "once", seeded(12), 7).total).toBe(6);
+  });
+
   it("shows at most 5 rows and fewer for small word lists", () => {
     expect([3, 4, 5, 6, 8].map(rushRows)).toEqual([2, 3, 4, 5, 5]);
     expect(live(createMatch(words(8), "rush", seeded(5)).left)).toHaveLength(5);

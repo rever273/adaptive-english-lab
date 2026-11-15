@@ -14,5 +14,6 @@ export function createDictationEnv(config: AppConfig, groqKey?: string): Dictati
     voices: new VoiceService(),
     topics: content.topics,
     audioDir: path.join(config.dataRoot, "typing-dictation-audio"),
+    realSpeech: { catalogPath: path.join(config.dataRoot, "dictation-real", "reviewed.json"), audioDir: path.join(config.projectRoot, "data", "Common Voice Mozilla", "commonvoice-v24_en-AU", "audio_files") },
   };
 }

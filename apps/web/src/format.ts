@@ -30,3 +30,13 @@ export function firstTranslation(text: string | null | undefined): string {
   }
   return text.trim();
 }
+
+/** a duration in milliseconds as days, hours and minutes ("1 d 4 h 20 min"); zero units are left out. The one formatter for time totals in statistics. */
+export function fmtDuration(ms: number): string {
+  const totalMin = Math.max(0, Math.round(ms / 60000));
+  if (totalMin === 0) return ms > 0 ? "< 1 min" : "0 min";
+  const days = Math.floor(totalMin / 1440);
+  const hours = Math.floor((totalMin % 1440) / 60);
+  const minutes = totalMin % 60;
+  return [days ? `${days} d` : "", hours ? `${hours} h` : "", minutes ? `${minutes} min` : ""].filter(Boolean).join(" ");
+}

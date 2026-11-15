@@ -27,7 +27,8 @@ export interface PairInsight {
 
 /** All pairs seen often enough, with their mean interval and error rate over every finished session (derived, never stored). */
 export function pairInsights(db: Db): PairInsight[] {
-  const rows = db.prepare("SELECT pair, SUM(count) AS count, SUM(total_ms) AS ms, SUM(errors) AS errors FROM typing_key_stats GROUP BY pair").all() as Array<{ pair: string; count: number; ms: number; errors: number }>;
+  // Words and Books sessions, and Key Builder lessons
+  const rows = db.prepare("SELECT pair, SUM(count) AS count, SUM(ms) AS ms, SUM(errors) AS errors FROM (SELECT pair, count, total_ms AS ms, errors FROM typing_key_stats UNION ALL SELECT pair, count, total_ms AS ms, errors FROM typing_key_pairs) GROUP BY pair").all() as Array<{ pair: string; count: number; ms: number; errors: number }>;
   const seen = rows.filter((r) => r.count >= PAIR_MIN_COUNT);
   const totalCount = seen.reduce((a, r) => a + r.count, 0);
   const typical = totalCount > 0 ? seen.reduce((a, r) => a + r.ms, 0) / totalCount : 0;

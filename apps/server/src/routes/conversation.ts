@@ -37,9 +37,9 @@ export function registerConversationRoutes(app: FastifyInstance, db: Db, deps: C
     statistics: db.prepare("SELECT count(*) AS conversations,coalesce(sum(answer_count),0) AS answers,coalesce(sum(active_ms),0) AS activeMs FROM conversation_sessions").get(),
   }));
   app.post(base, async (req) => {
-    const b = parse(z.union([z.object({ topic: z.string().min(1).max(200), tabId: id }).strict(), z.object({ mode: z.literal("lesson"), tabId: id }).strict()]), req.body);
+    const b = parse(z.union([z.object({ topic: z.string().min(1).max(200), tabId: id }).strict(), z.object({ mode: z.literal("lesson"), free: z.boolean().optional(), tabId: id }).strict()]), req.body);
     if ("topic" in b && !opts.topics.some(t => t.name === b.topic)) throw new ApiError(400, "UNKNOWN_TOPIC", "Choose one of the suggested topics.");
-    const sessionId = "topic" in b ? startConversation(db, deps, b.topic, b.tabId) : startConversation(db, deps, "", b.tabId, "lesson");
+    const sessionId = "topic" in b ? startConversation(db, deps, b.topic, b.tabId) : startConversation(db, deps, "", b.tabId, "lesson", b.free === true);
     opts.onQueued();
     return conversationState(db, sessionId);
   });

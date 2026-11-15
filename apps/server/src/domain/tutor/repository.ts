@@ -94,7 +94,7 @@ export function askTutor(db: Db, deps: SessionDeps, raw: unknown): { threadId: s
       if (!ruleShown) insert.run(deps.newId(), b.slotId, "assistant", b.kind, "approved_exercise", rule, JSON.stringify({ ...context, note: "the approved rule of this exercise revision" }), null, "approved", now);
       let jobId: string | null = null;
       if (needsModel) {
-        const j = enqueue(db, { now: deps.now, newId: deps.newId }, { kind: "tutor", payload: { messageId: userId, slotId: b.slotId, kind: b.kind, question: b.kind === "question" ? (b.question ?? "").trim() : null }, idempotencyKey: `tutor:${b.slotId}:${userId}`, priority: 2 });
+        const j = enqueue(db, { now: deps.now, newId: deps.newId }, { kind: "tutor", payload: { messageId: userId, slotId: b.slotId, kind: b.kind, question: b.kind === "question" ? (b.question ?? "").trim() : null, ...(feedback.verdict === "correct" ? { learnerCorrect: true } : {}) }, idempotencyKey: `tutor:${b.slotId}:${userId}`, priority: 2 });
         jobId = j.job.id;
       }
       return { threadId: b.slotId, jobId, messages: getThread(db, b.slotId).messages };

@@ -46,7 +46,7 @@ export function awardTypingXp(db: Db, input: { id: string; sessionId: string; am
 }
 
 export function typingProgress(db: Db): { track: "typing"; total: number; level: number; withinLevel: number; threshold: number; ruleVersion: string; levelRule: string } {
-  // Words and Books (one row per session) plus Audio Dictation (one row per sentence, its own table and rule version)
-  const total = (db.prepare("SELECT (SELECT COALESCE(SUM(amount), 0) FROM typing_xp_events) + (SELECT COALESCE(SUM(amount), 0) FROM typing_dictation_xp_events) AS total").get() as { total: number }).total;
+  // Words and Books (one row per session), Audio Dictation (one row per sentence) and Key Builder (one row per lesson), each with its own rule version
+  const total = (db.prepare("SELECT (SELECT COALESCE(SUM(amount), 0) FROM typing_xp_events) + (SELECT COALESCE(SUM(amount), 0) FROM typing_dictation_xp_events) + (SELECT COALESCE(SUM(amount), 0) FROM typing_key_xp_events) AS total").get() as { total: number }).total;
   return { track: "typing", total, ...levelFromTotal(total), ruleVersion: TYPING_XP_VERSION, levelRule: LEVEL_RULE_VERSION };
 }

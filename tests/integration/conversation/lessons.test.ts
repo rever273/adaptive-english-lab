@@ -24,8 +24,8 @@ it("a lesson works through its targets one at a time, switches on request and ro
     const state = conversationState(db, id);
     expect(state.session).toMatchObject({ mode: "lesson" });
     const targets = state.lesson!.targets;
-    expect(targets.map((t) => t.kind).sort()).toEqual(["expression", "grammar", "word"]);
-    expect(targets.map((t) => t.status)).toEqual(["current", "queued", "queued"]);
+    expect(targets.map((t) => t.status)).toEqual(["current"]); // one target per lesson
+    expect(conversationState(db, id).lesson!.finished).toBe(false);
 
     const calls: ChatMessage[][] = [];
     const chat = { chat: async (r: { messages: ChatMessage[] }) => { calls.push(r.messages); return { text: r.messages[0]!.content.includes("cautious") ? '{"level":"ok","ok":true,"feedback":"","corrected":"","grammar_skill_id":"","original":""}' : "Today we're having a crack at it.\n\nRU: Сегодня мы разбираем тему.\n\nYour turn: tell me one thing.", stats: { totalMs: 0, loadMs: null, promptTokens: null, evalTokens: null, evalMs: null } }; } };
@@ -49,38 +49,72 @@ it("a lesson works through its targets one at a time, switches on request and ro
     expect(system(1)).toContain('"learner_answers_on_this_target":1');
     expect(system(1)).toContain('"phase":"practice"');
 
-    const doneJobs = () => { for (const st of ["running", "completed"]) db.prepare("UPDATE jobs SET state=? WHERE idempotency_key LIKE ? AND state NOT IN ('completed','failed','cancelled')").run(st, `conversation:${id}:topic:%`); };
-    doneJobs(); // the queue would have finished the replies the test ran by hand
-    nextLessonTopic(db, deps, id, "tab");
-    expect(conversationState(db, id).lesson!.targets.map((t) => t.status)).toEqual(["done", "current", "queued"]);
-    // while the switch reply is being written: no second switch (it would skip a target) and no answer to the old question
-    expect(() => nextLessonTopic(db, deps, id, "tab")).toThrow(/wait/i);
-    expect(() => submitConversation(db, deps, id, "tab", randomUUID(), "Late answer")).toThrow(/wait/i);
-    expect(db.prepare("SELECT count(*) AS n FROM jobs WHERE idempotency_key=?").get(`conversation:${id}:topic:1`)).toEqual({ n: 1 });
-    await run("reply", null);
-    doneJobs();
-    expect(calls[2]!.at(-1)).toEqual({ role: "user", content: LESSON_SWITCH });
-    expect(system(2)).toContain('"just_switched_from_previous_target":true');
-    expect(system(2)).toContain('"learner_answers_on_this_target":0');
+    // up to the eighth answer: practice, then the teacher's closing message ends the lesson (no task, no next topic)
+    for (let n = 2; n <= 8; n++) {
+      const m = randomUUID();
+      submitConversation(db, deps, id, "tab", m, `Answer ${n}`);
+      expect(conversationState(db, id).lesson!.finished).toBe(false);
+      await run("reply", m);
+    }
+    expect(system(calls.length - 1)).toContain('"phase":"wrap_up"');
+    expect(system(calls.length - 1)).toContain("do NOT suggest another topic");
+    expect(conversationState(db, id).lesson!.finished).toBe(true);
+    expect(() => nextLessonTopic(db, deps, id, "tab")).toThrow();
 
-    nextLessonTopic(db, deps, id, "tab");
-    await run("reply", null);
-    doneJobs();
-    nextLessonTopic(db, deps, id, "tab"); // past the plan: one more target is added (another grammar rule, never one already in the lesson)
-    const more = conversationState(db, id).lesson!.targets;
-    expect(more).toHaveLength(4);
-    expect(new Set(more.map((t) => t.label)).size).toBe(4);
-    expect(more.at(-1)!.status).toBe("current");
-
-    // the next lesson does not reuse the grammar rules of the first one while other rules are left
-    const used = new Set(more.filter((t) => t.kind === "grammar").map((t) => t.label));
+    // the next lesson takes another kind of target and does not reuse the grammar rule of the first one
+    const firstKind = targets[0]!;
     const second = startConversation(db, deps, "", "tab2", "lesson");
-    const grammar = conversationState(db, second).lesson!.targets.find((t) => t.kind === "grammar")!;
-    expect(used.has(grammar.label)).toBe(false);
+    const next = conversationState(db, second).lesson!.targets;
+    expect(next).toHaveLength(1);
+    expect(next[0]!.kind).not.toBe(firstKind.kind);
 
     // practice only: no attempts, no error events, no word events
     expect((db.prepare("SELECT count(*) AS n FROM attempts").get() as { n: number }).n).toBe(0);
     expect((db.prepare("SELECT count(*) AS n FROM error_events").get() as { n: number }).n).toBe(0);
     expect(db.pragma("foreign_key_check")).toEqual([]);
+  } finally { db.close(); scratch.cleanup(); }
+});
+
+it("a lesson on the learner's own topic asks what to practise, maps the answer onto skill cards and records the target", async () => {
+  const scratch = makeScratchRoot();
+  const db = openDatabase(path.join(scratch.root, "db", "test.sqlite"));
+  try {
+    await runMigrations(db, { migrationsDir: path.join(projectRoot, "migrations"), appVersion: "test" });
+    const deps = { now: () => new Date(), newId: randomUUID };
+    const id = startConversation(db, deps, "", "tab", "lesson", true);
+    expect(conversationState(db, id).lesson!.targets).toEqual([]);
+
+    const answers: string[] = [];
+    const calls: ChatMessage[][] = [];
+    const chat = { chat: async (r: { messages: ChatMessage[] }) => { calls.push(r.messages); return { text: answers.shift() ?? "", stats: { totalMs: 0, loadMs: null, promptTokens: null, evalTokens: null, evalMs: null } }; } };
+    const run = async (action: "reply" | "analysis", messageId: string | null) => {
+      const payload: ConversationPayload = { conversation: true, sessionId: id, action, messageId };
+      const out = await runConversation(db, chat, { job: { payload }, signal: new AbortController().signal, checkpoint: () => undefined } as unknown as RunnerContext<ConversationPayload>);
+      out.alsoCommit?.(db);
+    };
+    const last = () => (db.prepare("SELECT text FROM conversation_messages WHERE session_id=? AND role='assistant' ORDER BY rowid DESC LIMIT 1").get(id) as { text: string }).text;
+    const say = (text: string) => { const m = randomUUID(); submitConversation(db, deps, id, "tab", m, text); return m; };
+
+    await run("reply", null); // the opening needs no model
+    expect(calls).toHaveLength(0);
+    expect(last()).toContain("What would you like to practise today?");
+
+    const first = say("I want to improve my English.");
+    answers.push(JSON.stringify({ ready: false, grammar_skill_ids: [], topic_label: "", reply: "Which grammar point gives you trouble?" }));
+    await run("reply", first);
+    expect(last()).toBe("Which grammar point gives you trouble?");
+    expect(conversationState(db, id).lesson!.targets).toEqual([]); // still choosing
+
+    const second = say("I mix up Present Perfect and Past Simple.");
+    answers.push(JSON.stringify({ ready: true, grammar_skill_ids: ["not.a.skill"], topic_label: "Present Perfect vs Past Simple", reply: "" }), "Right, the mix-up is common.\n\nYour turn: tell me what you did today.");
+    await run("reply", second);
+    const targets = conversationState(db, id).lesson!.targets;
+    expect(targets).toEqual([{ ordinal: 0, kind: "grammar", label: "Present Perfect vs Past Simple", status: "current" }]);
+    expect(last()).toContain("Your turn");
+    const system = calls.at(-1)![0]!.content;
+    expect(system).toContain("learner_request");
+    expect(system).toContain("I mix up Present Perfect and Past Simple.");
+    expect(db.prepare("SELECT target_key AS k FROM conversation_lesson_targets WHERE session_id=?").get(id)).toEqual({ k: "custom:present-perfect-vs-past-simple" });
+    expect((db.prepare("SELECT count(*) AS n FROM attempts").get() as { n: number }).n).toBe(0);
   } finally { db.close(); scratch.cleanup(); }
 });

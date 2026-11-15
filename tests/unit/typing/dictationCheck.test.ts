@@ -1,7 +1,7 @@
 import { describe, expect, it } from "vitest";
 import { spellNumbers } from "@english-lab/contracts";
 import { alignWords, isCorrect, rawTokens, tokenize, wordDistance } from "../../../apps/server/src/domain/typing/dictation/check.js";
-import { displayWords, revealFor, revealedSet, stuckWord } from "../../../apps/server/src/domain/typing/dictation/hints.js";
+import { attemptedAnswerWords, displayWords, revealFor, revealedSet, stuckWord, wrongAnswerWords } from "../../../apps/server/src/domain/typing/dictation/hints.js";
 import { checkSentence, checkWav } from "../../../apps/server/src/domain/typing/dictation/quality.js";
 import { variedLengthScale } from "../../../apps/server/src/domain/typing/dictation/runner.js";
 
@@ -61,6 +61,23 @@ describe("dictation-check-v1", () => {
 });
 
 describe("hint position", () => {
+  it("shows the prefix through the first error and other errors, without the remaining words", () => {
+    const sentence = displayWords("You may not have a great deal of time.");
+    expect(attemptedAnswerWords(sentence, "He may not have a great")).toEqual([0]);
+    expect(attemptedAnswerWords(sentence, "He may not")).toEqual([0]);
+    expect(attemptedAnswerWords(displayWords("I want to eat some cake"), "I want eat some coke")).toEqual([0, 1, 2, 5]);
+    const van = displayWords("Eighteen of us couldn't move the van.");
+    expect(attemptedAnswerWords(van, "Eighteen of us couldn't mive the van")).toEqual([0, 1, 2, 3, 4]);
+    expect(attemptedAnswerWords(van, "Eighteen of us couldn't mive the von")).toEqual([0, 1, 2, 3, 4, 6]);
+    expect(attemptedAnswerWords(van, "Eighteen of us")).toEqual([0, 1, 2, 3]);
+  });
+  it("finds all missing and substituted display words without exposing correct words", () => {
+    expect(wrongAnswerWords(displayWords("I want to eat some cake"), "I want eat some coke")).toEqual([2, 5]);
+    expect(wrongAnswerWords(displayWords("I want to eat some cake"), "I need to drink some bread")).toEqual([1, 3, 5]);
+    expect(wrongAnswerWords(displayWords("I am sure it is fine"), "I'm sure it's fine")).toEqual([]);
+    expect(wrongAnswerWords(displayWords("a well-known fact"), "a well wrong fact")).toEqual([1]);
+    expect(wrongAnswerWords(displayWords("I want cake"), "I really want cake")).toEqual([]);
+  });
   const words = displayWords("By the time we arrived, the film had started.");
   it("empty field, unfinished word, missing word, complete answer", () => {
     expect(stuckWord(words, [])).toBe(0);

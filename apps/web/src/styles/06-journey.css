@@ -130,6 +130,7 @@
 .journey-node.done { fill: #3c4e7b; stroke: #c7c1ff; }
 .journey-station.reached .journey-node-halo { fill: #9b9fff18; stroke: #b4b4ff55; }
 .journey-current { fill: none; stroke: #b8ffe8; stroke-width: 2; stroke-dasharray: 3 5; transform-box: fill-box; transform-origin: center; }
+.journey-dot { fill: #5df2b0; stroke: #0f1a2e; stroke-width: 2; filter: drop-shadow(0 0 6px #5df2b0aa); }
 .journey-pointer { fill: #b8ffe8; }
 .journey-map .journey-position-label { fill: #b8ffe8; font-size: 13px; font-weight: 600; }
 .journey-stops { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: .5rem; }
