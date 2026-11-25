@@ -14,10 +14,10 @@ import { SCREEN_PROMPT } from "./advisoryRunner.js";
 import { checkDuplicates, registerRevision, submitForReview, taxonomyForNewRevisions } from "../repository.js";
 import { validateExercise } from "../validator.js";
 import { GENERATION_PROMPT } from "./repository.js";
-import { GENERATION_SYSTEM_V3, GENERATION_SYSTEM_V4, GENERATION_SYSTEM_V5, GENERATION_SYSTEM_V6, GENERATION_SYSTEM_V7, GENERATION_SYSTEM_V8, GENERATION_SYSTEM_V9, assembleExercise, buildGenerationUser, buildGenerationUserV4, draftFormat, draftFormatsText, type Built } from "./draftFormats.js";
+import { GENERATION_SYSTEM_V3, GENERATION_SYSTEM_V4, GENERATION_SYSTEM_V5, GENERATION_SYSTEM_V6, GENERATION_SYSTEM_V7, GENERATION_SYSTEM_V8, GENERATION_SYSTEM_V9, GENERATION_SYSTEM_V11, assembleExercise, buildGenerationUser, buildGenerationUserV4, draftFormat, draftFormatsText, type Built } from "./draftFormats.js";
 import type { ItemPlan } from "./plan.js";
 import { articleMismatch } from "./languageChecks.js";
-import { VOCABULARY_SYSTEM, VOCABULARY_SYSTEM_V2, VOCABULARY_SYSTEM_V3, VOCABULARY_SYSTEM_V4, VOCABULARY_SYSTEM_V5, VOCABULARY_SYSTEM_V6, VOCABULARY_SYSTEM_V7, VOCABULARY_SYSTEM_V8, assembleVocabulary, vocabularyFormat } from "./vocabularyDrafts.js";
+import { VOCABULARY_SYSTEM, VOCABULARY_SYSTEM_V2, VOCABULARY_SYSTEM_V3, VOCABULARY_SYSTEM_V4, VOCABULARY_SYSTEM_V5, VOCABULARY_SYSTEM_V6, VOCABULARY_SYSTEM_V7, VOCABULARY_SYSTEM_V8, VOCABULARY_SYSTEM_V9, assembleVocabulary, vocabularyFormat } from "./vocabularyDrafts.js";
 import { itContext } from "./itContext.js";
 import { pickVocabularyTopic } from "./vocabularyTopics.js";
 import type { LexiconHint } from "../../vocabulary/lexiconHint.js";
@@ -28,6 +28,8 @@ import { expressionsForForms } from "../../vocabulary/expressions.js";
 import { matchForms } from "../../vocabulary/forms.js";
 import { EXPRESSION_PROMPT, expressionFormat, EXPRESSION_SYSTEM_V1, validateExpressionOutput, type ExpressionDraft } from "../../vocabulary/expressions.js";
 import { runWordLessonJob, type WordLessonPayload } from "../../wordLessons/runner.js";
+import { runContextLoopJob } from "../../contextLoop/runner.js";
+import type { ContextLoopPayload } from "../../contextLoop/generate.js";
 import { THOUGHT_SYSTEM_V1, thoughtFormat, validateInterpretation, type Interpretation } from "../../thoughts/interpret.js";
 
 export interface GenerationPayload {
@@ -244,7 +246,25 @@ export class GenerationJobRunner implements JobRunner<GenerationPayload | Though
     });
   }
 
-  async run(ctx: RunnerContext<GenerationPayload | ThoughtPayload | DictationPayload | ExpressionPayload | WordLessonPayload>): Promise<RunnerOutput> {
+  /** TASK_037: one chunk (up to three words) of a Context Loop sentence batch */
+  private runContextLoop(ctx: RunnerContext<ContextLoopPayload>): Promise<RunnerOutput> {
+    const m = this.pinned;
+    return runContextLoopJob(ctx, {
+      db: this.o.db,
+      chat: this.o.chat,
+      model: { tag: m.tag, digest: m.digest },
+      params: { numCtx: GENERATION_PARAMS.numCtx, temperature: GENERATION_PARAMS.temperature, seed: GENERATION_PARAMS.seed },
+      deps: this.o.deps,
+      sleep: this.o.sleep,
+      assertModel: async () => {
+        const installed = await this.o.installedDigest(m.tag);
+        if (installed !== m.digest) throw new RunnerError("model_digest_mismatch", `installed digest of ${m.tag} differs from the pinned one`, false);
+      },
+    });
+  }
+
+  async run(ctx: RunnerContext<GenerationPayload | ThoughtPayload | DictationPayload | ExpressionPayload | WordLessonPayload | ContextLoopPayload>): Promise<RunnerOutput> {
+    if ("contextLoopBatchId" in ctx.job.payload) return this.runContextLoop(ctx as RunnerContext<ContextLoopPayload>);
     if ("wordLessonId" in ctx.job.payload) return this.runWordLesson(ctx as RunnerContext<WordLessonPayload>);
     if ("expressionId" in ctx.job.payload) return this.runExpression(ctx as RunnerContext<ExpressionPayload>);
     if ("dictationLessonId" in ctx.job.payload || "dictationPool" in ctx.job.payload) return this.runDictation(ctx as RunnerContext<DictationPayload>);
@@ -262,15 +282,15 @@ export class GenerationJobRunner implements JobRunner<GenerationPayload | Though
 
     const skills = taxonomyForNewRevisions(this.o.db).skills;
     const version = (this.o.db.prepare("SELECT prompt_version_id AS v FROM batches WHERE id = ?").get(payload.batchId) as { v: string } | undefined)?.v;
-    const vocabulary = version === "vocabulary-generation-v1" || version === "vocabulary-generation-v2" || version === "vocabulary-generation-v3" || version === "vocabulary-generation-v4" || version === "vocabulary-generation-v5" || version === "vocabulary-generation-v6" || version === "vocabulary-generation-v7" || version === "vocabulary-generation-v8";
-    const targetedRetry = (version === "generation-v5" || version === "generation-v6" || version === "generation-v7" || version === "generation-v8" || (version === "generation-v9" || version === "generation-v10")) || version === "vocabulary-generation-v2" || version === "vocabulary-generation-v3" || version === "vocabulary-generation-v4" || version === "vocabulary-generation-v5" || version === "vocabulary-generation-v6" || version === "vocabulary-generation-v7" || version === "vocabulary-generation-v8";
-    if (version !== "generation-v3" && version !== "generation-v4" && version !== "generation-v5" && version !== "generation-v6" && version !== "generation-v7" && version !== "generation-v8" && version !== "generation-v9" && version !== "generation-v10" && !vocabulary) throw new RunnerError("unsupported_prompt_version", "This batch uses an unavailable historical generation prompt.", false);
+    const vocabulary = version === "vocabulary-generation-v1" || version === "vocabulary-generation-v2" || version === "vocabulary-generation-v3" || version === "vocabulary-generation-v4" || version === "vocabulary-generation-v5" || version === "vocabulary-generation-v6" || version === "vocabulary-generation-v7" || (version === "vocabulary-generation-v8" || version === "vocabulary-generation-v9");
+    const targetedRetry = (version === "generation-v5" || version === "generation-v6" || version === "generation-v7" || version === "generation-v8" || (version === "generation-v9" || (version === "generation-v10" || version === "generation-v11"))) || version === "vocabulary-generation-v2" || version === "vocabulary-generation-v3" || version === "vocabulary-generation-v4" || version === "vocabulary-generation-v5" || version === "vocabulary-generation-v6" || version === "vocabulary-generation-v7" || (version === "vocabulary-generation-v8" || version === "vocabulary-generation-v9");
+    if (version !== "generation-v3" && version !== "generation-v4" && version !== "generation-v5" && version !== "generation-v6" && version !== "generation-v7" && version !== "generation-v8" && version !== "generation-v9" && version !== "generation-v10" && version !== "generation-v11" && !vocabulary) throw new RunnerError("unsupported_prompt_version", "This batch uses an unavailable historical generation prompt.", false);
     const first = items[0]!.plan;
     const model = { tag: m.tag, digest: m.digest };
-    const v4 = version === "vocabulary-generation-v4" || version === "vocabulary-generation-v5" || version === "vocabulary-generation-v6" || version === "vocabulary-generation-v7" || version === "vocabulary-generation-v8";
-    const v8 = version === "vocabulary-generation-v8";
+    const v4 = version === "vocabulary-generation-v4" || version === "vocabulary-generation-v5" || version === "vocabulary-generation-v6" || version === "vocabulary-generation-v7" || (version === "vocabulary-generation-v8" || version === "vocabulary-generation-v9");
+    const v8 = (version === "vocabulary-generation-v8" || version === "vocabulary-generation-v9");
     const v7 = version === "vocabulary-generation-v7" || v8;
-    const v5 = version === "vocabulary-generation-v5" || version === "vocabulary-generation-v6" || version === "vocabulary-generation-v7" || version === "vocabulary-generation-v8";
+    const v5 = version === "vocabulary-generation-v5" || version === "vocabulary-generation-v6" || version === "vocabulary-generation-v7" || (version === "vocabulary-generation-v8" || version === "vocabulary-generation-v9");
     const withAvoid = (plan: ItemPlan): ItemPlan => v4 ? { ...plan, avoid_sentences: this.avoidSentences(plan), ...(plan.topic === "technology" ? { it_context: itContext(plan.ordinal) } : {}), ...(v5 ? this.expressionHint(plan) : {}), ...(v7 ? this.meaningHint(plan) : {}) } as ItemPlan : plan;
     // v8: three topic suggestions instead of one fixed topic; the model may ignore them when the word does not suit any
     const ideas = (plan: ItemPlan): ItemPlan => {
@@ -279,8 +299,8 @@ export class GenerationJobRunner implements JobRunner<GenerationPayload | Though
       const first = topic === "technology" ? "software development or other IT work" : topic;
       return { ...rest, topic_ideas: [first, pickVocabularyTopic(plan.ordinal + 57, 1), pickVocabularyTopic(plan.ordinal + 113, 2)] } as unknown as ItemPlan;
     };
-    const user = vocabulary ? JSON.stringify({ batch_id: payload.batchId, items: items.map(i => ideas(withAvoid(i.plan))), count: items.length }) : (version === "generation-v4" || version === "generation-v5" || version === "generation-v6" || version === "generation-v7" || version === "generation-v8" || (version === "generation-v9" || version === "generation-v10") ? (b: string, p: ItemPlan[]) => buildGenerationUserV4(b, p, version) : (b: string, p: ItemPlan[]) => buildGenerationUser(b, p, version))(payload.batchId, items.map((i) => i.plan));
-    const system = vocabulary ? (version === "vocabulary-generation-v8" ? VOCABULARY_SYSTEM_V8 : version === "vocabulary-generation-v7" ? VOCABULARY_SYSTEM_V7 : version === "vocabulary-generation-v6" ? VOCABULARY_SYSTEM_V6 : version === "vocabulary-generation-v5" ? VOCABULARY_SYSTEM_V5 : version === "vocabulary-generation-v4" ? VOCABULARY_SYSTEM_V4 : version === "vocabulary-generation-v3" ? VOCABULARY_SYSTEM_V3 : version === "vocabulary-generation-v2" ? VOCABULARY_SYSTEM_V2 : VOCABULARY_SYSTEM) : (version === "generation-v9" || version === "generation-v10") ? GENERATION_SYSTEM_V9 : version === "generation-v8" ? GENERATION_SYSTEM_V8 : version === "generation-v7" ? GENERATION_SYSTEM_V7 : version === "generation-v6" ? GENERATION_SYSTEM_V6 : version === "generation-v5" ? GENERATION_SYSTEM_V5 : version === "generation-v4" ? GENERATION_SYSTEM_V4 : GENERATION_SYSTEM_V3;
+    const user = vocabulary ? JSON.stringify({ batch_id: payload.batchId, items: items.map(i => ideas(withAvoid(i.plan))), count: items.length }) : (version === "generation-v4" || version === "generation-v5" || version === "generation-v6" || version === "generation-v7" || version === "generation-v8" || (version === "generation-v9" || (version === "generation-v10" || version === "generation-v11")) ? (b: string, p: ItemPlan[]) => buildGenerationUserV4(b, p, version) : (b: string, p: ItemPlan[]) => buildGenerationUser(b, p, version))(payload.batchId, items.map((i) => i.plan));
+    const system = version === "generation-v11" ? GENERATION_SYSTEM_V11 : version === "vocabulary-generation-v9" ? VOCABULARY_SYSTEM_V9 : vocabulary ? (version === "vocabulary-generation-v8" ? VOCABULARY_SYSTEM_V8 : version === "vocabulary-generation-v7" ? VOCABULARY_SYSTEM_V7 : version === "vocabulary-generation-v6" ? VOCABULARY_SYSTEM_V6 : version === "vocabulary-generation-v5" ? VOCABULARY_SYSTEM_V5 : version === "vocabulary-generation-v4" ? VOCABULARY_SYSTEM_V4 : version === "vocabulary-generation-v3" ? VOCABULARY_SYSTEM_V3 : version === "vocabulary-generation-v2" ? VOCABULARY_SYSTEM_V2 : VOCABULARY_SYSTEM) : (version === "generation-v9" || version === "generation-v10") ? GENERATION_SYSTEM_V9 : version === "generation-v8" ? GENERATION_SYSTEM_V8 : version === "generation-v7" ? GENERATION_SYSTEM_V7 : version === "generation-v6" ? GENERATION_SYSTEM_V6 : version === "generation-v5" ? GENERATION_SYSTEM_V5 : version === "generation-v4" ? GENERATION_SYSTEM_V4 : GENERATION_SYSTEM_V3;
     // A repeat of a sentence already in the bank is found here, in code, before any agent sees the draft: the targeted retry then writes a new one.
     // Exact repeats are errors; near repeats (trigram Jaccard >= .80) are treated the same way so the reviewer never spends tokens on them.
     const rejectRepeats = (built: Built, item: QueuedItem): Built => {
@@ -357,7 +377,7 @@ export class GenerationJobRunner implements JobRunner<GenerationPayload | Though
     const rawText = result.ok ? (result.usage.rawOutputs.at(-1) ?? "") : (result.usage.rawOutputs.at(-1) ?? "");
     const parsed = parse(rawText);
     // A shorter array cannot identify which requested ordinal was omitted. Quarantine the whole unit.
-    const ambiguousCount = (version === "generation-v4" || version === "generation-v5" || version === "generation-v6" || version === "generation-v7" || version === "generation-v8" || (version === "generation-v9" || version === "generation-v10") || vocabulary) && parsed.ok && parsed.list.length !== items.length;
+    const ambiguousCount = (version === "generation-v4" || version === "generation-v5" || version === "generation-v6" || version === "generation-v7" || version === "generation-v8" || (version === "generation-v9" || (version === "generation-v10" || version === "generation-v11")) || vocabulary) && parsed.ok && parsed.list.length !== items.length;
     const proposals: Array<{ item: QueuedItem; built: Built; proposal?: unknown }> = items.map((item, i) => ({
       item,
       proposal: parsed.ok && !ambiguousCount ? parsed.list[i] : undefined,

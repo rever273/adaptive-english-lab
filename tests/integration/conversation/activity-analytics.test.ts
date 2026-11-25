@@ -3,7 +3,7 @@ import { randomUUID } from "node:crypto";
 import { expect, it, vi } from "vitest";
 import { makeEnv, makeSession } from "../attempts/fixtures.js";
 import { startConversation, heartbeatConversation, pauseConversation } from "../../../apps/server/src/domain/conversation/repository.js";
-import { conversationAnalytics } from "../../../apps/server/src/domain/conversation/analytics.js";
+import { conversationAnalytics, conversationInsights } from "../../../apps/server/src/domain/conversation/analytics.js";
 import { registerJourneyRoutes } from "../../../apps/server/src/routes/journey.js";
 import { registerSettingsRoutes } from "../../../apps/server/src/routes/settings.js";
 import { registerErrorHandling } from "../../../apps/server/src/errors.js";
@@ -38,5 +38,26 @@ it("keeps tentative reviews separate and retains counts after conversation text 
   expect(conversationAnalytics(env.db,"all").series).toEqual([{startedAt:now,answers:3,activeMs:5000,good:0,suggestions:0}]);
   for (let i=0; i<21; i++) env.db.prepare("INSERT INTO conversation_sessions(id,topic,status,started_at,updated_at) VALUES (?, 'Test', 'paused', ?, ?)").run(`extra-${i}`,now,now);
   const report=conversationAnalytics(env.db,"all"); expect(report.sessions).toHaveLength(20); expect(report.series).toHaveLength(22);
+ } finally { env.cleanup(); }
+});
+
+it("conversation-insights-v1 counts words, variety, time to answer and the tentative AI figures from retained answers only", async () => {
+ const env=await makeEnv(); try {
+  const t=(s:number)=>new Date(Date.UTC(2026,10,20,10,0,s)).toISOString();
+  env.db.prepare("INSERT INTO conversation_sessions(id,topic,status,started_at,updated_at,active_ms,answer_count) VALUES ('s','Travel','paused',?,?,5000,3)").run(t(0),t(0));
+  const add=env.db.prepare("INSERT INTO conversation_messages(id,session_id,role,text,created_at) VALUES (?,'s',?,?,?)");
+  add.run("q1","assistant","Where did you go?",t(0)); add.run("a","user","We went to the coast last summer with friends.",t(20));
+  add.run("q2","assistant","Nice!",t(30)); add.run("b","user","I go there.",t(70));
+  add.run("q3","assistant","And?",t(80)); add.run("c","user","Maybe.",t(84));
+  const analysis=env.db.prepare("INSERT INTO conversation_analyses(message_id,status,text,created_at) VALUES (?,'ready',?,?)");
+  analysis.run("a",JSON.stringify({version:"conversation-feedback-v2",analysis:"conversation-analysis-v3",ok:true,level:"ok",cefr:"B1",issueType:"none"}),t(21));
+  analysis.run("b",JSON.stringify({version:"conversation-feedback-v2",ok:false,level:"error",grammarSkillId:"past-simple"}),t(71));
+  analysis.run("c",JSON.stringify({version:"conversation-feedback-v2",analysis:"conversation-analysis-v3",ok:false,level:"tip",cefr:null,issueType:"naturalness"}),t(85));
+  const ins=conversationInsights(env.db,"all",Date.parse(t(100)));
+  expect(ins).toMatchObject({answers:3,totalWords:13,longest:9,levels:{ok:1,tip:1,error:1},issues:{grammar:1,naturalness:1},cefr:{B1:1}});
+  expect(ins.skills).toEqual([{id:"past-simple",label:"past-simple",count:1}]);
+  expect(ins.perConversation[0]).toMatchObject({answers:3,replyMedianMs:20000,cefr:3,longest:9});
+  env.db.prepare("UPDATE conversation_sessions SET history_deleted=1 WHERE id='s'").run();
+  expect(conversationInsights(env.db,"all",Date.parse(t(100))).perConversation).toEqual([]);
  } finally { env.cleanup(); }
 });

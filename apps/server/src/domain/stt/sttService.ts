@@ -16,7 +16,7 @@ export const STT_MODEL = { tag: "faster-whisper-small", runtime: "ctranslate2", 
 interface SpeechWorker { readonly alive: boolean; start(): Promise<SttReady>; transcribe(pcm: Buffer): Promise<Transcription>; stop(): Promise<number | null>; }
 
 /** who owns a voice stream: a practice session (the lease decides) or a Single Word lesson run (the run and its tab decide) */
-export type SttOwnerKind = "session" | "word_lesson" | "conversation";
+export type SttOwnerKind = "session" | "word_lesson" | "conversation" | "context_loop";
 
 interface Stream {
   id: string;
@@ -187,13 +187,13 @@ export class SttService {
   /** the lease of a practice session, or the open run (and its tab) of a Single Word lesson */
   private assertOwner(kind: SttOwnerKind, id: string, tabId: string): void {
     if (kind === "session") return assertLease(this.o.db, this.o.deps, id, tabId);
-    const table = kind === "conversation" ? "conversation_sessions" : "word_lesson_runs";
+    const table = kind === "conversation" ? "conversation_sessions" : kind === "context_loop" ? "context_loop_sessions" : "word_lesson_runs";
     const run = this.o.db.prepare(`SELECT status, tab_id AS tabId FROM ${table} WHERE id = ?`).get(id) as { status: string; tabId: string } | undefined;
     if (!run || run.status !== "active" || run.tabId !== tabId) throw new ApiError(409, "LEASE_REQUIRED", "This tab is not the one practising this lesson");
   }
 
   private ownerActive(kind: SttOwnerKind, id: string): boolean {
-    const table = kind === "session" ? "sessions" : kind === "conversation" ? "conversation_sessions" : "word_lesson_runs";
+    const table = kind === "session" ? "sessions" : kind === "conversation" ? "conversation_sessions" : kind === "context_loop" ? "context_loop_sessions" : "word_lesson_runs";
     return (this.o.db.prepare(`SELECT status FROM ${table} WHERE id = ?`).get(id) as { status: string } | undefined)?.status === "active";
   }
 
@@ -201,10 +201,10 @@ export class SttService {
    * A lesson answer by voice: the learner confirmed the (possibly edited) text. Returns the recognised text and the speech model so the attempt can keep
    * both. Text only, no audio.
    */
-  takeDraft(streamId: string, draftId: string, runId: string): { asrText: string; sttModelId: string; use: () => void } {
+  takeDraft(streamId: string, draftId: string, runId: string, kind: "word_lesson" | "context_loop" = "word_lesson"): { asrText: string; sttModelId: string; use: () => void } {
     const s = this.need(streamId);
     const d = this.drafts.get(draftId);
-    if (s.kind !== "word_lesson" || s.sessionId !== runId || !d || d.sessionId !== s.sessionId || d.used) throw new ApiError(404, "DRAFT_NOT_FOUND", "That voice draft is gone. Record again or type your answer.");
+    if (s.kind !== kind || s.sessionId !== runId || !d || d.sessionId !== s.sessionId || d.used) throw new ApiError(404, "DRAFT_NOT_FOUND", "That voice draft is gone. Record again or type your answer.");
     const model = this.o.cloud ? { tag: "whisper-large-v3", runtime: "groq", runtimeVersion: "api", digest: "provider-managed", parameters: { language: "en", temperature: 0 } } : { ...STT_MODEL, digest: path.basename(s.modelDir), parameters: { ...STT_MODEL.parameters } };
     const sttModelId = upsertModelVersion(this.o.db, this.o.deps.newId, model);
     // the draft is used up only when the caller has stored the answer (`use`), so a refused submission can be sent again

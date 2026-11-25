@@ -196,7 +196,7 @@ export function drillState(db: Db, excludeSessionId: string | null = null): Dril
 function candidates(db: Db): Candidate[] {
     const out = new Map<string, Candidate>();
     const bank = db
-        .prepare('SELECT lemma, translation_ru AS t, difficulty AS d FROM typing_word_bank WHERE typing_ok = 1 AND char_count BETWEEN 3 AND 12')
+        .prepare('SELECT lemma, translation_ru AS t, difficulty AS d FROM typing_word_bank WHERE typing_ok = 1 AND archived = 0 AND char_count BETWEEN 3 AND 12')
         .all() as Array<{ lemma: string; t: string; d: number }>;
     for (const b of bank) {
         const stage = stageOf(b.lemma, b.d);

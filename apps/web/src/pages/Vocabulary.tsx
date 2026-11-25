@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useRef, useState, type ReactNode } from "react";
 import { createPortal } from "react-dom";
-import { ApiRequestError, addVocabulary, createVocabSession, fetchVocabPractice, fetchVocabulary, fetchWordLessons, patchVocabulary, removeVocabulary, vocabularyWordSpeech, type VocabEntry, type VocabPracticeStatus, type WordLessonListResponse } from "../api";
+import { ApiRequestError, addVocabulary, createVocabSession, fetchContextLoopStatus, fetchVocabPractice, fetchVocabulary, fetchWordLessons, patchVocabulary, removeVocabulary, vocabularyWordSpeech, type VocabEntry, type ContextLoopStatus, type VocabPracticeStatus, type WordLessonListResponse } from "../api";
+import { ContextLoop } from "./ContextLoop";
 import { WordImage } from "../components/WordImage";
 import { Practice } from "./Practice";
 import { WordLesson } from "./WordLesson";
@@ -182,13 +183,14 @@ function Row({ w, onChanged }: { w: VocabEntry; onChanged: () => void }) {
         <td className="c small">{w.pos === "unknown" ? <span className="muted">—</span> : w.posSource === "ai_draft" ? <span className="ai-text" title={AI_TIP}>{w.pos}</span> : w.pos}</td>
         <td className="small collocations"><Txt text={w.collocations.items.join(", ")} source={w.collocations.source} empty="—" /></td>
         <td className="small example"><Txt text={w.example.text} source={w.example.source} empty={w.aiExampleOmitted ? "AI example unavailable" : "—"} /></td>
+        <td className="c num narrow" data-testid="vocab-strength" title={w.strength ? `Strength ${w.strength.value} of 10 (${w.strength.version}). Evidence (successes / misses): Practice ${w.strength.parts.practice.success}/${w.strength.parts.practice.miss}, One Word ${w.strength.parts.oneWord.success}/${w.strength.parts.oneWord.miss}, Context Loop ${w.strength.parts.contextLoop.success}/${w.strength.parts.contextLoop.miss}, checks ${w.strength.parts.checks.success}/${w.strength.parts.checks.miss}` : "No practice yet"}>{w.strength ? w.strength.value.toFixed(1) : "—"}</td>
         <td className="c num narrow" title="How many vocabulary-practice tasks on this word you have answered (first tries)">{w.practised}</td>
         <td className="c num narrow" title="How many times the word appears in approved exercises">{w.bank.occurrences}</td>
         <td className="c num narrow" title="How many times you were actually shown it">{w.displayed.occurrences}</td>
       </tr>
       {open && (
         <tr className="edit-row">
-          <td colSpan={12}>
+          <td colSpan={13}>
             {msg && <p className="notice notice-warn small" role="alert">{msg}</p>}
             <div className="form-grid">
               <label>Translation (Russian)<input value={tr} onChange={(e) => setTr(e.target.value)} /></label>
@@ -216,38 +218,28 @@ const loadPref = (): boolean => {
 };
 
 /** Vocabulary Practice: a short vocabulary-only session from approved exercises for the words in this dictionary (no flashcards, no timer) */
-function PracticeBlock({ status, onStart, onStudio, error }: { status: VocabPracticeStatus | null; onStart: (count?: number) => void; onStudio: () => void; error: string | null }) {
-  if (!status) return null;
-  const short = status.shortage;
+function PracticeCard({ status, onStart, onStudio, error }: { status: VocabPracticeStatus | null; onStart: (count?: number) => void; onStudio: () => void; error: string | null }) {
+  const short = status?.shortage ?? null;
   return (
-    <div className="vocab-practice vocab-practice-layout" data-testid="vocab-practice">
-      <div className="vocab-practice-content">
-      <div className="vocab-practice-main">
-        <div>
-          <h3><i className="pi pi-bolt" aria-hidden="true" /> Vocabulary Practice</h3>
-          <p className="muted small">Short tasks with your words in new sentences: choose the word, type it, or pick its natural partner. No timer; “I don’t know” and Skip are always there.</p>
+    <div className="vocab-mode vocab-practice" data-testid="vocab-practice">
+      <h3><i className="pi pi-bolt" aria-hidden="true" /> Vocabulary Practice</h3>
+      <p className="muted small">Short tasks with your words in new sentences: choose the word, type it, or pick its natural partner.</p>
+      {status && (
+        <div className="mini-stats" role="list">
+          <span role="listitem" title="Approved exercises for your words whose sentences you have never seen"><strong>{status.freshAvailable ?? status.available}</strong> new exercises</span>
+          <span role="listitem" title="Words that have at least one new approved exercise"><strong>{status.wordsWithContexts}</strong> words ready</span>
+          {(status.repeatStock ?? 0) > 0 && <span role="listitem" title="Sentences you have seen before. Some may come back with a Repeat label, mostly after a miss"><strong>{status.repeatStock}</strong> seen before</span>}
         </div>
-      </div>
-      <div className="mini-stats" role="list">
-        <span role="listitem" title="Approved exercises for your words whose sentences you have never seen"><strong>{status.freshAvailable ?? status.available}</strong> new exercises</span>
-        {(status.repeatStock ?? 0) > 0 && <span role="listitem" title="Sentences you have seen before. Some may come back with a Repeat label, mostly after a miss"><strong>{status.repeatStock}</strong> previously seen sentences</span>}
-        <span role="listitem" title="Words that have at least one new approved exercise"><strong>{status.wordsWithContexts}</strong> words ready</span>
-        <span role="listitem"><strong>{status.words}</strong> words saved</span>
-        <span role="listitem"><strong>{status.learned}</strong> marked learned</span>
-        {status.draftsNotReleased > 0 && <span role="listitem" title="Exercises that are not approved and released are never offered"><strong>{status.draftsNotReleased}</strong> not released</span>}
-      </div>
-      {status.wordQueue && <p className="small muted" data-testid="vocab-word-queue">Words with eligible contexts: {status.wordQueue.due} due for review ? {status.wordQueue.newWords} new ? {status.wordQueue.recent} not yet due. These are priorities, not a fixed next-session list.</p>}
+      )}
       {short && (
         <p className="notice notice-warn small" data-testid="vocab-shortage">
-          <i className="pi pi-info-circle" aria-hidden="true" /> {short.message}{" "}
-          <button className="link" onClick={onStudio}>Open Content Studio → Vocabulary</button>
+          <i className="pi pi-info-circle" aria-hidden="true" /> {short.message} <button className="link" onClick={onStudio}>Content Studio</button>
         </p>
       )}
       {error && <p className="notice notice-error small" role="alert">{error}</p>}
-      </div>
-      <button className="btn btn-primary btn-big has-kbd" disabled={status.available === 0} onClick={() => onStart(short ? status.available : undefined)} data-testid="start-vocab">
+      <button className="btn btn-primary has-kbd vocab-mode-go" disabled={!status || status.available === 0} onClick={() => status && onStart(short ? status.available : undefined)} data-testid="start-vocab">
         <Kbd k="P" />
-        <i className="pi pi-play" aria-hidden="true" /> {short && status.available > 0 ? `Practise ${status.available} task${status.available === 1 ? "" : "s"}` : `Practise vocabulary · ${status.taskCount} tasks`}
+        <i className="pi pi-play" aria-hidden="true" /> {status && short && status.available > 0 ? `Practise ${status.available} task${status.available === 1 ? "" : "s"}` : `Practise · ${status?.taskCount ?? 0} tasks`}
       </button>
     </div>
   );
@@ -261,31 +253,64 @@ const loadHideCompleted = (): boolean => {
   }
 };
 
-/** Single Word Practice: one word from the dictionary, five short steps in its own ready-made lesson. Lessons are made ahead of time in Content Studio. */
-function SingleWordBlock({ data, hideCompleted, onHideCompleted, onPick, onStudio, inputRef }: { data: WordLessonListResponse | null; hideCompleted: boolean; onHideCompleted: (v: boolean) => void; onPick: (lessonId: string) => void; onStudio: () => void; inputRef: React.RefObject<HTMLInputElement | null> }) {
+/** Single Word Practice: one word from the dictionary, five short steps in its own ready-made lesson. The word is chosen in a dialog. */
+function SingleWordCard({ data, onChoose }: { data: WordLessonListResponse | null; onChoose: () => void }) {
   return (
-    <div className="vocab-practice wl-block" id="single-word-practice" data-testid="word-lesson-block">
-      <div className="vocab-practice-main">
-        <div>
-          <h3><i className="pi pi-star" aria-hidden="true" /> Single Word Practice</h3>
-          <p className="muted small">Take one word and use it in five short steps: read examples, recall it, rewrite sentences, build a sentence from an idea, then write your own. Hints are always there; nothing can be failed. Do it again any time.</p>
-        </div>
-      </div>
-      <div className="wl-pick-row">
-        <WordTable lessons={data?.lessons ?? []} hideCompleted={hideCompleted} onPick={(l) => onPick(l.lessonId)} inputRef={inputRef} />
-        <label className="inline toggle"><input type="checkbox" checked={hideCompleted} onChange={(e) => onHideCompleted(e.target.checked)} data-testid="wl-hide-completed" /> Hide learned words</label>
-      </div>
-      {data && (
-        <p className="muted small" data-testid="wl-coverage">
-          <strong>{data.coverage.ready} / {data.coverage.eligible}</strong> words have a lesson.{" "}
-          {data.lessons.length === 0 && <>No lessons yet: <button className="link" onClick={onStudio}>prepare them in Content Studio → Vocabulary</button>.</>}
-        </p>
-      )}
+    <div className="vocab-mode wl-block" id="single-word-practice">
+      <h3><i className="pi pi-star" aria-hidden="true" /> Single Word Practice</h3>
+      <p className="muted small">One word in five short steps: examples, recall, rewriting, a sentence from an idea, then your own. Hints are always there.</p>
+      {data && <div className="mini-stats" role="list"><span role="listitem" data-testid="wl-coverage"><strong>{data.coverage.ready} / {data.coverage.eligible}</strong> words have a lesson</span></div>}
+      <button className="btn btn-primary vocab-mode-go" onClick={onChoose} data-testid="wl-choose"><i className="pi pi-list" aria-hidden="true" /> Choose a word</button>
     </div>
   );
 }
 
-export function Vocabulary({ onNavigate, dailyStart = false, wordLessonFocus = false, onDailyDone }: { onNavigate?: (page: "vocabulary" | "analytics" | "studio") => void; dailyStart?: boolean; wordLessonFocus?: boolean; onDailyDone?: () => void } = {}) {
+function SingleWordDialog({ data, hideCompleted, onHideCompleted, onPick, onStudio, onClose, inputRef }: { data: WordLessonListResponse | null; hideCompleted: boolean; onHideCompleted: (v: boolean) => void; onPick: (lessonId: string) => void; onStudio: () => void; onClose: () => void; inputRef: React.RefObject<HTMLInputElement | null> }) {
+  useEffect(() => {
+    const esc = (e: KeyboardEvent) => e.key === "Escape" && onClose();
+    window.addEventListener("keydown", esc);
+    requestAnimationFrame(() => inputRef.current?.focus());
+    return () => window.removeEventListener("keydown", esc);
+  }, [onClose, inputRef]);
+  return createPortal(
+    <div className="vocab-dialog-backdrop" role="dialog" aria-modal="true" aria-labelledby="wl-dialog-h" onMouseDown={(e) => e.target === e.currentTarget && onClose()}>
+      <div className="card vocab-dialog wl-block" data-testid="word-lesson-block">
+        <div className="vocab-dialog-head">
+          <h3 id="wl-dialog-h"><i className="pi pi-star" aria-hidden="true" /> Single Word Practice</h3>
+          <button className="icon-btn" onClick={onClose} aria-label="Close" title="Close"><i className="pi pi-times" aria-hidden="true" /></button>
+        </div>
+        <div className="wl-pick-row">
+          <WordTable lessons={data?.lessons ?? []} hideCompleted={hideCompleted} onPick={(l) => onPick(l.lessonId)} inputRef={inputRef} />
+          <label className="inline toggle"><input type="checkbox" checked={hideCompleted} onChange={(e) => onHideCompleted(e.target.checked)} data-testid="wl-hide-completed" /> Hide learned words</label>
+        </div>
+        {data && data.lessons.length === 0 && <p className="muted small">No lessons yet: <button className="link" onClick={onStudio}>prepare them in Content Studio → Vocabulary</button>.</p>}
+      </div>
+    </div>,
+    document.body,
+  );
+}
+
+/** Context Loop (TASK_037): recall a word's meaning inside short ready-made sentences; missed words come back, recalled ones in a new context. */
+function ContextLoopCard({ status, onStart, onStudio }: { status: ContextLoopStatus | null; onStart: () => void; onStudio: () => void }) {
+  return (
+    <div className="vocab-mode cl-block" data-testid="context-loop-card">
+      <h3><i className="pi pi-sync" aria-hidden="true" /> Context Loop</h3>
+      <p className="muted small">Recall what a word means in a short sentence, then reveal it. Missed words come back after a few cards; recalled ones return in a new sentence.</p>
+      {status && (
+        <div className="mini-stats" role="list">
+          <span role="listitem"><strong>{status.playableWords}</strong> words ready</span>
+          {status.missingWords > 0 && <span role="listitem"><strong>{status.missingWords}</strong> need sentences · <button className="link" onClick={onStudio}>Prepare</button></span>}
+        </div>
+      )}
+      <button className="btn btn-primary has-kbd vocab-mode-go" disabled={!status || (status.playableWords === 0 && !status.activeSessionId)} onClick={onStart} data-testid="start-context-loop">
+        <Kbd k="C" />
+        <i className="pi pi-play" aria-hidden="true" /> {status?.activeSessionId ? "Continue Context Loop" : "Start Context Loop"}
+      </button>
+    </div>
+  );
+}
+
+export function Vocabulary({ onNavigate, dailyStart = false, wordLessonFocus = false, contextLoopStart = false, onDailyDone }: { onNavigate?: (page: "vocabulary" | "analytics" | "studio") => void; dailyStart?: boolean; wordLessonFocus?: boolean; contextLoopStart?: boolean; onDailyDone?: () => void } = {}) {
   const [words, setWords] = useState<VocabEntry[] | null>(null);
   const [practice, setPractice] = useState<VocabPracticeStatus | null>(null);
   const [practising, setPractising] = useState(false);
@@ -307,6 +332,26 @@ export function Vocabulary({ onNavigate, dailyStart = false, wordLessonFocus = f
   const [lesson, setLesson] = useState<string | null>(null);
   const [hideCompleted, setHideCompleted] = useState(loadHideCompleted);
   const pickerBox = useRef<HTMLInputElement>(null);
+  const [choosing, setChoosing] = useState(false);
+  // Context Loop: its status and whether its screen is open (the screen starts or continues the one open session)
+  const [loopStatus, setLoopStatus] = useState<ContextLoopStatus | null>(null);
+  const [looping, setLooping] = useState(false);
+  const loadLoop = useCallback(async () => {
+    try {
+      setLoopStatus(await fetchContextLoopStatus());
+    } catch {
+      /* the dictionary works without it */
+    }
+  }, []);
+  useEffect(() => {
+    void loadLoop();
+  }, [loadLoop]);
+  const loopStarted = useRef(false);
+  useEffect(() => {
+    if (!contextLoopStart || loopStarted.current || !loopStatus) return;
+    loopStarted.current = true;
+    if (loopStatus.playableWords > 0 || loopStatus.activeSessionId) setLooping(true);
+  }, [contextLoopStart, loopStatus]);
   const loadLessons = useCallback(async () => {
     try {
       setLessons(await fetchWordLessons());
@@ -324,16 +369,13 @@ export function Vocabulary({ onNavigate, dailyStart = false, wordLessonFocus = f
       /* a convenience only */
     }
   }, [hideCompleted]);
-  // the Daily Practice button opens this page at the block, which is the only place a word is chosen
+  // the Daily Practice button opens the word dialog, which is the only place a word is chosen
   const focused = useRef(false);
   useEffect(() => {
     if (!wordLessonFocus || focused.current || !lessons || lesson || practising) return;
     focused.current = true;
     setPart("words");
-    requestAnimationFrame(() => {
-      document.getElementById("single-word-practice")?.scrollIntoView({ block: "start", behavior: "smooth" });
-      pickerBox.current?.focus({ preventScroll: true });
-    });
+    setChoosing(true);
   }, [wordLessonFocus, lessons, lesson, practising]);
 
   const loadPractice = useCallback(async () => {
@@ -415,13 +457,16 @@ export function Vocabulary({ onNavigate, dailyStart = false, wordLessonFocus = f
   }, [visibleCount, shown.length, matchingTotal]);
   // keys: P starts a practice session, / jumps to the search box (never while typing)
   useKeys((e) => {
-    if (practising || lesson || e.repeat || e.ctrlKey || e.metaKey || e.altKey || isTextField(e.target)) return;
+    if (practising || lesson || looping || choosing || e.repeat || e.ctrlKey || e.metaKey || e.altKey || isTextField(e.target)) return;
     if (e.key === "/") {
       e.preventDefault();
       searchBox.current?.focus();
     } else if (e.key.toLowerCase() === "p" && practice && practice.available > 0 && !(e.target instanceof HTMLElement && e.target.closest("button, a"))) {
       e.preventDefault();
       void start(practice.shortage ? practice.available : undefined);
+    } else if (e.key.toLowerCase() === "c" && loopStatus && (loopStatus.playableWords > 0 || loopStatus.activeSessionId) && !(e.target instanceof HTMLElement && e.target.closest("button, a"))) {
+      e.preventDefault();
+      setLooping(true);
     }
   });
   if (lesson) {
@@ -435,6 +480,13 @@ export function Vocabulary({ onNavigate, dailyStart = false, wordLessonFocus = f
         }}
       />
     );
+  }
+  if (looping) {
+    const back = () => {
+      setLooping(false);
+      void loadLoop();
+    };
+    return <ContextLoop onExit={back} {...(contextLoopStart && onDailyDone ? { onFinished: () => { back(); onDailyDone(); } } : {})} />;
   }
   if (practising) {
     return (
@@ -460,8 +512,12 @@ export function Vocabulary({ onNavigate, dailyStart = false, wordLessonFocus = f
       {part === "expressions" ? <VocabularyExpressions /> : <>
       <p className="lede">Words you saved while practising. Saving is instant; the local AI adds a translation in the background (shown in <span className="ai-text">blue</span>), and anything you write yourself is never replaced. The dotted line under a word shows its level, from green (A1) to red (C2) — hover to see it.</p>
       {error && <p className="notice notice-error" role="alert">{error}</p>}
-      <PracticeBlock status={practice} onStart={(c) => void start(c)} onStudio={() => onNavigate?.("studio")} error={startError} />
-      <SingleWordBlock data={lessons} hideCompleted={hideCompleted} onHideCompleted={setHideCompleted} onPick={setLesson} onStudio={() => onNavigate?.("studio")} inputRef={pickerBox} />
+      <div className="vocab-modes">
+        <PracticeCard status={practice} onStart={(c) => void start(c)} onStudio={() => onNavigate?.("studio")} error={startError} />
+        <SingleWordCard data={lessons} onChoose={() => setChoosing(true)} />
+        <ContextLoopCard status={loopStatus} onStart={() => setLooping(true)} onStudio={() => onNavigate?.("studio")} />
+      </div>
+      {choosing && <SingleWordDialog data={lessons} hideCompleted={hideCompleted} onHideCompleted={setHideCompleted} onPick={(id) => { setChoosing(false); setLesson(id); }} onStudio={() => { setChoosing(false); onNavigate?.("studio"); }} onClose={() => setChoosing(false)} inputRef={pickerBox} />}
       <div className="toolbar">
         <div className="field-add">
           <input value={newWord} onChange={(e) => setNewWord(e.target.value)} onKeyDown={(e) => e.key === "Enter" && newWord.trim() && void add()} placeholder="Add a word or a short phrase" aria-label="Add a word" data-testid="new-word" />
@@ -499,6 +555,7 @@ export function Vocabulary({ onNavigate, dailyStart = false, wordLessonFocus = f
                 <th>Part of speech</th>
                 <th>Collocations</th>
                 <th>Example</th>
+                <th className="narrow" title="How well you know the word, 0-10, from all three vocabulary modes (a new sentence and another day count most; repeats of the same sentence count little)">Strength</th>
                 <th className="narrow" title="Vocabulary-practice tasks on this word that you have answered">Tried</th>
                 <th className="narrow" title="Occurrences in approved exercises">In bank</th>
                 <th className="narrow" title="Times you were actually shown the word">Seen</th>

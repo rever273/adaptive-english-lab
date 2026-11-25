@@ -1,6 +1,8 @@
 import { useEffect, useState } from "react";
 import { Chart } from "../components/Chart";
+import { LineChart } from "../components/LineChart";
 import { PracticeActivityChart } from "../components/PracticeActivityChart";
+import { fmtDuration } from "../format";
 import { ApiRequestError, fetchVocabAnalytics, type Rate, type VocabAnalytics as Data } from "../api";
 
 const FAMILY: Record<string, { label: string; icon: string; note: string }> = {
@@ -28,25 +30,168 @@ function RateBar({ r, label, icon, note, extra }: { r: Rate; label: string; icon
   );
 }
 
-/** main chart: per day, first-try accuracy (bars, only days with at least one scored try) and Vocabulary XP (line) */
-function DailyChart({ series }: { series: Data["series"] }) {
-  if (series.length === 0) return <p className="muted">No vocabulary practice in this period yet.</p>;
-  const maxXp = Math.max(10, ...series.map((s) => s.xp));
+/** fixed categorical order for the dark surface (validated: CVD and normal-vision separation, 3:1 contrast) */
+const SERIES = ["#3987e5", "#d95926", "#199e70", "#c98500", "#d55181"] as const;
+const GROUPS: Record<"active" | "weak" | "recent", { label: string; note: string }> = {
+  active: { label: "Most practised", note: "the words with the most answers in this period" },
+  weak: { label: "Hardest to remember", note: "the lowest strength among words with at least 3 answers" },
+  recent: { label: "Latest", note: "the words practised most recently" },
+};
+const short = (date: string) => date.slice(5);
+const MODE: Record<Data["progress"]["modes"][number]["source"], { label: string; icon: string }> = {
+  practice: { label: "Vocabulary Practice", icon: "pi-list-check" },
+  oneWord: { label: "Single Word", icon: "pi-star" },
+  contextLoop: { label: "Context Loop", icon: "pi-sync" },
+  checks: { label: "Context Loop checks", icon: "pi-pencil" },
+};
+
+/** the four sources side by side: answers, share right, time and words, each bar on its own scale across the modes */
+function ModeCompare({ pr }: { pr: Data["progress"] }) {
+  const modes = pr.modes.filter((m) => m.answers > 0 || m.timeMs > 0);
+  if (modes.length === 0) return <p className="muted">No practice in this period yet.</p>;
+  const maxA = Math.max(1, ...modes.map((m) => m.answers));
+  const maxT = Math.max(1, ...modes.map((m) => m.timeMs));
+  return (
+    <div className="mode-cmp" data-testid="vocab-mode-compare">
+      {modes.map((m) => {
+        const rate = m.answers ? m.right / m.answers : null;
+        return (
+          <div className="mode-cmp-card" key={m.source}>
+            <div className="mode-cmp-head"><i className={`pi ${MODE[m.source].icon}`} aria-hidden="true" /> <strong>{MODE[m.source].label}</strong></div>
+            <div className="mode-cmp-row"><span>Answers</span><span className="mode-bar"><span style={{ width: `${(m.answers / maxA) * 100}%` }} /></span><span className="num">{m.answers}</span></div>
+            <div className="mode-cmp-row"><span>Right</span><span className="mode-bar mode-bar-ok"><span style={{ width: `${(rate ?? 0) * 100}%` }} /></span><span className="num">{rate === null ? "—" : `${Math.round(rate * 100)}%`}</span></div>
+            <div className="mode-cmp-row"><span>Time</span><span className="mode-bar mode-bar-time"><span style={{ width: `${(m.timeMs / maxT) * 100}%` }} /></span><span className="num">{fmtDuration(m.timeMs)}</span></div>
+            <div className="muted small">{m.words} word(s){m.answers > 0 && m.timeMs > 0 ? ` · ${Math.round(m.timeMs / m.answers / 1000)} s per answer` : ""}</div>
+          </div>
+        );
+      })}
+    </div>
+  );
+}
+
+/** the words that took the most time in the period, as horizontal bars */
+function TimeTop({ pr }: { pr: Data["progress"] }) {
+  if (pr.timeTop.length === 0) return <p className="muted">No timed practice in this period yet.</p>;
+  const max = Math.max(1, ...pr.timeTop.map((w) => w.timeMs));
+  return (
+    <ul className="time-top" role="list" data-testid="vocab-time-top">
+      {pr.timeTop.map((w) => (
+        <li key={w.entryId} title={`${w.lemma}: ${fmtDuration(w.timeMs)}, ${w.answers} answer(s)`}>
+          <span className="time-top-word">{w.lemma}</span>
+          <span className="mode-bar mode-bar-time"><span style={{ width: `${(w.timeMs / max) * 100}%` }} /></span>
+          <span className="num small">{fmtDuration(w.timeMs)}</span>
+        </li>
+      ))}
+    </ul>
+  );
+}
+
+/** right and not-right answers per day (or week), all three vocabulary modes together */
+function AnswersChart({ pr }: { pr: Data["progress"] }) {
+  const pts = pr.points.filter((p) => p.right + p.missed > 0);
+  if (pts.length === 0) return <p className="muted">No answers in this period yet.</p>;
+  const unit = pr.grouping === "week" ? "week to" : "";
   return (
     <Chart
-      ariaLabel={`Daily first-try accuracy and XP over ${series.length} day(s)`}
-      bars={{ color: "#3fbf6f", format: (v) => `${Math.round(v * 100)}%`, max: 1 }}
-      line={{ color: "#f3c94d", format: (v) => `${Math.round(v)} XP`, max: maxXp }}
-      points={series.map((s) => ({
-        key: s.date,
-        label: s.date.slice(5),
-        bar: s.total > 0 ? s.correct / s.total : null,
-        line: s.xp,
-        muted: s.total > 0 && s.total < 5,
-        tip: [s.date, s.total > 0 ? `First-try: ${s.correct}/${s.total} (${Math.round((s.correct / s.total) * 100)}%)` : "No scored tries", `Vocabulary XP: ${s.xp}`],
+      ariaLabel={`Right and not-right answers per ${pr.grouping}`}
+      bars={{ color: "#0ca30c", format: (v) => `${Math.round(v)}` }}
+      bars2={{ color: "#d03b3b", format: (v) => `${Math.round(v)}` }}
+      points={pr.points.map((p) => ({
+        key: p.date,
+        label: short(p.date),
+        bar: p.right + p.missed > 0 ? p.right : null,
+        bar2: p.right + p.missed > 0 ? p.missed : null,
+        tip: [`${unit} ${p.date}`.trim(), `Right: ${p.right}`, `Not right: ${p.missed}`, p.right + p.missed > 0 ? `${Math.round((p.right / (p.right + p.missed)) * 100)}% right` : "No answers", `${p.words} word(s) practised`],
       }))}
-      legend="Green bars: first-try accuracy per day (faded = fewer than 5 tries) · yellow line: Vocabulary XP per day"
+      legend="Green: answers right · red: missed, “I don’t know” or with a hint. Practice, Single Word and Context Loop together."
     />
+  );
+}
+
+/** the dictionary over time as lines: saved, being practised, strong by the strength figure, and the learner's own mark */
+function WordsOverTime({ pr }: { pr: Data["progress"] }) {
+  if (pr.points.every((p) => p.total === 0)) return <p className="muted">No saved words yet.</p>;
+  return (
+    <LineChart
+      ariaLabel="Saved, practised, strong and marked-learned words over time"
+      labels={pr.points.map((p) => short(p.date))}
+      tips={pr.points.map((p) => (pr.grouping === "week" ? `Week to ${p.date}` : p.date))}
+      series={[
+        { key: "total", name: "Saved", color: SERIES[0], values: pr.points.map((p) => p.total) },
+        { key: "practised", name: "Practised", color: SERIES[1], values: pr.points.map((p) => p.learning + p.strong) },
+        { key: "strong", name: `Strong (≥ ${pr.strong})`, color: SERIES[2], values: pr.points.map((p) => p.strong) },
+        { key: "marked", name: "Marked learned", color: SERIES[3], values: pr.points.map((p) => p.markedLearned), dashed: true },
+      ]}
+      note={`Strong = word strength ${pr.strong} or more out of 10, counted from your answers (${pr.strengthVersion}); “Marked learned” is your own mark.`}
+    />
+  );
+}
+
+/** how strong the practised words are now, in bands of two points */
+function StrengthBands({ pr, unpractised }: { pr: Data["progress"]; unpractised: number }) {
+  if (pr.practisedWords === 0) return <p className="muted">No word has been practised yet.</p>;
+  return (
+    <Chart
+      ariaLabel="Practised words by strength now"
+      height={200}
+      bars={{ color: "#3987e5", format: (v) => `${Math.round(v)}` }}
+      points={pr.bands.map((b) => ({ key: `${b.from}`, label: `${b.from}–${b.to}`, bar: b.words, highlight: b.from >= pr.strong - 1, tip: [`Strength ${b.from}–${b.to}`, `${b.words} word(s)`] }))}
+      legend={`${pr.practisedWords} practised word(s) by strength now (0–10); ${unpractised} saved word(s) not practised yet.`}
+    />
+  );
+}
+
+/** strength of a few words day by day, switchable between the most practised, the hardest and the latest */
+function WordTracks({ pr }: { pr: Data["progress"] }) {
+  const [group, setGroup] = useState<"active" | "weak" | "recent">("active");
+  const ids = pr.groups[group];
+  const byId = new Map(pr.tracks.map((t) => [t.entryId, t]));
+  const tracks = ids.map((id) => byId.get(id)!).filter(Boolean);
+  return (
+    <div>
+      <div className="seg" role="tablist" aria-label="Which words">
+        {(Object.keys(GROUPS) as Array<keyof typeof GROUPS>).map((g) => (
+          <button key={g} role="tab" aria-selected={group === g} className={`seg-btn${group === g ? " active" : ""}`} onClick={() => setGroup(g)} disabled={pr.groups[g].length === 0}>{GROUPS[g].label}</button>
+        ))}
+      </div>
+      <p className="muted small">{GROUPS[group].note}.</p>
+      {tracks.length === 0 ? (
+        <p className="muted">No word fits here in this period.</p>
+      ) : (
+        <>
+          <LineChart
+            ariaLabel={`Strength of ${tracks.map((t) => t.lemma).join(", ")} over time`}
+            labels={pr.points.map((p) => short(p.date))}
+            tips={pr.points.map((p) => (pr.grouping === "week" ? `Week to ${p.date}` : p.date))}
+            series={tracks.map((t, i) => ({ key: t.entryId, name: t.lemma, color: SERIES[i % SERIES.length]!, values: t.strength }))}
+            max={10}
+            format={(v) => (Number.isInteger(v) ? `${v}` : v.toFixed(1))}
+            reference={{ value: pr.strong, label: "strong" }}
+          />
+          <div className="table-wrap">
+            <table className="data-table">
+              <thead><tr><th>Word</th><th>Strength now</th><th>Right</th><th>Not right</th><th>Time</th><th>Answers in all</th></tr></thead>
+              <tbody>
+                {tracks.map((t, i) => {
+                  const right = t.right.reduce((a, b) => a + b, 0);
+                  const missed = t.missed.reduce((a, b) => a + b, 0);
+                  return (
+                    <tr key={t.entryId}>
+                      <td><i className="lc-key" style={{ background: SERIES[i % SERIES.length], borderColor: SERIES[i % SERIES.length] }} /> <strong>{t.lemma}</strong></td>
+                      <td className="c num">{t.now.toFixed(1)}</td>
+                      <td className="c num">{right}</td>
+                      <td className="c num">{missed}</td>
+                      <td className="c num">{fmtDuration(t.timeMs)}</td>
+                      <td className="c num">{t.evidence}</td>
+                    </tr>
+                  );
+                })}
+              </tbody>
+            </table>
+          </div>
+        </>
+      )}
+    </div>
   );
 }
 
@@ -80,10 +225,21 @@ export function VocabularyAnalytics({ days = "30" }: { days?: "7" | "30" | "90" 
             <div className="stat stat-skip"><i className="pi pi-database" aria-hidden="true" /><span className="stat-value">{d.encounters.bankWords}</span><span className="stat-label">words present in approved exercises · {d.encounters.bankContexts} places</span></div>
           </div>
 
-          <div className="charts-grid"><PracticeActivityChart mode="vocabulary" days={days} /><div><h3>Day by day</h3><DailyChart series={d.series} /></div></div>
+          <div className="charts-grid"><PracticeActivityChart mode="vocabulary" days={days} /><div><h3>Answers by {d.progress.grouping}</h3><AnswersChart pr={d.progress} /></div></div>
 
-          <h3>Your dictionary</h3>
-          {d.growth.series.length === 0 ? <p className="muted">No words added or marked learned in this period.</p> : <Chart ariaLabel="Dictionary additions and words marked learned" bars={{ color: "#6ab7ff", format: (v) => `${Math.round(v)}` }} bars2={{ color: "#51b788", format: (v) => `${Math.round(v)}` }} legend="Blue bars: words added; green bars: words you marked learned on that date." points={d.growth.series.map((g) => ({ key: g.date, label: g.date.slice(5), bar: g.added, bar2: g.learned, tip: [g.date, `Added: ${g.added}`, `Marked learned: ${g.learned}`] }))} />}
+          <div className="charts-grid">
+            <div><h3>Your words over time</h3><WordsOverTime pr={d.progress} /></div>
+            <div><h3>Strength now</h3><StrengthBands pr={d.progress} unpractised={d.progress.points.at(-1)?.notStarted ?? 0} /></div>
+          </div>
+
+          <h3>Modes side by side <span className="muted small">({fmtDuration(d.progress.timeTotalMs)} on words in this period)</span></h3>
+          <ModeCompare pr={d.progress} />
+          <p className="muted small">Time: Practice = how long each answer took; Single Word = a finished pass; Context Loop = from the previous card to the answer. Each piece is capped, so a pause away from the screen does not count.</p>
+
+          <h3>Word progress <span className="muted small">(strength 0–10 by {d.progress.grouping})</span></h3>
+          <WordTracks pr={d.progress} />
+          <h3>Where your time went <span className="muted small">(top 10 words)</span></h3>
+          <TimeTop pr={d.progress} />
           <p className="muted small">
             {d.growth.learnedNow} word(s) are marked learned now{d.growth.learnedWithoutDate > 0 ? `; ${d.growth.learnedWithoutDate} were marked before dates were recorded` : ""}. “Learned” is your own mark, not a test result.
           </p>

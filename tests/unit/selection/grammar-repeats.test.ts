@@ -169,3 +169,11 @@ describe("grammar repeats in the solver (D68)", () => {
 function scaleTen() {
   return { choose_form: 3, choose_missing_fragment: 2, detect_error: 3, guided_short_answer: 1, russian_to_english_short: 1 };
 }
+
+it("prefers one No-mistake control when the bank can supply mistakes for the remaining slots", () => {
+  const candidates = fixedBank();
+  const controls = new Set(candidates.filter(c => c.noMistake).map(c => c.revisionId));
+  const result = selectSession(input(candidates, { preferSingleNoMistake: true }));
+  expect(result.feasible).toBe(true);
+  expect(result.slots.filter(s => controls.has(s.revisionId))).toHaveLength(1);
+});

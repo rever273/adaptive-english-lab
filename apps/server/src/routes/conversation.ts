@@ -4,6 +4,7 @@ import type { Db } from "../db/open.js";
 import { ApiError } from "../errors.js";
 import type { SttService } from "../domain/stt/sttService.js";
 import { conversationState, heartbeatConversation, nextLessonTopic, pauseConversation, resumeConversation, startConversation, submitConversation, type ConversationDeps } from "../domain/conversation/repository.js";
+import { lessonFinished } from "../domain/conversation/lessons.js";
 import { applyAction } from "../queue/jobs.js";
 import type { DictationEnv } from "../domain/typing/dictation/lessons.js";
 import { modelShaOpt } from "../domain/voices/model.js";
@@ -11,7 +12,7 @@ import { speakable } from "./typingBookSpeech.js";
 import { checkedConversationSpeech } from "../domain/conversation/speech.js";
 import { createHash } from "node:crypto";
 import { AsrError, type DictationAsr } from "../domain/typing/dictation/asr.js";
-import { conversationAnalytics } from "../domain/conversation/analytics.js";
+import { conversationAnalytics, conversationInsights } from "../domain/conversation/analytics.js";
 
 const id = z.string().uuid();
 const tab = z.object({ tabId: id }).strict();
@@ -28,12 +29,13 @@ export function registerConversationRoutes(app: FastifyInstance, db: Db, deps: C
   let cacheBytes = 0;
   app.get("/api/v1/analytics/conversation", async req => {
     const query = parse(z.object({ days: z.enum(["7", "30", "90", "all"]).default("30") }).strict(), req.query);
-    return conversationAnalytics(db, query.days, deps.now().getTime());
+    return { ...conversationAnalytics(db, query.days, deps.now().getTime()), insights: conversationInsights(db, query.days, deps.now().getTime()) };
   });
   app.get(base, async () => ({
     topics: [...opts.topics].sort(() => Math.random() - 0.5).slice(0, 8).map(x => x.name),
     topicGroups: Object.fromEntries(opts.topics.map(t => [t.name, t.group])),
-    latest: db.prepare("SELECT id,topic,mode,(SELECT label FROM conversation_lesson_targets t WHERE t.session_id=s.id AND t.started_at IS NOT NULL ORDER BY ordinal DESC LIMIT 1) AS lessonTarget,updated_at AS updatedAt FROM conversation_sessions s WHERE history_deleted=0 ORDER BY updated_at DESC,rowid DESC LIMIT 1").get() ?? null,
+    // a lesson the teacher has closed is finished: it is not offered for continuing any more
+    latest: (db.prepare("SELECT id,topic,mode,(SELECT label FROM conversation_lesson_targets t WHERE t.session_id=s.id AND t.started_at IS NOT NULL ORDER BY ordinal DESC LIMIT 1) AS lessonTarget,updated_at AS updatedAt FROM conversation_sessions s WHERE history_deleted=0 ORDER BY updated_at DESC,rowid DESC LIMIT 20").all() as Array<{ id: string; mode: string }>).find((r) => r.mode !== "lesson" || !lessonFinished(db, r.id)) ?? null,
     statistics: db.prepare("SELECT count(*) AS conversations,coalesce(sum(answer_count),0) AS answers,coalesce(sum(active_ms),0) AS activeMs FROM conversation_sessions").get(),
   }));
   app.post(base, async (req) => {

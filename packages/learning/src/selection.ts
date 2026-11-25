@@ -18,6 +18,7 @@ export const SELECTION_VERSION = "selection-v1";
 export const GRAMMAR_SELECTION_V2 = "grammar-selection-v2";
 export const GRAMMAR_SELECTION_V3 = "grammar-selection-v3";
 export const GRAMMAR_SELECTION_V4 = "grammar-selection-v4";
+export const GRAMMAR_SELECTION_V5 = "grammar-selection-v5";
 
 /** repeat limits of grammar-selection-v3 (stored in algorithm_versions) */
 export const GRAMMAR_REPEAT_CONFIG = {
@@ -89,6 +90,7 @@ export interface SelectionInput {
   discovery: { bonusBySkill: Readonly<Record<string, number>>; limit: number };
   /** search budget: nodes explored before the solver gives up on a feasible answer */
   maxNodes?: number;
+  preferSingleNoMistake?: boolean;
   /** Optional cost for stock planning; normal session selection does not use this. */
   candidatePenalty?: (candidate: Candidate) => number;
 }
@@ -379,14 +381,78 @@ function solve(input: SelectionInput): SelectionResult {
     return families.size >= 3 && formats.size >= 3;
   };
 
+  /**
+   * Forward check (relaxation of `allowed`: roles and repeat caps ignored): the remaining slots of each format need that many
+   * distinct unused exercises, and the family cap limits the total. Cuts hopeless subtrees without changing which solution is found.
+   */
+  const hopeless = (k: number): boolean => {
+    const need = new Map<NonReadingFormat, number>();
+    for (let i = k; i < order.length; i++) need.set(order[i]!.s.format, (need.get(order[i]!.s.format) ?? 0) + 1);
+    // distinct unused exercises per (format, family); the family cap is shared by every format of that family
+    const cells = new Map<string, Map<string, Set<string>>>();
+    const fresh = new Map<string, Map<string, Set<string>>>();
+    const noSoon = new Map<string, Map<string, Set<string>>>(); // fresh + correct-answer reviews: everything outside the "soon" repeat cap
+    for (const c of pool) {
+      if (!need.has(c.format as NonReadingFormat) || usedExercise.has(c.exerciseId) || usedCluster.has(c.templateCluster)) continue;
+      if ((familyCount.get(c.family) ?? 0) + 1 > cap || c.unitFingerprints.some((f) => usedFp.has(f))) continue;
+      const byFam = cells.get(c.format) ?? cells.set(c.format, new Map()).get(c.format)!;
+      (byFam.get(c.family) ?? byFam.set(c.family, new Set()).get(c.family)!).add(c.exerciseId);
+      if (!c.repeat || c.repeat.reason === "review") {
+        const nFam = noSoon.get(c.format) ?? noSoon.set(c.format, new Map()).get(c.format)!;
+        (nFam.get(c.family) ?? nFam.set(c.family, new Set()).get(c.family)!).add(c.exerciseId);
+      }
+      if (c.repeat) continue;
+      const fFam = fresh.get(c.format) ?? fresh.set(c.format, new Map()).get(c.format)!;
+      (fFam.get(c.family) ?? fFam.set(c.family, new Set()).get(c.family)!).add(c.exerciseId);
+    }
+    // Hall-style check over every subset of the formats still needed: their slots must fit under the per-family caps
+    const formats = [...need.keys()];
+    for (let mask = 1; mask < 1 << formats.length; mask++) {
+      let slots = 0;
+      const fams = new Map<string, Set<string>>();
+      const freshFams = new Map<string, Set<string>>();
+      const noSoonFams = new Map<string, Set<string>>();
+      for (let i = 0; i < formats.length; i++) {
+        if (!(mask & (1 << i))) continue;
+        slots += need.get(formats[i]!)!;
+        for (const [target, source] of [[fams, cells], [freshFams, fresh], [noSoonFams, noSoon]] as const) {
+          for (const [fam, ids] of source.get(formats[i]!) ?? []) {
+            const set = target.get(fam) ?? target.set(fam, new Set()).get(fam)!;
+            for (const id of ids) set.add(id);
+          }
+        }
+      }
+      let room = 0;
+      for (const [fam, ids] of fams) room += Math.min(cap - (familyCount.get(fam) ?? 0), ids.size);
+      if (room < slots) return true;
+      // whatever fresh exercises cannot cover must come from the repeat budget
+      let freshRoom = 0;
+      for (const [fam, ids] of freshFams) freshRoom += Math.min(cap - (familyCount.get(fam) ?? 0), ids.size);
+      if (slots - freshRoom > totalCap - repeatUsed) return true;
+      let noSoonRoom = 0;
+      for (const [fam, ids] of noSoonFams) noSoonRoom += Math.min(cap - (familyCount.get(fam) ?? 0), ids.size);
+      if (slots - noSoonRoom > soonCap - soonUsed) return true;
+    }
+    // the "No mistake" case must still be reachable, and so must the minimum family spread (finalOk)
+    if (needNoMistake && !pool.some((c) => c.format === "detect_error" && c.noMistake && !usedExercise.has(c.exerciseId) && !usedCluster.has(c.templateCluster) && (familyCount.get(c.family) ?? 0) + 1 <= cap && !c.unitFingerprints.some((f) => usedFp.has(f)))) return true;
+    if (n >= 10) {
+      const reachable = new Set(familyCount.keys());
+      for (const byFam of cells.values()) for (const fam of byFam.keys()) reachable.add(fam);
+      if (reachable.size < 3) return true;
+    }
+    return false;
+  };
+
   const dfs = (k: number): boolean => {
     if (nodes++ > budget) return false;
     if (k === order.length) return finalOk() && !needNoMistake;
+    if (hopeless(k)) return false;
     const { s: spec } = order[k]!;
+    const extraControl = input.preferSingleNoMistake && spec.format === "detect_error" && chosen.some(({ cand }) => cand.format === "detect_error" && cand.noMistake);
     const options = pool
       .filter((c) => allowed(spec, c))
       .map((c) => ({ c, ...score(spec, c) }))
-      .sort((a, b) => b.score - a.score || (a.c.revisionId < b.c.revisionId ? -1 : 1));
+      .sort((a, b) => b.score - a.score + (extraControl ? 3 * (Number(a.c.noMistake) - Number(b.c.noMistake)) : 0) || (a.c.revisionId < b.c.revisionId ? -1 : 1));
     // the No-mistake requirement is satisfied by the first detect_error slot that can take such a case
     const forceNoMistake = spec.format === "detect_error" && needNoMistake && spec.role !== "discovery"; // a probe may be an error item; another slot supplies the No-mistake case
     const eligible = forceNoMistake ? options.filter((o) => o.c.noMistake) : options;
@@ -442,6 +508,17 @@ function solve(input: SelectionInput): SelectionResult {
     for (const f of FORMAT_ORDER) {
       const next = queues.get(f)!.shift();
       if (next) sequence.push(next);
+    }
+  }
+  // If the selected material already covers a focus skill twice, see a model
+  // of the construction before having to produce it after intervening items.
+  if (input.preferSingleNoMistake) {
+    const produced = sequence.findIndex((x, i) => x.cand.dimension === "production" && !x.cand.repeat &&
+      sequence.slice(i + 2).some(y => y.cand.skillId === x.cand.skillId && y.cand.dimension !== "production" && !y.cand.repeat));
+    if (produced >= 0) {
+      const focus = sequence[produced]!.cand.skillId;
+      const example = sequence.findIndex((x, i) => i >= produced + 2 && x.cand.skillId === focus && x.cand.dimension !== "production" && !x.cand.repeat);
+      [sequence[produced], sequence[example]] = [sequence[example]!, sequence[produced]!];
     }
   }
   const slots: SelectedSlot[] = [];

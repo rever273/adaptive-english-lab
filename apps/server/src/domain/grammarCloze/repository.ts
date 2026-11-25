@@ -1,11 +1,12 @@
-import type { ClozeAnswerResult, ClozeOverview, ClozeSessionView, ClozeSlotState, ClozeSlotView, ClozeStageView, ClozeSummary } from "@english-lab/contracts";
+import type { ClozeAnswerResult, ClozeOverview, ClozeSessionPlan, ClozeSessionView, ClozeSlotState, ClozeSlotView, ClozeStageView, ClozeSummary } from "@english-lab/contracts";
 import { clozeTaskCount } from "@english-lab/contracts";
 import type { Db } from "../../db/open.js";
 import { ApiError } from "../../errors.js";
 import { loadSettings } from "../sessions/policy.js";
 import { awardModeXp, XP_CLOZE_ANSWER } from "../sessions/modeXp.js";
 import { displayName } from "../skills/cards.js";
-import { orderOptions, planSession, SELECT_VERSION, type Candidate } from "./select.js";
+import { auditOf, checkedOkSql, hiddenSql } from "./audit.js";
+import { familyName, familyOf, orderOptions, planThemedSession, SELECT_VERSION_V2, type ThemedCandidate } from "./select.js";
 
 /** the exercises this mode plays; another source would be a separate setting, never mixed in */
 export const ACTIVE_SOURCE = "zanichelli";
@@ -28,6 +29,7 @@ interface PoolRow {
   status: string;
   ans: number | null;
   excl: number | null;
+  hidden: number;
 }
 
 /**
@@ -39,19 +41,22 @@ export function stageView(db: Db, stage: number): ClozeStageView {
     .prepare(
       `SELECT i.id AS itemId, COALESCE(r.skill_id, 'topic:' || r.source_topic) AS ruleKey, i.status AS status,
               (SELECT a.is_correct FROM grammar_cloze_attempts a WHERE a.item_id = i.id AND a.stage = @s) AS ans,
-              (SELECT 1 FROM grammar_cloze_exclusions e WHERE e.item_id = i.id) AS excl
+              (SELECT 1 FROM grammar_cloze_exclusions e WHERE e.item_id = i.id) AS excl, ${hiddenSql("i")} AS hidden
          FROM grammar_cloze_items i JOIN grammar_cloze_revisions r ON r.id = i.current_revision_id
         WHERE i.source_id = @src AND (@s = 1 OR EXISTS (SELECT 1 FROM grammar_cloze_attempts p WHERE p.item_id = i.id AND p.stage = @s - 1 AND p.is_correct = 0))`,
     )
     .all({ s: stage, src: ACTIVE_SOURCE }) as PoolRow[];
-  const inPool = rows.filter((r) => r.status === "validated" || r.ans !== null);
+  // a sentence hidden by the background check (or by hand) leaves the pool of every stage, answered or not (its answer stays in the history)
+  const playable = (r: PoolRow): boolean => r.status === "validated" && r.hidden !== 1;
+  const inPool = rows.filter((r) => playable(r) || (r.ans !== null && r.status !== "validated"));
   const counted = inPool.filter((r) => !(r.excl && r.ans === null));
   const processed = counted.filter((r) => r.ans !== null).length;
   const present = new Set(counted.map((r) => r.ruleKey));
   const touched = new Set(counted.filter((r) => r.ans !== null).map((r) => r.ruleKey));
   const open = new Set(counted.filter((r) => r.ans === null).map((r) => r.ruleKey));
   const completed = [...touched].filter((k) => !open.has(k)).length;
-  const carriedToNext = counted.filter((r) => r.ans === 0 && !r.excl && r.status === "validated").length;
+  const hiddenByCheck = rows.filter((r) => r.status === "validated" && r.hidden === 1 && !(r.excl && r.ans === null)).length;
+  const carriedToNext = counted.filter((r) => r.ans === 0 && !r.excl && playable(r)).length;
   const excluded = inPool.filter((r) => r.excl).length;
   const total = counted.length;
   const percent = total === 0 ? "0.00" : ((processed / total) * 100).toFixed(2);
@@ -66,6 +71,7 @@ export function stageView(db: Db, stage: number): ClozeStageView {
     rulesPresent: present.size,
     rulesTouched: touched.size,
     rulesCompleted: completed,
+    hiddenByCheck,
     excluded,
     carriedToNext,
     // TASK_032 plays stage 1 only; later stages show their pool but stay closed
@@ -102,24 +108,40 @@ export function startSession(db: Db, deps: Deps, tabId: string): { sessionId: st
       const settings = loadSettings(db);
       const rows = db
         .prepare(
-          `SELECT i.id AS itemId, COALESCE(r.skill_id, 'topic:' || r.source_topic) AS ruleKey
+          `SELECT i.id AS itemId, COALESCE(r.skill_id, 'topic:' || r.source_topic) AS ruleKey, r.source_topic AS topic, ${checkedOkSql("i")} AS checked
              FROM grammar_cloze_items i JOIN grammar_cloze_revisions r ON r.id = i.current_revision_id
             WHERE i.source_id = ? AND i.status = 'validated'
               AND NOT EXISTS (SELECT 1 FROM grammar_cloze_attempts a WHERE a.item_id = i.id AND a.stage = ?)
               AND NOT EXISTS (SELECT 1 FROM grammar_cloze_exclusions e WHERE e.item_id = i.id)
-              AND NOT EXISTS (SELECT 1 FROM grammar_cloze_session_items s WHERE s.item_id = i.id AND s.stage = ?)`,
+              AND NOT EXISTS (SELECT 1 FROM grammar_cloze_session_items s WHERE s.item_id = i.id AND s.stage = ?)
+              AND NOT ${hiddenSql("i")}`,
         )
-        .all(ACTIVE_SOURCE, stage, stage) as Candidate[];
+        .all(ACTIVE_SOURCE, stage, stage)
+        .map((r) => {
+          const x = r as { itemId: string; ruleKey: string; topic: string; checked: number };
+          return { itemId: x.itemId, ruleKey: x.ruleKey, family: familyOf(x.topic), checked: x.checked === 1 } satisfies ThemedCandidate;
+        });
       if (rows.length === 0) throw new ApiError(409, "STAGE_DONE", "Stage 1 has no sentences left to answer");
       const history = new Map<string, number>();
       for (const h of db.prepare("SELECT rule_key AS k, COUNT(*) AS n FROM grammar_cloze_session_items WHERE stage = ? GROUP BY rule_key").all(stage) as Array<{ k: string; n: number }>) history.set(h.k, h.n);
+      const recentFocus = (db.prepare("SELECT json_extract(plan_json, '$.focus') AS f FROM grammar_cloze_sessions WHERE plan_json IS NOT NULL ORDER BY level_no DESC LIMIT 12").all() as Array<{ f: string }>).map((r) => r.f);
+      const mistakes = new Map<string, number>();
+      for (const m of db
+        .prepare(
+          `SELECT a.rule_key AS k, COUNT(*) AS n FROM grammar_cloze_attempts a
+            WHERE a.is_correct = 0 AND a.session_id IN (SELECT id FROM grammar_cloze_sessions WHERE status = 'completed' ORDER BY level_no DESC LIMIT 5)
+            GROUP BY a.rule_key`,
+        )
+        .all() as Array<{ k: string; n: number }>)
+        mistakes.set(m.k, m.n);
       const seed = Math.floor(Math.random() * 2 ** 31);
-      const plan = planSession({ available: rows, history, size: clozeTaskCount(settings.values), seed });
+      const themed = planThemedSession({ available: rows, history, recentFocus, mistakes, size: clozeTaskCount(settings.values), seed });
+      const plan = themed.items;
       const texts = plan.map((p) => db.prepare("SELECT i.current_revision_id AS rev, r.solution, r.distractors_json AS d FROM grammar_cloze_items i JOIN grammar_cloze_revisions r ON r.id = i.current_revision_id WHERE i.id = ?").get(p.itemId) as { rev: string; solution: string; d: string });
       const options = orderOptions(texts.map((t) => ({ solution: t.solution, distractors: JSON.parse(t.d) as string[] })), seed);
       const level = ((db.prepare("SELECT MAX(level_no) AS m FROM grammar_cloze_sessions").get() as { m: number | null }).m ?? 0) + 1;
       const id = deps.newId();
-      db.prepare("INSERT INTO grammar_cloze_sessions(id, level_no, stage, planned_count, status, algorithm_version, seed, settings_revision, tab_id, started_at) VALUES (?,?,?,?,'active',?,?,?,?,?)").run(id, level, stage, plan.length, SELECT_VERSION, seed, settings.revision, tabId, deps.now().toISOString());
+      db.prepare("INSERT INTO grammar_cloze_sessions(id, level_no, stage, planned_count, status, algorithm_version, seed, settings_revision, tab_id, started_at, plan_json) VALUES (?,?,?,?,'active',?,?,?,?,?,?)").run(id, level, stage, plan.length, SELECT_VERSION_V2, seed, settings.revision, tabId, deps.now().toISOString(), JSON.stringify(themed.plan));
       const ins = db.prepare("INSERT INTO grammar_cloze_session_items(session_id, position, item_id, revision_id, stage, rule_key, options_json) VALUES (?,?,?,?,?,?,?)");
       plan.forEach((p, i) => ins.run(id, i + 1, p.itemId, texts[i]!.rev, stage, p.ruleKey, JSON.stringify(options[i])));
       return { sessionId: id, resumed: false };
@@ -130,6 +152,9 @@ export function startSession(db: Db, deps: Deps, tabId: string): { sessionId: st
 interface SlotRow {
   position: number;
   itemId: string;
+  rev: string;
+  hint: number | null;
+  hidden: number;
   options: string;
   ruleKey: string;
   gapped: string;
@@ -145,7 +170,7 @@ interface SlotRow {
 function slotRows(db: Db, sessionId: string): SlotRow[] {
   return db
     .prepare(
-      `SELECT s.position, s.item_id AS itemId, s.options_json AS options, s.rule_key AS ruleKey, r.gapped_text AS gapped, r.solution, r.source_topic AS topic, r.skill_id AS skillId,
+      `SELECT s.position, s.item_id AS itemId, s.revision_id AS rev, a.hint_level AS hint, (SELECT ${hiddenSql("i")} FROM grammar_cloze_items i WHERE i.id = s.item_id) AS hidden, s.options_json AS options, s.rule_key AS ruleKey, r.gapped_text AS gapped, r.solution, r.source_topic AS topic, r.skill_id AS skillId,
               a.chosen_text AS chosen, a.is_correct AS isCorrect, (SELECT 1 FROM grammar_cloze_exclusions e WHERE e.item_id = s.item_id) AS excl, (SELECT i.status FROM grammar_cloze_items i WHERE i.id = s.item_id) AS status
          FROM grammar_cloze_session_items s JOIN grammar_cloze_revisions r ON r.id = s.revision_id
          LEFT JOIN grammar_cloze_attempts a ON a.session_id = s.session_id AND a.position = s.position
@@ -157,16 +182,26 @@ function slotRows(db: Db, sessionId: string): SlotRow[] {
 const stateOf = (r: SlotRow): ClozeSlotState => (r.isCorrect !== null ? (r.isCorrect ? "correct" : "incorrect") : r.excl ? "excluded" : "pending");
 
 export function sessionView(db: Db, sessionId: string): ClozeSessionView {
-  const s = db.prepare("SELECT id, level_no AS levelNo, stage, status, planned_count AS planned FROM grammar_cloze_sessions WHERE id = ?").get(sessionId) as { id: string; levelNo: number; stage: number; status: "active" | "completed"; planned: number } | undefined;
-  if (!s) throw new ApiError(404, "CLOZE_SESSION_NOT_FOUND", "Unknown Grammar Cloze session");
+  const row = db.prepare("SELECT id, level_no AS levelNo, stage, status, planned_count AS planned, plan_json AS planJson FROM grammar_cloze_sessions WHERE id = ?").get(sessionId) as { id: string; levelNo: number; stage: number; status: "active" | "completed"; planned: number; planJson: string | null } | undefined;
+  if (!row) throw new ApiError(404, "CLOZE_SESSION_NOT_FOUND", "Unknown Grammar Cloze session");
+  const { planJson, ...s } = row;
+  const p = planJson ? (JSON.parse(planJson) as { focus: string; review: string[] }) : null;
+  const plan: ClozeSessionPlan | null = p ? { focus: p.focus, focusName: familyName(p.focus), review: [...new Set(p.review.map(ruleName))] } : null;
   const slots: ClozeSlotView[] = slotRows(db, sessionId).map((r) => {
     const state = stateOf(r);
     const slot: ClozeSlotView = { position: r.position, itemId: r.itemId, gappedText: r.gapped, options: JSON.parse(r.options) as string[], ruleName: ruleName(r.ruleKey), exact: !r.ruleKey.startsWith("topic:"), sourceTopic: r.topic, state, excluded: Boolean(r.excl) };
-    if (state !== "pending") { slot.correct = r.solution; if (r.chosen !== null) slot.chosen = r.chosen; }
+    if (state !== "pending") { slot.correct = r.solution; if (r.chosen !== null) slot.chosen = r.chosen; if (r.hint !== null) slot.hintLevel = r.hint; }
+    // the background check: signal words and names help before the answer; its reason would give the answer away, so it waits
+    const audit = auditOf(db, r.rev);
+    if (audit) {
+      slot.cues = audit.cues;
+      slot.names = audit.names;
+      if (state !== "pending") slot.reasonRu = audit.reason_ru;
+    }
     return slot;
   });
   const next = slots.find((x) => x.state === "pending");
-  return { ...s, answered: slots.filter((x) => x.state === "correct" || x.state === "incorrect").length, excluded: slots.filter((x) => x.state === "excluded").length, slots, nextPosition: next?.position ?? null };
+  return { ...s, plan, answered: slots.filter((x) => x.state === "correct" || x.state === "incorrect").length, excluded: slots.filter((x) => x.state === "excluded").length, slots, nextPosition: next?.position ?? null };
 }
 
 /** the first time a sentence is on screen; a reload never changes it (a showing is not an answer) */
@@ -181,6 +216,8 @@ export interface AnswerBody {
   position: number;
   chosen: string;
   responseMs?: number | undefined;
+  /** help shown before the answer: 0 none, 1 signal words, 2 the rule name */
+  hintLevel?: number | undefined;
 }
 
 export function submitAnswer(db: Db, deps: Deps, sessionId: string, b: AnswerBody): ClozeAnswerResult {
@@ -202,8 +239,10 @@ export function submitAnswer(db: Db, deps: Deps, sessionId: string, b: AnswerBod
       if (!(JSON.parse(slot.options) as string[]).includes(b.chosen)) throw new ApiError(400, "BAD_OPTION", "That is not one of the options");
       const correct = lc(b.chosen) === lc(slot.solution);
       const ms = b.responseMs === undefined ? null : Math.max(0, Math.min(3600000, Math.round(b.responseMs)));
-      db.prepare("INSERT INTO grammar_cloze_attempts(id, session_id, position, item_id, revision_id, stage, chosen_text, correct_text, is_correct, skill_id, rule_key, source_topic, response_ms, answered_at) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?)").run(b.id, sessionId, b.position, slot.itemId, slot.rev, slot.stage, b.chosen, slot.solution, correct ? 1 : 0, slot.skillId, slot.ruleKey, slot.topic, ms, deps.now().toISOString());
-      if (correct) awardModeXp(db, { id: deps.newId(), source: "grammarCloze", sourceId: b.id, amount: XP_CLOZE_ANSWER, at: deps.now().toISOString() });
+      const hint = Math.max(0, Math.min(2, Math.round(b.hintLevel ?? 0)));
+      db.prepare("INSERT INTO grammar_cloze_attempts(id, session_id, position, item_id, revision_id, stage, chosen_text, correct_text, is_correct, skill_id, rule_key, source_topic, response_ms, answered_at, hint_level) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)").run(b.id, sessionId, b.position, slot.itemId, slot.rev, slot.stage, b.chosen, slot.solution, correct ? 1 : 0, slot.skillId, slot.ruleKey, slot.topic, ms, deps.now().toISOString(), hint);
+      // a hinted correct answer stays correct (it does not move to the next stage) but earns half the XP
+      if (correct) awardModeXp(db, { id: deps.newId(), source: "grammarCloze", sourceId: b.id, amount: hint > 0 ? XP_CLOZE_ANSWER / 2 : XP_CLOZE_ANSWER, at: deps.now().toISOString() });
       return { correct, correctText: slot.solution, chosenText: b.chosen };
     })
     .immediate();
@@ -255,7 +294,7 @@ export function summary(db: Db, sessionId: string): ClozeSummary {
     by.set(r.ruleKey, e);
   });
   const byRule = [...by.entries()].map(([ruleKey, v]) => ({ ruleKey, name: ruleName(ruleKey), ...v })).sort((a, b) => b.incorrect - a.incorrect || b.correct + b.incorrect - (a.correct + a.incorrect));
-  const carried = rows.filter((r, i) => states[i] === "incorrect" && !r.excl && r.status === "validated").length;
+  const carried = rows.filter((r, i) => states[i] === "incorrect" && !r.excl && r.status === "validated" && r.hidden !== 1).length;
   return { levelNo: s.levelNo, stage: s.stage, answered: correct + incorrect, correct, incorrect, excluded: rows.filter((r) => r.excl).length, accuracy: correct + incorrect === 0 ? null : correct / (correct + incorrect), activeMs: activeMsOf(db, sessionId), byRule, carriedToNext: carried, stageProgress: stageView(db, s.stage) };
 }
 

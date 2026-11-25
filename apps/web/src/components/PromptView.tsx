@@ -4,6 +4,7 @@ import { SpeakButton, isSpeakableSentence } from './SpeakButton';
 import type { VoiceController } from '../voice';
 import { typoMarks } from '../typoMarks';
 import { Kbd, isPressable, isTextField, useKeys } from './hotkeys';
+import { applyHint, boardFromOpened, builtWords, clearPlaced, emptyBoard, filledCount, hintSlot, lockedCount as lockedIn, placeTile, removeAt, removeLast, type TileBoard } from '../game/tileBoard';
 
 interface Props {
     reveal: RevealResponse;
@@ -89,9 +90,9 @@ export function PromptView({
     const build = reveal.prompt.kind === 'short' ? reveal.prompt.build : undefined;
     const [tilesOn, setTilesOn] = useState(() => !!build && [...reveal.slotId].reduce((n, ch) => n + ch.charCodeAt(0), 0) % 2 === 0);
     const tileCount = build ? build.pattern.reduce((a, b) => a + b, 0) : 0;
-    // one entry per slot of the word: the index of the tile placed there, or null. Slots opened by a hint are locked (any position).
-    const [placed, setPlaced] = useState<Array<number | null>>(() => Array<number | null>(tileCount).fill(null));
-    const [locks, setLocks] = useState<boolean[]>(() => Array<boolean>(tileCount).fill(false));
+    // one board per task: slot -> tile index, and which slots a hint opened (locked, any order of placing and hinting)
+    const [board, setBoard] = useState<TileBoard>(() => emptyBoard(tileCount));
+    const { placed, locks } = board;
     const useTiles = vocabulary && !!build && tilesOn;
     const [hinting, setHinting] = useState(false);
     const answerIndexOf = (k: number) => {
@@ -99,28 +100,17 @@ export function PromptView({
         for (let left = k; build && word < build.pattern.length - 1 && left >= build.pattern[word]!; word++) left -= build.pattern[word]!;
         return k + word; // spaces between words count in the server's answer text
     };
-    const emptySlots = () => Array<number | null>(tileCount).fill(null);
-    const noLocks = () => Array<boolean>(tileCount).fill(false);
-    const filled = placed.filter((x) => x !== null).length;
-    const lockedCount = locks.filter(Boolean).length;
-    const dropOne = (cur: Array<number | null>, at: number) => cur.map((x, i) => (i === at ? null : x));
-    /** Hint with tiles: the first EMPTY slot (letters the learner placed stay where they are) gets its correct letter and is locked; with no empty slot, the first one not opened yet */
+    const filled = filledCount(board);
+    const lockedCount = lockedIn(board);
+    /** Hint with tiles: opens the first slot not opened yet. A letter the learner put there (right or wrong) is replaced by the correct one; the others stay where they are */
     async function tileHint() {
         if (!build || !onTileHint || hinting || lockedCount >= tileCount) return;
-        const empty = placed.findIndex((x, i) => x === null && !locks[i]);
-        const k = empty >= 0 ? empty : locks.findIndex((l) => !l);
+        const k = hintSlot(board);
         const answerIndex = answerIndexOf(k);
         setHinting(true);
         try {
-            const letter = (await onTileHint(answerIndex))?.[answerIndex]?.toLowerCase();
-            if (!letter) return;
-            setPlaced((cur) => {
-                if (cur[k] !== null && build.tiles[cur[k]!] === letter) return cur;
-                // a tile with this letter that is not in a locked slot (it may sit in another unlocked slot: it moves here)
-                const free = build.tiles.findIndex((tile, i) => tile === letter && !cur.some((x, s) => x === i && locks[s]));
-                return cur.map((x, s) => (s === k ? (free < 0 ? null : free) : x === free ? null : x));
-            });
-            setLocks((cur) => cur.map((l, i) => l || i === k));
+            const letter = (await onTileHint(answerIndex))?.[answerIndex];
+            if (letter) setBoard((cur) => applyHint(cur, k, letter, build.tiles));
         } finally {
             setHinting(false);
         }
@@ -130,44 +120,14 @@ export function PromptView({
     const cubes = useTiles ? null : letters;
     /** switching to tiles: every letter already opened (wherever it is in the word) is placed in its own slot and locked */
     function switchToTiles() {
-        const next = emptySlots();
-        const lock = noLocks();
-        if (build && letters) {
-            for (let k = 0; k < tileCount; k++) {
-                const shown = letters[answerIndexOf(k)];
-                if (!shown) continue;
-                const free = build.tiles.findIndex((tile, i) => tile === shown.toLowerCase() && !next.includes(i));
-                if (free < 0) continue;
-                next[k] = free;
-                lock[k] = true;
-            }
-        }
         setText('');
-        setPlaced(next);
-        setLocks(lock);
+        setBoard(build && letters ? boardFromOpened(tileCount, build.tiles, (k) => letters[answerIndexOf(k)]) : emptyBoard(tileCount));
         setTilesOn(true);
     }
     const hintAction = () => (tileHintMode ? void tileHint() : onHint());
     // the first-letter cue ("на b...") is only for typing; with tiles Hint gives the letters
     const cue = (s: string) => (tileHintMode ? s.replace(/,?\s*на\s+[A-Za-z]+\.{3}/, '') : s);
-    const built = build
-        ? build.pattern
-              .reduce<{ words: string[]; at: number }>(
-                  (acc, n) => ({
-                      words: [
-                          ...acc.words,
-                          placed
-                              .slice(acc.at, acc.at + n)
-                              .map((i) => (i === null ? '' : build.tiles[i]))
-                              .join(''),
-                      ],
-                      at: acc.at + n,
-                  }),
-                  { words: [], at: 0 },
-              )
-              .words.filter(Boolean)
-              .join(' ')
-        : '';
+    const built = build ? builtWords(board, build.tiles, build.pattern) : '';
     const groupId = useId();
     // a recording made on THIS task fills the text box once; a draft left over from the previous task never does
     const vs = voice?.state;
@@ -236,10 +196,7 @@ export function PromptView({
             if (e.altKey) return;
             if (useTiles && e.key === 'Backspace' && !typing) {
                 e.preventDefault();
-                setPlaced((cur) => {
-                    const at = cur.reduce<number>((last, x, i) => (x !== null && !locks[i] ? i : last), -1);
-                    return at < 0 ? cur : dropOne(cur, at);
-                });
+                setBoard(removeLast);
                 return;
             }
             if (typing) {
@@ -423,7 +380,7 @@ export function PromptView({
                                                 type="button"
                                                 className={`tile-slot tile-slot-filled${locks[from + k] ? ' tile-slot-hinted' : ''}`}
                                                 disabled={locked || locks[from + k]}
-                                                onClick={() => setPlaced((cur) => dropOne(cur, from + k))}
+                                                onClick={() => setBoard((cur) => removeAt(cur, from + k))}
                                                 aria-label={`Remove letter ${build.tiles[at]}`}
                                             >
                                                 {build.tiles[at]}
@@ -440,8 +397,8 @@ export function PromptView({
                                 key={i}
                                 type="button"
                                 className="tile"
-                                disabled={locked || busy || placed.includes(i) || filled >= tileCount}
-                                onClick={() => setPlaced((cur) => cur.map((x, s) => (s === cur.indexOf(null) ? i : x)))}
+                                disabled={locked || busy || placed.includes(i) || filled >= tileCount || hinting}
+                                onClick={() => setBoard((cur) => placeTile(cur, i))}
                             >
                                 {letter}
                             </button>
@@ -449,7 +406,7 @@ export function PromptView({
                     </div>
                     {!locked && (
                         <p className="small muted">
-                            <button type="button" className="link" disabled={filled <= lockedCount} onClick={() => setPlaced((cur) => cur.map((x, s) => (locks[s] ? x : null)))}>
+                            <button type="button" className="link" disabled={filled <= lockedCount} onClick={() => setBoard(clearPlaced)}>
                                 Clear
                             </button>
                             {' · '}
@@ -457,8 +414,7 @@ export function PromptView({
                                 type="button"
                                 className="link"
                                 onClick={() => {
-                                    setPlaced(emptySlots());
-                                    setLocks(noLocks());
+                                    setBoard(emptyBoard(tileCount));
                                     setTilesOn(false);
                                 }}
                             >
@@ -682,7 +638,7 @@ export function PromptView({
                             data-testid="hint-btn"
                         >
                             <Kbd k="H" />
-                            <i className="pi pi-lightbulb" aria-hidden="true" /> Hint
+                            <i className="pi pi-lightbulb" aria-hidden="true" /> Hint{!vocabulary && ` (${reveal.hintsAvailable})`}
                         </button>
                     )}
                     {!checkMode && (

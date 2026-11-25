@@ -4,6 +4,7 @@ import { Chart } from '../components/Chart';
 import { CumulativeCharacters } from '../components/CharacterCharts';
 import { fmtTotalTime } from '../format';
 import { TypingDictationAnalytics } from './TypingDictationAnalytics';
+import { TypingVocabAnalytics } from './TypingVocabAnalytics';
 import { KeyboardSection } from './TypingKeyboardAnalytics';
 import { KeyChips } from './TypingKeys';
 import { MODE_INFO } from '../journey/model';
@@ -67,18 +68,18 @@ function LineChart({
     );
 }
 
-type Mode = 'words' | 'drills' | 'keys' | 'books' | 'dictation';
+type Mode = 'words' | 'drills' | 'keys' | 'books' | 'dictation' | 'vocab';
 type Days = '7' | '30' | '90' | 'all';
 
 function Toolbar({ mode, setMode }: { mode: Mode; setMode: (m: Mode) => void }) {
     return (
         <div className="analytics-toolbar">
             <div className="segmented" role="radiogroup" aria-label="Typing mode">
-                {(['words', 'drills', 'keys', 'books', 'dictation'] as const).map((m) => (
+                {(['words', 'drills', 'keys', 'books', 'dictation', 'vocab'] as const).map((m) => (
                     <label key={m} className={mode === m ? 'on' : ''}>
                         <input type="radio" name="typing-mode" checked={mode === m} onChange={() => setMode(m)} />{' '}
-                        <i className={`pi ${m === 'drills' ? 'pi-th-large' : m === 'keys' ? 'pi-key' : MODE_INFO[m].icon}`} aria-hidden="true" />{' '}
-                        {m === 'words' ? 'Meteor Rain' : m === 'drills' ? 'Finger Drills' : m === 'keys' ? 'Key Builder' : m === 'books' ? 'Books' : 'Audio Dictation'}
+                        <i className={`pi ${m === 'drills' ? 'pi-th-large' : m === 'keys' ? 'pi-key' : m === 'vocab' ? 'pi-language' : MODE_INFO[m].icon}`} aria-hidden="true" />{' '}
+                        {m === 'words' ? 'Meteor Rain' : m === 'drills' ? 'Finger Drills' : m === 'keys' ? 'Key Builder' : m === 'books' ? 'Books' : m === 'vocab' ? 'Vocabulary Typing' : 'Audio Dictation'}
                     </label>
                 ))}
             </div>
@@ -141,6 +142,7 @@ export function TypingAnalytics({ days = '30' }: { days?: Days }) {
     const [mode, setMode] = useState<Mode>('words');
     const toolbar = <Toolbar mode={mode} setMode={setMode} />;
     if (mode === 'dictation') return <TypingDictationAnalytics days={days} toolbar={toolbar} />;
+    if (mode === 'vocab') return <TypingVocabAnalytics days={days} toolbar={toolbar} />;
     return <ClassicAnalytics mode={mode} days={days} toolbar={toolbar} />;
 }
 
@@ -234,7 +236,7 @@ function ClassicAnalytics({ mode, days, toolbar }: { mode: 'words' | 'drills' | 
                     </div>
                 )}
                 {keys && s.keyBuilder && (
-                    <div className="stat" title="Median speed of your last 10 lessons; the next stage target is fixed at it when a letter opens, never above the goal">
+                    <div className="stat" title="Median speed of your last 10 lessons. Shown for information: letters open by the fixed target speed in Settings">
                         <span className="stat-num">{Math.round(s.keyBuilder.currentCpm / 5)}</span>
                         <span className="stat-label">current WPM · goal {Math.round(s.keyBuilder.goalCpm / 5)}</span>
                     </div>
@@ -434,6 +436,7 @@ function KeyBuilderCharts({ series }: { series: NonNullable<Data['series']['keyP
                 <h4 className="chart-title">Speed, target and open keys</h4>
                 <Chart
                     ariaLabel="Speed of each lesson against its target, and the letters open"
+                    height={340}
                     bars={{ color: '#51b788', format: (v) => `${Math.round(v)} keys`, max: 26 }}
                     line={{ color: '#6ab7ff', format: (v) => `${Math.round(v)} WPM` }}
                     line2={{ color: '#f3c94d', format: (v) => `${Math.round(v)} WPM` }}

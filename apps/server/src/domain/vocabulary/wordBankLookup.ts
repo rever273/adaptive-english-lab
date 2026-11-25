@@ -6,16 +6,41 @@ export interface WordBankMatch { lemma: string; translationRu: string; partOfSpe
 
 const SELECT = "SELECT lemma, translation_ru AS translationRu, part_of_speech AS partOfSpeech FROM typing_word_bank";
 
+/**
+ * Irregular forms -> their bases, built once per database: finding them by SQL scans all ~20k rows (~5 ms a column), and a word
+ * missing from the bank needs both columns. The index is rebuilt when the bank's row count or latest import changes; that check is
+ * itself a scan (~4 ms), so it runs at most once per INDEX_CHECK_MS (the bank changes only by a seed or import).
+ */
+const INDEX_CHECK_MS = 30_000;
+const irregularIndex = new WeakMap<Db, { key: string; checkedAt: number; byForm: Map<string, WordBankMatch[]> }>();
+function irregularForms(db: Db): Map<string, WordBankMatch[]> {
+  const cached = irregularIndex.get(db);
+  if (cached && Date.now() - cached.checkedAt < INDEX_CHECK_MS) return cached.byForm;
+  const sig = db.prepare("SELECT COUNT(*) AS n, MAX(imported_at) AS at FROM typing_word_bank").get() as { n: number; at: string | null };
+  const key = `${sig.n}|${sig.at ?? ""}`;
+  if (cached?.key === key) {
+    cached.checkedAt = Date.now();
+    return cached.byForm;
+  }
+  const byForm = new Map<string, WordBankMatch[]>();
+  const rows = db.prepare("SELECT lemma, translation_ru AS translationRu, part_of_speech AS partOfSpeech, past_forms AS past, participle_forms AS participle FROM typing_word_bank WHERE past_forms <> '[]' OR participle_forms <> '[]'").all() as Array<WordBankMatch & { past: string; participle: string }>;
+  // past before participle, as the order of the lookup has always been
+  for (const form of ["past", "participle"] as const) {
+    for (const r of rows) {
+      for (const f of JSON.parse(r[form]) as string[]) {
+        const list = byForm.get(f) ?? [];
+        if (!list.some((m) => m.lemma === r.lemma)) list.push({ lemma: r.lemma, translationRu: r.translationRu, partOfSpeech: r.partOfSpeech, form });
+        byForm.set(f, list);
+      }
+    }
+  }
+  irregularIndex.set(db, { key, checkedAt: Date.now(), byForm });
+  return byForm;
+}
+
 /** Bases whose irregular past (2nd) or past participle (3rd) form is exactly `word`: arisen -> arise. */
 function irregularBases(db: Db, word: string): WordBankMatch[] {
-  const out = new Map<string, WordBankMatch>();
-  for (const [form, column] of [["past", "past_forms"], ["participle", "participle_forms"]] as const) {
-    const rows = db
-      .prepare(`${SELECT} WHERE ${column} <> '[]' AND EXISTS (SELECT 1 FROM json_each(${column}) WHERE value = ?)`)
-      .all(word) as WordBankMatch[];
-    for (const row of rows) if (!out.has(row.lemma)) out.set(row.lemma, { ...row, form });
-  }
-  return [...out.values()];
+  return irregularForms(db).get(word) ?? [];
 }
 
 /** Bases that the regular endings turn into `word`. Each guessed stem is verified against the forward rules, so a guess alone never matches. */

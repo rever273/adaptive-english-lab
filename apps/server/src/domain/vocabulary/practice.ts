@@ -1,5 +1,5 @@
 import { createHash } from "node:crypto";
-import { VocabularyPracticeMetadataSchema, vocabularyNewWordsPerSession, vocabularyTaskCount, type CreateSessionResponse } from "@english-lab/contracts";
+import { VocabularyPracticeMetadataSchema, vocabularyFocusEnabled, vocabularyNewWordsPerSession, vocabularyTaskCount, type CreateSessionResponse } from "@english-lab/contracts";
 import type { Db } from "../../db/open.js";
 import { ApiError } from "../../errors.js";
 import { localDateIn } from "../attempts/canonical.js";
@@ -7,7 +7,7 @@ import { loadBlockedFingerprints } from "../sessions/bank.js";
 import { loadPlan, loadSettings, type SessionDeps } from "../sessions/policy.js";
 import { getSnapshot } from "../sessions/snapshot.js";
 import { normalizeWord } from "./forms.js";
-import { FAMILY_WEIGHT, SELECTION_CONFIG, VOCABULARY_SELECTION_V4, pickVocabulary, wordState, type Outcome, type ShownCandidate, type VocabularyCandidate, type WordEvent } from "./schedule.js";
+import { FAMILY_WEIGHT, FOCUS_CONFIG, VOCABULARY_FOCUS_V1, SELECTION_CONFIG, VOCABULARY_SELECTION_V4, pickVocabulary, wordState, type Outcome, type ShownCandidate, type VocabularyCandidate, type WordEvent } from "./schedule.js";
 
 export const VOCABULARY_SELECTION = VOCABULARY_SELECTION_V4;
 export type { VocabularyCandidate, ShownCandidate } from "./schedule.js";
@@ -58,14 +58,14 @@ export function wordEvents(db: Db): Map<string, WordEvent[]> {
   const rows = db
     .prepare(
       `SELECT t.submitted_at AS at, t.hints_before AS hints, t.answer_seen_before AS seen, t.idk AS idk, ss.id AS slotId, ss.exercise_revision_id AS revisionId,
-              json_extract(er.content_json, '$.vocabulary.target.lemma') AS lemma, COALESCE(json_extract(ss.cohort_json, '$.repeat'), 0) AS repeat,
+              json_extract(er.content_json, '$.vocabulary.target.lemma') AS lemma, COALESCE(json_extract(er.content_json, '$.vocabulary.family'), json_extract(ss.cohort_json, '$.family')) AS family, COALESCE(json_extract(ss.cohort_json, '$.repeat'), 0) AS repeat,
               (SELECT a.verdict FROM assessment_revisions a WHERE a.attempt_id = t.id ORDER BY a.sequence DESC LIMIT 1) AS verdict,
               (SELECT a.confirmation FROM assessment_revisions a WHERE a.attempt_id = t.id ORDER BY a.sequence DESC LIMIT 1) AS confirmation
          FROM attempts t JOIN session_slots ss ON ss.id = t.slot_id JOIN vocabulary_sessions vs ON vs.session_id = ss.session_id
          JOIN exercise_revisions er ON er.id = ss.exercise_revision_id
         WHERE t.attempt_no = 1 ORDER BY t.submitted_at, t.id`,
     )
-    .all() as Array<{ at: string; hints: number; seen: number; idk: number; slotId: string; revisionId: string; lemma: string | null; repeat: number; verdict: string | null; confirmation: string | null }>;
+    .all() as Array<{ at: string; hints: number; seen: number; idk: number; slotId: string; revisionId: string; lemma: string | null; family: WordEvent["family"]; repeat: number; verdict: string | null; confirmation: string | null }>;
   const out = new Map<string, WordEvent[]>();
   for (const r of rows) {
     if (!r.lemma) continue;
@@ -74,7 +74,7 @@ export function wordEvents(db: Db): Map<string, WordEvent[]> {
     if (!result) continue; // pending or ambiguous: not evidence yet
     const outcome: Outcome = r.hints > 0 || r.seen === 1 ? "assisted" : result === "correct" ? "success" : "miss";
     const lemma = normalizeWord(r.lemma);
-    (out.get(lemma) ?? out.set(lemma, []).get(lemma)!).push({ at: r.at, outcome, revisionId: r.revisionId, slotId: r.slotId, independent: r.repeat !== 1 });
+    (out.get(lemma) ?? out.set(lemma, []).get(lemma)!).push({ at: r.at, outcome, revisionId: r.revisionId, slotId: r.slotId, independent: r.repeat !== 1, family: r.family });
   }
   return out;
 }
@@ -144,6 +144,7 @@ export interface VocabularyPracticeStatus {
   freshAvailable: number;
   /** repeats among `available` (in your next session) */
   repeatsAvailable: number;
+  focus?: boolean;
   /** shown sentences that can come back as repeats (stock, not the next session) */
   repeatStock: number;
   wordsWithContexts: number;
@@ -160,7 +161,8 @@ export interface VocabularyPracticeStatus {
 /** `candidates` lets a caller that already read them (same request) skip a second pass over the bank. */
 export function vocabularyPracticeStatus(db: Db, now: Date = new Date(), candidates: ReturnType<typeof vocabularyCandidates> = vocabularyCandidates(db)): VocabularyPracticeStatus {
   const settings = loadSettings(db);
-  const n = vocabularyTaskCount(settings.values);
+  const focus = vocabularyFocusEnabled(settings.values);
+  const n = focus ? FOCUS_CONFIG.taskCount : vocabularyTaskCount(settings.values);
   const { usable, shown, approvedForWords, events } = candidates;
   const entries = visibleEntries(db);
   const drafts = (db
@@ -173,7 +175,7 @@ export function vocabularyPracticeStatus(db: Db, now: Date = new Date(), candida
   const active = db.prepare("SELECT s.id FROM sessions s JOIN vocabulary_sessions v ON v.session_id = s.id WHERE s.status = 'active' ORDER BY s.created_at DESC LIMIT 1").get() as { id: string } | undefined;
   const all = Number.MAX_SAFE_INTEGER;
   // `available` = the largest session (up to the configured size) the picker can really build with the soft repeat cap and the new-word cap
-  const newWords = vocabularyNewWordsPerSession(settings.values);
+  const newWords = focus ? FOCUS_CONFIG.newWords : vocabularyNewWordsPerSession(settings.values);
   const candidateLemmas = new Set([...usable, ...shown].map(c => c.lemma));
   const wordQueue = { due: 0, newWords: 0, recent: 0 };
   for (const lemma of candidateLemmas) {
@@ -182,13 +184,14 @@ export function vocabularyPracticeStatus(db: Db, now: Date = new Date(), candida
     else if (state.due) wordQueue.due++;
     else wordQueue.recent++;
   }
-  const { n: available, picks } = largestFeasible((m) => pickVocabulary({ fresh: usable, shown, events, now, n: m, seed: "status", newWordsPerSession: newWords }), n);
+  const { n: available, picks } = largestFeasible((m) => pickVocabulary({ fresh: usable, shown, events, now, n: m, seed: "status", newWordsPerSession: newWords, focus }), n);
   const freshAvailable = pickVocabulary({ fresh: usable, shown: [], events: new Map(), now, n: all, seed: "status", newWordsPerSession: all }).length;
   return {
     taskCount: n,
     wordQueue,
     available,
     freshAvailable,
+    focus,
     repeatsAvailable: picks.filter((p) => p.repeat).length,
     repeatStock: shown.length,
     wordsWithContexts: new Set(usable.map((c) => c.lemma)).size,
@@ -236,28 +239,30 @@ export function createVocabularySession(db: Db, deps: SessionDeps, req: { timezo
       const active = db.prepare("SELECT id FROM sessions WHERE status = 'active' LIMIT 1").get() as { id: string } | undefined;
       if (active) throw new ApiError(409, "SESSION_ACTIVE", "A session is already in progress: resume it or finish it first", { sessionId: active.id });
       const settings = loadSettings(db);
-      const configured = vocabularyTaskCount(settings.values);
+      const focus = vocabularyFocusEnabled(settings.values);
+      const version = focus ? VOCABULARY_FOCUS_V1 : VOCABULARY_SELECTION;
+      const configured = focus ? FOCUS_CONFIG.taskCount : vocabularyTaskCount(settings.values);
       const n = req.count !== undefined ? Math.max(1, Math.min(configured, Math.floor(req.count))) : configured;
       const { usable, shown } = vocabularyCandidates(db);
       const seed = req.seed ?? deps.newId();
-      const newWords = vocabularyNewWordsPerSession(settings.values);
+      const newWords = focus ? FOCUS_CONFIG.newWords : vocabularyNewWordsPerSession(settings.values);
       const events = wordEvents(db);
-      const picked = pickVocabulary({ fresh: usable, shown, events, now: deps.now(), n, seed, newWordsPerSession: newWords });
+      const picked = pickVocabulary({ fresh: usable, shown, events, now: deps.now(), n, seed, newWordsPerSession: newWords, focus });
       if (picked.length < n || picked.length === 0) {
-        const feasible = largestFeasible((m) => pickVocabulary({ fresh: usable, shown, events, now: deps.now(), n: m, seed, newWordsPerSession: newWords }), n - 1).n;
+        const feasible = largestFeasible((m) => pickVocabulary({ fresh: usable, shown, events, now: deps.now(), n: m, seed, newWordsPerSession: newWords, focus }), n - 1).n;
         throw new ApiError(409, "CONTENT_SHORTAGE", `Not enough approved vocabulary exercises (new sentences or repeats) for ${n} tasks`, { deficits: [{ kind: "vocabulary", needed: n, available: feasible, message: "Create more in Content Studio → Vocabulary" }], largestFeasibleN: feasible, requestedN: n });
       }
       const nowIso = deps.now().toISOString();
-      const json = JSON.stringify(SELECTION_CONFIG);
-      if (!db.prepare("SELECT 1 FROM algorithm_versions WHERE id = ?").get(VOCABULARY_SELECTION)) {
-        db.prepare("INSERT INTO algorithm_versions(id, config_json, config_hash, source_version, created_at) VALUES (?,?,?,?,?)").run(VOCABULARY_SELECTION, json, sha256(json), "apps/server vocabulary/practice", nowIso);
+      const json = JSON.stringify(focus ? { ...SELECTION_CONFIG, ...FOCUS_CONFIG, version } : SELECTION_CONFIG);
+      if (!db.prepare("SELECT 1 FROM algorithm_versions WHERE id = ?").get(version)) {
+        db.prepare("INSERT INTO algorithm_versions(id, config_json, config_hash, source_version, created_at) VALUES (?,?,?,?,?)").run(version, json, sha256(json), "apps/server vocabulary/practice", nowIso);
       }
       const plan = loadPlan(db, deps);
       const sessionId = deps.newId();
       db.prepare(
         `INSERT INTO sessions(id, blueprint_revision_id, purpose, settings_revision_id, plan_id, selection_version, random_seed, status, created_at, timezone)
          VALUES (?,?,?,?,?,?,?,?,?,?)`,
-      ).run(sessionId, null, "practice", settings.id, plan.id, VOCABULARY_SELECTION, seed, "active", nowIso, req.timezone);
+      ).run(sessionId, null, "practice", settings.id, plan.id, version, seed, "active", nowIso, req.timezone);
       db.prepare("INSERT INTO vocabulary_sessions(session_id, created_at) VALUES (?,?)").run(sessionId, nowIso); // before any activity (trigger)
       const insSlot = db.prepare("INSERT INTO session_slots(id, session_id, ordinal, exercise_revision_id, question_id, reading_group_id, input_preference, cohort_json) VALUES (?,?,?,?,?,?,?,?)");
       const reserve = db.prepare("INSERT INTO prompt_reservations(unit_id, slot_id, created_at) VALUES (?,?,?)");
@@ -273,9 +278,9 @@ export function createVocabularySession(db: Db, deps: SessionDeps, req: { timezo
       db.prepare("INSERT INTO scheduling_decisions(id, session_id, algorithm_id, candidate_hash, choices_json, deficits_json, created_at) VALUES (?,?,?,?,?,?,?)").run(
         deps.newId(),
         sessionId,
-        VOCABULARY_SELECTION,
+        version,
         sha256(JSON.stringify({ fresh: usable.map((c) => c.revisionId), shown: shown.map((c) => c.revisionId) })),
-        JSON.stringify({ selectionVersion: VOCABULARY_SELECTION, seed, asOf: nowIso, settings: { revision: settings.revision, vocabularyTaskCount: configured, vocabularyNewWordsPerSession: newWords, requested: n }, slots: choices }),
+        JSON.stringify({ selectionVersion: version, seed, asOf: nowIso, settings: { revision: settings.revision, vocabularyTaskCount: configured, vocabularyNewWordsPerSession: newWords, requested: n }, slots: choices }),
         JSON.stringify({ soft: { familyMix: { target: FAMILY_WEIGHT, actual: Object.fromEntries(Object.keys(FAMILY_WEIGHT).map((f) => [f, picked.filter((p) => p.candidate.family === f).length])), repeats: picked.filter((p) => p.repeat).length } }, hard: [] }),
         nowIso,
       );

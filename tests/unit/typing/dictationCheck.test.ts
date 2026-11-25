@@ -69,7 +69,7 @@ describe("hint position", () => {
     const van = displayWords("Eighteen of us couldn't move the van.");
     expect(attemptedAnswerWords(van, "Eighteen of us couldn't mive the van")).toEqual([0, 1, 2, 3, 4]);
     expect(attemptedAnswerWords(van, "Eighteen of us couldn't mive the von")).toEqual([0, 1, 2, 3, 4, 6]);
-    expect(attemptedAnswerWords(van, "Eighteen of us")).toEqual([0, 1, 2, 3]);
+    expect(attemptedAnswerWords(van, "Eighteen of us")).toEqual([0, 1, 2]); // the next word is not typed yet: Enter does not show it
   });
   it("finds all missing and substituted display words without exposing correct words", () => {
     expect(wrongAnswerWords(displayWords("I want to eat some cake"), "I want eat some coke")).toEqual([2, 5]);
@@ -141,5 +141,16 @@ describe("sentence rules and coefficients", () => {
     expect(new Set(xs).size).toBeGreaterThan(10);
     expect(variedLengthScale(1.3, "a:1:1")).toBe(variedLengthScale(1.3, "a:1:1"));
     expect(variedLengthScale(0.9, "z")).toBeGreaterThanOrEqual(0.85);
+  });
+});
+
+describe("Enter does not reveal words the learner has not typed", () => {
+  const s = displayWords("Winning several prizes encouraged him to extend his stay there.");
+  it("keeps the unreached end of the sentence hidden when the typed words are paired with it", () => {
+    const shown = attemptedAnswerWords(s, "Waiting several prizes has encourages him");
+    expect(Math.max(...shown)).toBeLessThanOrEqual(5);
+    expect(shown).not.toContain(8);
+    expect(shown).not.toContain(9);
+    expect(Math.max(...wrongAnswerWords(s, "Waiting several prizes has encourages him"))).toBeLessThanOrEqual(5);
   });
 });

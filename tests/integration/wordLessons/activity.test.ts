@@ -87,8 +87,8 @@ describe("word lesson time", () => {
       const old = await a.inject({ method: "POST", url: "/api/v1/settings", payload: { dailyMinutes: { grammar: 15, vocabulary: 10, words: 5, books: 10, dictation: 5 }, dailyOrder: ["books", "grammar", "vocabulary", "words", "dictation"] } });
       expect(old.statusCode).toBe(200);
       const j = (await a.inject({ url: "/api/v1/journey" })).json();
-      expect(j.dailyMinutes).toEqual({ grammar: 15, vocabulary: 10, words: 5, books: 10, dictation: 5, wordLesson: 5, grammarCloze: 10, conversation: 2.5 });
-      expect(j.dailyOrder).toEqual(["books", "grammar", "vocabulary", "words", "dictation", "wordLesson", "grammarCloze", "conversation"]);
+      expect(j.dailyMinutes).toEqual({ grammar: 15, vocabulary: 10, words: 5, books: 10, dictation: 5, wordLesson: 5, contextLoop: 5, grammarCloze: 10, conversation: 2.5 });
+      expect(j.dailyOrder).toEqual(["books", "grammar", "vocabulary", "words", "dictation", "wordLesson", "contextLoop", "grammarCloze", "conversation"]);
       const upd = await a.inject({ method: "POST", url: "/api/v1/settings", payload: { dailyMinutes: { grammar: 15, vocabulary: 10, words: 5, books: 10, dictation: 5, wordLesson: 8 }, dailyOrder: ["wordLesson", "books", "grammar", "vocabulary", "words", "dictation"] } });
       expect(upd.statusCode).toBe(200);
       const k = (await a.inject({ url: "/api/v1/journey" })).json();

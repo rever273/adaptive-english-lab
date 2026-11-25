@@ -268,3 +268,7 @@ The first commit of this repository was briefly published under the MIT licence;
 ### Review and benchmark materials
 
 Reviewers can use [the content and AI review guidelines](content/review-guidelines.md). Internal development documents and benchmark cases are not included. To run `npm run benchmark:ai`, provide your own reviewed manifest with `--manifest <file>`; the same option is available for `scripts/nimble-tune.mjs` and `scripts/benchmark-review-packet.mjs`. Benchmark labels still require independent review.
+
+### Third-party data
+
+Example sentences in Vocabulary Typing: Tatoeba (tatoeba.org), CC BY 2.0 FR (some sentences CC0). The corpus itself is downloaded locally and is not part of this repository.

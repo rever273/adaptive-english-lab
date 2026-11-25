@@ -4,7 +4,7 @@
  *
  * Two modes:
  *  - once: every word is matched one time; matched buttons stay green and become unclickable.
- *  - rush: every word must be matched `rounds` times (the setting; ROUNDS is the default); a matched pair is replaced by another word's pair, and a word does not come back
+ *  - rush: every word must be matched `rounds` times (the setting; ROUNDS is the default); a matched pair is replaced by another word's pair (its translation lands on a random row, never the row of its English word), and a word does not come back
  *    until about COOLDOWN other pairs were matched (relaxed only when there are too few words to wait that long).
  */
 export type Side = "left" | "right";
@@ -41,7 +41,7 @@ export interface MatchState {
 export type MatchEvent = { kind: 'match'; wordId: string; leftKey: number; rightKey: number } | { kind: 'wrong' } | null;
 
 /** the default repeat count of the rush mode (Settings: Matching game repeats) */
-export const ROUNDS = 4;
+export const ROUNDS = 3;
 export const COOLDOWN = 3;
 export const MAX_ROWS = 5;
 export const MIN_WORDS = 3;
@@ -169,7 +169,26 @@ export function replacePair(state: MatchState, leftKey: number, rightKey: number
             }
         }
     }
-    return { ...state, left: put(state.left, li, pick), right: put(state.right, ri, pick), nextKey };
+    const left = put(state.left, li, pick);
+    let right = put(state.right, ri, pick);
+    if (pick !== null) {
+        // the new word goes to a random row of the right column (a swap with another open button), never the row of its left twin, so the
+        // pair that comes back can not be matched blindly by pressing the same two keys again
+        const row = (cells: Array<Cell | null>, i: number) => cells[i] ?? null;
+        const partner = row(left, ri);
+        const options = right
+            .map((c, t) => ({ c, t }))
+            .filter(({ c, t }) => t !== li && c !== null && (t === ri || (!c.matched && !(partner && !partner.matched && partner.wordId === c.wordId))))
+            .map(({ t }) => t);
+        if (options.length > 0) {
+            const t = options[Math.floor(rng() * options.length)]!;
+            if (t !== ri) {
+                right = [...right];
+                [right[ri], right[t]] = [right[t]!, right[ri]!];
+            }
+        }
+    }
+    return { ...state, left, right, nextKey };
 }
 
 export interface MatchResult {

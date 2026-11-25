@@ -15,7 +15,7 @@ it("preserves previous dictation history and foreign keys through the real-speec
   const dir = path.join(scratch.root, "migrations");
   mkdirSync(dir, { recursive: true });
   const real = path.join(projectRoot, "migrations");
-  for (const file of readdirSync(real).filter((f) => /^\d{3}_.*\.sql$/.test(f) && !f.startsWith("053_"))) copyFileSync(path.join(real, file), path.join(dir, file));
+  for (const file of readdirSync(real).filter((f) => /^\d{3}_.*\.sql$/.test(f) && f < "053_")) copyFileSync(path.join(real, file), path.join(dir, file));
   db = openDatabase(path.join(scratch.root, "test.sqlite"));
   await runMigrations(db, { migrationsDir: dir, appVersion: "test" });
   const t = "2026-01-01T00:00:00.000Z";

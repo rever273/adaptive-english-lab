@@ -11,10 +11,12 @@ export function feedbackSound(feedback: Pick<FeedbackResponse, "state" | "verdic
 }
 
 export type GameSound = "shoot" | "explode" | "fail";
+/** the daily practice goal reached (only the daily goal notice uses it) */
+export type GoalSound = "goal";
 
-const VOLUME: Record<FeedbackSound | "complete" | GameSound, number> = { correct: 0.175, incorrect: 0.175, complete: 0.175, shoot: 0.12, explode: 0.2, fail: 0.2 };
+const VOLUME: Record<FeedbackSound | "complete" | GameSound | GoalSound, number> = { correct: 0.175, incorrect: 0.175, complete: 0.175, shoot: 0.12, explode: 0.2, fail: 0.2, goal: 0.22 };
 
-type Kind = FeedbackSound | "complete" | GameSound;
+type Kind = FeedbackSound | "complete" | GameSound | GoalSound;
 
 // One shared AudioContext and decoded buffers: a new <audio> element per keystroke piles up while typing fast,
 // and the browser then stalls all sounds for a few seconds.
@@ -38,7 +40,8 @@ function buffer(c: AudioContext, kind: Kind): Promise<AudioBuffer | null> {
 }
 
 /** Sound is optional: browser autoplay restrictions or disabled audio must never interrupt practice. */
-export function playPracticeSound(kind: Kind, enabled = true, volume?: number): void {
+/** `rate` above 1 raises the pitch (Grammar Cloze lifts it a little on a run of right answers) */
+export function playPracticeSound(kind: Kind, enabled = true, volume?: number, rate = 1): void {
   if (!enabled) return;
   const gainValue = volume ?? VOLUME[kind];
   try {
@@ -51,6 +54,7 @@ export function playPracticeSound(kind: Kind, enabled = true, volume?: number): 
         const gain = c.createGain();
         gain.gain.value = gainValue;
         src.buffer = b;
+        src.playbackRate.value = rate;
         src.connect(gain).connect(c.destination);
         src.start();
       }).catch(() => {});

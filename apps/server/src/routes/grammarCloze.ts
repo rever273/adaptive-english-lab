@@ -5,13 +5,16 @@ import { ApiError } from "../errors.js";
 import { recordClozeActivity } from "../domain/grammarCloze/activity.js";
 import { clozeAnalytics } from "../domain/grammarCloze/analytics.js";
 import { requestAnalysis, viewOf } from "../domain/grammarCloze/analysis.js";
+import { auditOverview, auditRows, ensureAuditJob, setAuditEnabled, setOverride } from "../domain/grammarCloze/audit.js";
 import { completeSession, excludeItem, markShown, overview, sessionView, startSession, submitAnswer, summary, type Deps } from "../domain/grammarCloze/repository.js";
 
 const idParams = { schema: { params: { type: "object", properties: { id: { type: "string", minLength: 1, maxLength: 80 } }, required: ["id"] } } } as const;
 const id = z.string().min(1).max(80);
 const Start = z.object({ tabId: id }).strict();
 const Shown = z.object({ position: z.number().int().min(1).max(50) }).strict();
-const Answer = z.object({ id: z.string().uuid(), position: z.number().int().min(1).max(50), chosen: z.string().min(1).max(200), responseMs: z.number().min(0).max(3600000).optional() }).strict();
+const Answer = z.object({ id: z.string().uuid(), position: z.number().int().min(1).max(50), chosen: z.string().min(1).max(200), responseMs: z.number().min(0).max(3600000).optional(), hintLevel: z.number().int().min(0).max(2).optional() }).strict();
+const AuditSwitch = z.object({ enabled: z.boolean() }).strict();
+const Override = z.object({ action: z.enum(["restore", "hide"]) }).strict();
 const Exclude = z.object({ sessionId: id.optional(), reason: z.string().max(500).optional() }).strict();
 const Analysis = z.object({ sessionId: id, position: z.number().int().min(1).max(50) }).strict();
 const Activity = z.object({ id: z.string().uuid(), tabId: id, startMs: z.number().int().nonnegative(), endMs: z.number().int().nonnegative() }).strict();
@@ -66,6 +69,24 @@ export function registerGrammarClozeRoutes(app: FastifyInstance, db: Db, deps: D
     return v;
   });
   app.get<{ Params: { id: string } }>("/api/v1/grammar-cloze/analyses/:id", idParams, async (req) => viewOf(db, req.params.id));
+
+  // background check of the bank by the local model (Content Studio)
+  app.get("/api/v1/grammar-cloze/audit", async () => {
+    // a chain stopped by a failed chunk is picked up again while the check is on
+    if (db.transaction(() => ensureAuditJob(db, deps, { fromPoll: true })).immediate()) hooks.onQueued?.();
+    return auditOverview(db);
+  });
+  app.post("/api/v1/grammar-cloze/audit", async (req) => {
+    const v = setAuditEnabled(db, deps, parse(AuditSwitch, req.body).enabled);
+    hooks.onQueued?.();
+    return v;
+  });
+  app.get<{ Querystring: { offset?: string } }>("/api/v1/grammar-cloze/audit/items", async (req) => {
+    const offset = Number(req.query.offset ?? "0");
+    if (!Number.isInteger(offset) || offset < 0 || offset > 1_000_000) throw new ApiError(400, "VALIDATION_ERROR", "offset must be a non-negative integer");
+    return { items: auditRows(db, { limit: 50, offset }) };
+  });
+  app.post<{ Params: { id: string } }>("/api/v1/grammar-cloze/items/:id/audit-override", idParams, async (req) => setOverride(db, deps, req.params.id, parse(Override, req.body).action));
 
   app.get<{ Querystring: { days?: string } }>("/api/v1/grammar-cloze/analytics", async (req) => {
     const days = req.query.days ?? "30";

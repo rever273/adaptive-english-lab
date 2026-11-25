@@ -171,7 +171,7 @@ export function Practice({ category = "grammar", onExit, onNavigate, dailyStart 
         if (cancelled) return;
         let feedback: FeedbackResponse | null = null;
         if (reveal.state === "answered") feedback = await api.fetchFeedback(sessionId, openSlotId).catch(() => null);
-        if (!cancelled) setSlotUi({ ...emptySlot, reveal, feedback });
+        if (!cancelled) setSlotUi({ ...emptySlot, reveal, feedback, hint: reveal.lastHint ?? null });
       } catch (e) {
         if (cancelled) return;
         if (e instanceof ApiRequestError && (e.code === "LEASE_REQUIRED" || e.code === "LEASE_HELD")) setReadOnly("This session is open in another tab, or a closed tab still holds it for up to 90 seconds. This tab continues by itself as soon as the session is free.");
@@ -232,6 +232,21 @@ export function Practice({ category = "grammar", onExit, onNavigate, dailyStart 
     if (next) void start(next.blueprintRevisionId);
   }, [dailyStart, category, view]);
 
+  /** the summary's "Next session": another session of the same kind (the next ready grammar lesson, or a new vocabulary session) */
+  async function nextSession() {
+    if (category === "vocabulary") {
+      try { await api.createVocabSession(); } catch { onExit?.(); return; }
+      await loadDashboard(); // picks up the session just opened
+      return;
+    }
+    try {
+      const d = await api.fetchDashboard();
+      const next = d.blueprints.find(b => b.unlocked && b.completed < MAX_LESSON_PLAYS && b.readySessions > 0);
+      if (next) await start(next.blueprintRevisionId);
+      else await loadDashboard();
+    } catch (e) { await loadDashboard(errorText(e)); }
+  }
+
   async function startCheck(purpose: "diagnostic" | "heldout") {
     try {
       const { snapshot } = await api.createCheckSession(purpose);
@@ -287,7 +302,7 @@ export function Practice({ category = "grammar", onExit, onNavigate, dailyStart 
     setSlotUi((u) => ({ ...u, busy: true, error: null }));
     try {
       const ev = await api.sendEvent(sessionId, slotUi.reveal.slotId, type, letterIndex);
-      if (type === "hint") setSlotUi((u) => ({ ...u, busy: false, hint: ev.hint ?? "No more hints for this exercise." }));
+      if (type === "hint") setSlotUi((u) => ({ ...u, busy: false, hint: ev.hint ?? "No more hints for this exercise.", reveal: u.reveal ? { ...u.reveal, hintsAvailable: Math.max(0, u.reveal.hintsAvailable - 1) } : null }));
       else if (type === "vocabulary_letters") setSlotUi((u) => ({ ...u, busy: false, letters: ev.letters ?? null }));
       else if (type === "vocabulary_translation") setSlotUi((u) => ({ ...u, busy: false, translation: ev.hint ?? "Translation unavailable for this exercise." }));
       else if (type === "reveal_answer") {
@@ -336,7 +351,7 @@ export function Practice({ category = "grammar", onExit, onNavigate, dailyStart 
       const [{ words }, speech, rounds] = await Promise.all([
         api.fetchMatchWords(id),
         api.fetchVocabularySpeech().then((s) => s.enabled && s.configured).catch(() => false),
-        api.fetchSettings().then((s) => s.values.vocabularyMatchRounds ?? 4).catch(() => 4),
+        api.fetchSettings().then((s) => s.values.vocabularyMatchRounds ?? 3).catch(() => 3),
       ]);
       if (words.length >= MIN_WORDS) {
         setMatch({ words, mode: Math.random() < 0.5 ? "once" : "rush", speech, rounds });
@@ -391,7 +406,7 @@ export function Practice({ category = "grammar", onExit, onNavigate, dailyStart 
   if (view.kind === "loading") return <p role="status">Loading…</p>;
 
   if (view.kind === "summary") {
-    return <><DailyGoalCheck mode={category} /><SummaryScreen summary={view.summary} onDone={() => (category === "vocabulary" ? onExit?.() : void loadDashboard())} onNavigate={onNavigate} onDailyDone={onDailyDone} /></>;
+    return <><DailyGoalCheck mode={category} /><SummaryScreen summary={view.summary} onDone={() => (category === "vocabulary" ? onExit?.() : void loadDashboard())} onNavigate={onNavigate} onDailyDone={onDailyDone} onNext={() => void nextSession()} /></>;
   }
 
   if (view.kind === "dashboard") {

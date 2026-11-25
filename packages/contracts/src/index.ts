@@ -108,6 +108,7 @@ export const SettingsV1Schema = z
     explanation: z.enum(["compact", "detailed"]),
     vocabularyShare: z.number().min(0).max(0.25),
     stockWarning: z.number().int().min(1).max(20),
+    vocabularyFocus: z.boolean().optional(),
     vocabularyTaskCount: z.number().int().min(5).max(10).optional(),
     /** D64/TASK_020: at most this many words never practised before enter one vocabulary session (default 4) */
     vocabularyNewWordsPerSession: z.number().int().min(1).max(10).optional(),
@@ -115,6 +116,10 @@ export const SettingsV1Schema = z
     vocabularyMatchRounds: z.number().int().min(1).max(10).optional(),
     /** TASK_032: sentences in one Grammar Cloze session (default 15); applies to the next session */
     clozeTaskCount: z.number().int().min(5).max(50).optional(),
+    /** Grammar Cloze: after a correct answer the next sentence opens by itself; missing means on */
+    clozeAutoAdvance: z.boolean().optional(),
+    /** Grammar Cloze: names of people and places are drawn in a muted colour; missing means on */
+    clozeHighlightNames: z.boolean().optional(),
     /** D67: warm the local model at start and when the learner arrives (default true) */
     preloadModelOnStart: z.boolean().optional(),
     /** Feedback and completion sounds; missing on older revisions means enabled. */
@@ -136,7 +141,9 @@ export const SettingsV1Schema = z
     typingDrillSpeech: z.boolean().optional(),
     /** unused (Key Builder's first fixed target); kept so a saved revision with it stays valid */
     typingKeysTargetCpm: z.number().int().min(75).max(750).optional(),
-    /** Key Builder: the speed you are working towards, WPM; the opening target follows your real speed up to it. Missing means 55 */
+    /** Key Builder (keybr "Target speed"): every open key must reach this speed, WPM, before the next letter opens; raise it by hand. Missing means 40 */
+    typingKeysTargetWpm: z.number().int().min(15).max(150).optional(),
+    /** Key Builder: the speed you are working towards, WPM; only the long-range forecast uses it. Missing means 55 */
     typingKeysGoalWpm: z.number().int().min(20).max(150).optional(),
     /** Key Builder: a key counts as reached only with at least this accuracy, percent; missing means 95 */
     typingKeysMinAccuracy: z.number().int().min(80).max(100).optional(),
@@ -150,14 +157,28 @@ export const SettingsV1Schema = z
     typingDictationSource: z.enum(["real", "tts"]).optional(),
     /** how many saved words the memory check after a Words level offers (0 = no check); missing means 2 */
     typingRecallWords: z.number().int().min(0).max(3).optional(),
-    dailyOrder: z.array(z.enum(["grammar", "vocabulary", "words", "books", "dictation", "wordLesson", "grammarCloze", "conversation"])).min(5).max(8).refine(v => new Set(v).size === v.length).optional(),
+    /** TASK_037: cards in one Context Loop session (missing means 20) and rare typed/spoken checks per session (0-3, missing means 2) */
+    contextLoopCards: z.number().int().min(10).max(40).optional(),
+    contextLoopChecks: z.number().int().min(0).max(3).optional(),
+    /** TASK_038 (D163-D174): Vocabulary Typing; missing means the defaults (batch 20, probes 25%, new 5, cards 20, checks 5, first check after 1 day, retention 0.90, speak word and sentence on) */
+    vtScreeningBatch: z.number().int().min(10).max(40).optional(),
+    vtProbeShare: z.number().min(0).max(0.5).optional(),
+    vtNewPerSession: z.number().int().min(0).max(10).optional(),
+    vtLearningCards: z.number().int().min(10).max(40).optional(),
+    vtChecksPerSession: z.number().int().min(0).max(15).optional(),
+    vtFirstCheckDays: z.number().int().min(1).max(7).optional(),
+    vtRetention: z.number().min(0.8).max(0.97).optional(),
+    vtSpeakWord: z.boolean().optional(),
+    vtSpeakSentence: z.boolean().optional(), vtMinLength: z.number().int().min(2).max(5).optional(), vtSkipTopRanks: z.number().int().min(0).max(1000).optional(),
+    dailyOrder: z.array(z.enum(["grammar", "vocabulary", "words", "books", "dictation", "wordLesson", "grammarCloze", "conversation", "contextLoop", "vocabTyping"])).min(5).max(10).refine(v => new Set(v).size === v.length).optional(),
     journeyHours: z.object({ b2: z.number().int().min(1).max(5000), c1: z.number().int().min(1).max(5000), c2: z.number().int().min(1).max(5000) }).strict().optional(),
-    dailyMinutes: z.object({ grammar: z.number().int().min(0).max(180), vocabulary: z.number().int().min(0).max(180), words: z.number().int().min(0).max(180), books: z.number().int().min(0).max(180), dictation: z.number().int().min(0).max(180), wordLesson: z.number().int().min(0).max(180).optional(), grammarCloze: z.number().int().min(0).max(180).optional(), conversation: z.number().min(0).max(180).multipleOf(0.5).optional() }).strict().optional(),
+    dailyMinutes: z.object({ grammar: z.number().int().min(0).max(180), vocabulary: z.number().int().min(0).max(180), words: z.number().int().min(0).max(180), books: z.number().int().min(0).max(180), dictation: z.number().int().min(0).max(180), wordLesson: z.number().int().min(0).max(180).optional(), grammarCloze: z.number().int().min(0).max(180).optional(), conversation: z.number().min(0).max(180).multipleOf(0.5).optional(), contextLoop: z.number().int().min(0).max(180).optional(), vocabTyping: z.number().int().min(0).max(180).optional() }).strict().optional(),
   })
   .strict();
 export type SettingsV1 = z.infer<typeof SettingsV1Schema>;
 
 /** Older settings revisions predate vocabulary sessions. */
+export const vocabularyFocusEnabled = (v: Pick<SettingsV1, "vocabularyFocus">): boolean => v.vocabularyFocus ?? true;
 export const vocabularyTaskCount = (v: Pick<SettingsV1, "vocabularyTaskCount">): number => v.vocabularyTaskCount ?? 8;
 
 /** TASK_032: sentences per Grammar Cloze session; missing on older revisions means 15. */
@@ -169,7 +190,7 @@ export const reviewNoticeThreshold = (v: Pick<SettingsV1, "reviewNoticeThreshold
 
 export const vocabularyNewWordsPerSession = (v: Pick<SettingsV1, "vocabularyNewWordsPerSession">): number => v.vocabularyNewWordsPerSession ?? 4;
 
-export const vocabularyMatchRounds = (v: Pick<SettingsV1, "vocabularyMatchRounds">): number => v.vocabularyMatchRounds ?? 4;
+export const vocabularyMatchRounds = (v: Pick<SettingsV1, "vocabularyMatchRounds">): number => v.vocabularyMatchRounds ?? 3;
 
 export const typingWordsPerLevel = (v: Pick<SettingsV1, "typingWordsPerLevel">): number => v.typingWordsPerLevel ?? 30;
 
@@ -180,6 +201,23 @@ export const typingVocabularyShare = (v: Pick<SettingsV1, "typingVocabularyShare
 export const typingSpeedMultiplier = (v: Pick<SettingsV1, "typingSpeedMultiplier">): number => v.typingSpeedMultiplier ?? 1.05;
 
 export const typingBookMinutes = (v: Pick<SettingsV1, "typingBookMinutes">): number => v.typingBookMinutes ?? 5;
+
+export const contextLoopCards = (v: Pick<SettingsV1, "contextLoopCards">): number => v.contextLoopCards ?? 20;
+
+export const contextLoopChecks = (v: Pick<SettingsV1, "contextLoopChecks">): number => v.contextLoopChecks ?? 2;
+
+/** TASK_038 (D163-D174): Vocabulary Typing settings with their defaults */
+export const vocabTypingSettings = (v: Partial<Pick<SettingsV1, "vtScreeningBatch" | "vtProbeShare" | "vtNewPerSession" | "vtLearningCards" | "vtChecksPerSession" | "vtFirstCheckDays" | "vtRetention" | "vtSpeakWord" | "vtSpeakSentence" | "vtMinLength" | "vtSkipTopRanks">>) => ({ minLength: v.vtMinLength ?? 3, skipTopRanks: v.vtSkipTopRanks ?? 300,
+  screeningBatch: v.vtScreeningBatch ?? 20,
+  probeShare: v.vtProbeShare ?? 0.25,
+  newPerSession: v.vtNewPerSession ?? 5,
+  learningCards: v.vtLearningCards ?? 20,
+  checksPerSession: v.vtChecksPerSession ?? 5,
+  firstCheckDays: v.vtFirstCheckDays ?? 1,
+  retention: v.vtRetention ?? 0.9,
+  speakWord: v.vtSpeakWord ?? true,
+  speakSentence: v.vtSpeakSentence ?? true,
+});
 
 export const typingRecallWords = (v: Pick<SettingsV1, "typingRecallWords">): number => v.typingRecallWords ?? 2;
 
@@ -226,3 +264,5 @@ export * from "./dictationCheck.js";
 export * from "./voices.js";
 export * from "./wordLessons.js";
 export * from "./grammarCloze.js";
+export * from "./contextLoop.js";
+export * from "./vocabTyping.js";

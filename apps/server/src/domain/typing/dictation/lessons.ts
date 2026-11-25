@@ -28,6 +28,7 @@ import { isCorrect, rawTokens, tokenize, wordDistance } from "./check.js";
 import { attemptedAnswerWords, displayWords, revealedSet, stuckWord, wrongAnswerWords } from "./hints.js";
 import { loadRealClips, type RealSpeechConfig } from "./realSpeech.js";
 import { dictationFingerprint } from "./check.js";
+import { answerLetterFacts } from "./keyFacts.js";
 import { fingerprintOf, normalizeSentence } from "../../content/normalize.js";
 
 /** Everything the dictation mode needs from outside the database. Tests replace the clients with fakes. */
@@ -143,9 +144,12 @@ const openLesson = (db: Db): LessonRow | undefined => db.prepare("SELECT * FROM 
 
 export function unusedRealClips(db: Db, config: RealSpeechConfig) {
   const seen = new Set<string>();
+  const inExercises = db.prepare("SELECT 1 FROM typing_dictation_exercises WHERE fingerprint = ?");
+  const inPool = db.prepare("SELECT 1 FROM typing_dictation_pool WHERE fingerprint = ?");
+  const inPrompts = db.prepare("SELECT 1 FROM prompt_units WHERE fingerprint = ? LIMIT 1");
   return loadRealClips(config).filter((c) => {
     const fp = dictationFingerprint(c.text);
-    if (seen.has(fp) || db.prepare("SELECT 1 FROM typing_dictation_exercises WHERE fingerprint = ?").get(fp) || db.prepare("SELECT 1 FROM typing_dictation_pool WHERE fingerprint = ?").get(fp) || db.prepare("SELECT 1 FROM prompt_units WHERE fingerprint = ? LIMIT 1").get(fingerprintOf(normalizeSentence(c.text)))) return false;
+    if (seen.has(fp) || inExercises.get(fp) || inPool.get(fp) || inPrompts.get(fingerprintOf(normalizeSentence(c.text)))) return false;
     seen.add(fp);
     return true;
   });
@@ -157,7 +161,8 @@ export function dictationOverview(db: Db, env: DictationEnv): DictationOverview 
   const source = loadSettings(db).values.typingDictationSource ?? (env.realSpeech ? "real" : "tts");
   let availableReal = false;
   if (source === "real" && !open && env.realSpeech) {
-    availableReal = unusedRealClips(db, env.realSpeech).length >= typingDictationExercisesPerLesson(loadSettings(db).values);
+    const perLesson = typingDictationExercisesPerLesson(loadSettings(db).values);
+    availableReal = unusedRealClips(db, env.realSpeech).length >= perLesson - realRepeatCandidates(db, Math.floor(perLesson / REPEAT_EVERY)).length;
   }
   const openIsReal = !!open && !!db.prepare("SELECT 1 FROM typing_dictation_exercises WHERE lesson_id = ? AND source = 'real' LIMIT 1").get(open.id);
   const a = openIsReal ? { available: true, reason: null } : source === "real" && !open ? { available: availableReal, reason: availableReal ? null : "real_speech_unavailable" as const } : dictationAvailability(env);
@@ -195,6 +200,35 @@ export function prepareTracks(db: Db, deps: Deps, env: DictationEnv, count: numb
       return { queued: count };
     })
     .immediate();
+}
+
+/**
+ * Real recordings come back only while they are not mastered: the first time the sentence took more than one mistake, or its answer was
+ * shown. A sentence typed cleanly (no mistakes, no hints) never returns. It stays in the pool, now and then (not in the last two levels,
+ * not when it came back recently), until a marked repeat of it is typed with no mistake, no hint and no shown answer.
+ */
+/** `recentLevels`: a sentence that came back in one of this many latest levels is left alone (tests pass a negative number to look at mastery only) */
+export function realRepeatCandidates(db: Db, limit: number, recentLevels = 1): Array<{ id: string }> {
+  if (limit <= 0) return [];
+  return db
+    .prepare(
+      `SELECT e.id AS id FROM typing_dictation_exercises e
+        JOIN typing_dictation_lessons l ON l.id = e.lesson_id AND l.status = 'completed'
+       WHERE e.repeat_of IS NULL
+         AND e.source = 'real'
+         AND ((SELECT COALESCE(SUM(a.word_errors), 0) FROM typing_dictation_attempts a WHERE a.exercise_id = e.id AND a.correct = 0) > 1
+              OR EXISTS (SELECT 1 FROM typing_dictation_events v WHERE v.exercise_id = e.id AND v.reveal_all = 1))
+         AND NOT EXISTS (SELECT 1 FROM typing_dictation_exercises m
+                          WHERE m.repeat_of = e.id
+                            AND EXISTS (SELECT 1 FROM typing_dictation_attempts c WHERE c.exercise_id = m.id AND c.correct = 1)
+                            AND NOT EXISTS (SELECT 1 FROM typing_dictation_attempts w WHERE w.exercise_id = m.id AND w.correct = 0 AND w.word_errors > 0)
+                            AND NOT EXISTS (SELECT 1 FROM typing_dictation_events h WHERE h.exercise_id = m.id AND (h.kind = 'hint' OR h.reveal_all = 1)))
+         AND NOT EXISTS (SELECT 1 FROM typing_dictation_exercises r JOIN typing_dictation_lessons rl ON rl.id = r.lesson_id
+                          WHERE r.repeat_of = e.id AND rl.level_number >= (SELECT MAX(level_number) - ? FROM typing_dictation_lessons))
+       ORDER BY (SELECT COALESCE(SUM(a.word_errors), 0) FROM typing_dictation_attempts a WHERE a.exercise_id = e.id AND a.correct = 0) DESC, e.created_at ASC
+       LIMIT ?`,
+    )
+    .all(recentLevels, limit) as Array<{ id: string }>;
 }
 
 /** earlier sentences that were answered with mistakes or shown, worth repeating now and then; never one that already came back recently */
@@ -238,13 +272,39 @@ export function createLesson(db: Db, deps: Deps, env: DictationEnv): DictationLe
     return db.transaction(() => {
       const again = openLesson(db);
       if (again) return summary(db, again);
-      const selected = unusedRealClips(db, config).slice(0, count);
-      if (selected.length < count) throw new ApiError(409, "TYPING_DICTATION_REAL_SHORTAGE", `Only ${selected.length} checked real-speech sentences remain; ${count} are needed.`);
+      // a few sentences that were not mastered come back as marked repeats (never in the first two places); the rest are new recordings
+      const repeats = realRepeatCandidates(db, Math.floor(count / REPEAT_EVERY));
+      const selected = unusedRealClips(db, config).slice(0, count - repeats.length);
+      if (selected.length < count - repeats.length) throw new ApiError(409, "TYPING_DICTATION_REAL_SHORTAGE", `Only ${selected.length} checked real-speech sentences remain; ${count - repeats.length} are needed.`);
+      const rand = mulberry32(level * 104729 + count);
+      const spots = Array.from({ length: Math.max(0, count - 2) }, (_, k) => k + 2);
+      for (let i = spots.length - 1; i > 0; i--) {
+        const j = Math.floor(rand() * (i + 1));
+        [spots[i], spots[j]] = [spots[j]!, spots[i]!];
+      }
+      const repeatAt = new Map<number, string>(repeats.map((x, k) => [spots[k]!, x.id] as [number, string]));
+      const slots: Array<{ repeat: string } | { clip: (typeof selected)[number] }> = [];
+      let nextClip = 0;
+      for (let ordinal = 0; ordinal < count; ordinal++) {
+        const rep = repeatAt.get(ordinal);
+        slots.push(rep ? { repeat: rep } : { clip: selected[nextClip++]! });
+      }
       const id = deps.newId();
       const plan: LessonPlan = { version: 1, voicesVersion: 0, items: [] };
       db.prepare("INSERT INTO typing_dictation_lessons(id, level_number, status, exercise_count, settings_revision, settings_json, plan_json, generation_attempt, created_at) VALUES (?,?,?,?,?,?,?,?,?)").run(id, level, "generating", count, settings.revision, JSON.stringify(settings.values), JSON.stringify(plan), 1, asOf);
       mkdirSync(env.audioDir, { recursive: true });
-      selected.forEach((c, ordinal) => {
+      slots.forEach((slot, ordinal) => {
+        if ("repeat" in slot) {
+          const o = db.prepare(`SELECT ${EXERCISE_COLUMNS} FROM typing_dictation_exercises WHERE id = ?`).get(slot.repeat) as Record<string, unknown>;
+          const prov = db.prepare("SELECT corpus, sentence_id, clip_file, audio_sha256, validation_json FROM typing_dictation_real_provenance WHERE exercise_id = ?").get(slot.repeat) as { corpus: string; sentence_id: string; clip_file: string; audio_sha256: string; validation_json: string } | undefined;
+          if (!prov) throw new ApiError(409, "TYPING_DICTATION_AUDIO_CHANGED", "A repeated real recording has lost its provenance");
+          const repId = deps.newId();
+          db.prepare(`INSERT INTO typing_dictation_exercises(id, lesson_id, ordinal, text_en, translation_ru, topic, target_skill_id, word_count, fingerprint, source, voice_id, voice_name, length_scale, tts_model_sha256, audio_file, audio_ms, asr_model, asr_text, status, job_result_id, created_at, repeat_of)
+            VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)`).run(repId, id, ordinal, o.text_en, o.translation_ru, o.topic, o.target_skill_id, o.word_count, `${String(o.fingerprint)}:r:${id}`, "real", null, null, null, null, o.audio_file, o.audio_ms, o.asr_model, o.asr_text, "validated", null, asOf, slot.repeat);
+          db.prepare("INSERT INTO typing_dictation_real_provenance(exercise_id, corpus, sentence_id, clip_file, audio_sha256, validation_json, created_at) VALUES (?,?,?,?,?,?,?)").run(repId, prov.corpus, prov.sentence_id, prov.clip_file, prov.audio_sha256, prov.validation_json, asOf);
+          return;
+        }
+        const c = slot.clip;
         const exId = deps.newId();
         const filename = `real-${c.sha256}.mp3`;
         const dest = path.join(env.audioDir, filename);
@@ -597,7 +657,7 @@ function answerResponse(db: Db, e: ExerciseRow, attempt: AttemptRow): DictationA
   return { correct, xpAwarded: correct ? (xp?.amount ?? 0) : 0, lessonCompleted: correct && lesson.status === "completed", hintLevel: view.hintLevel, words: correct ? wordsFor(e.text_en, "all") : view.words, nextOrdinal: correct ? next : e.ordinal };
 }
 
-export function submitAnswer(db: Db, deps: Deps, exerciseId: string, input: { attemptId: string; text: string; activeMs: number; typingMs?: number | undefined; keystrokes?: number | undefined }): DictationAnswerResponse {
+export function submitAnswer(db: Db, deps: Deps, exerciseId: string, input: { attemptId: string; text: string; activeMs: number; typingMs?: number | undefined; keystrokes?: number | undefined; keyTimes?: ReadonlyArray<{ letter: string; ms: number; timed: number }> | undefined }): DictationAnswerResponse {
   return db
     .transaction((): DictationAnswerResponse => {
       const e = exerciseRow(db, exerciseId);
@@ -630,6 +690,17 @@ export function submitAnswer(db: Db, deps: Deps, exerciseId: string, input: { at
         input.keystrokes ?? null,
         now,
       );
+      // per-key facts for the Keys analytics: hits and misses from the answer, timing from the page
+      const letterFacts = answerLetterFacts(exercise.text_en, input.text);
+      const timing = new Map((input.keyTimes ?? []).map((k) => [k.letter, k]));
+      const putKey = db.prepare("INSERT INTO typing_dictation_keys(id, attempt_id, letter, hits, misses, total_ms, timed) VALUES (?,?,?,?,?,?,?)");
+      for (const letter of new Set([...letterFacts.keys(), ...timing.keys()])) {
+        const f = letterFacts.get(letter) ?? { hits: 0, misses: 0 };
+        const t = timing.get(letter);
+        if (f.hits + f.misses === 0) continue;
+        const timed = t ? Math.min(t.timed, f.hits + f.misses) : 0;
+        putKey.run(deps.newId(), input.attemptId, letter, f.hits, f.misses, t && t.timed > 0 ? Math.round((t.ms * timed) / t.timed) : 0, timed);
+      }
       if (input.activeMs > lesson.active_ms) db.prepare("UPDATE typing_dictation_lessons SET active_ms = ? WHERE id = ?").run(input.activeMs, lesson.id);
       if (!correct) {
         writeHint(db, deps, exercise, input.text, "wrong_answer");

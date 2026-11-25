@@ -14,6 +14,8 @@ export interface ClozeStageView {
   rulesPresent: number;
   rulesTouched: number;
   rulesCompleted: number;
+  /** sentences the background check hid and that were never answered in this stage: they are not in `total` */
+  hiddenByCheck: number;
   excluded: number;
   /** wrong answers of this stage that wait for the next one */
   carriedToNext: number;
@@ -45,6 +47,20 @@ export interface ClozeSlotView {
   /** only after the answer or the exclusion */
   chosen?: string;
   correct?: string;
+  /** help shown before the answer (0 none, 1 signal words, 2 rule name); only after the answer */
+  hintLevel?: number;
+  /** the background check of this sentence, when it has run: words that signal the answer and proper names (never the answer itself) */
+  cues?: string[];
+  names?: string[];
+  /** the short reason of the background check; only after the answer */
+  reasonRu?: string;
+}
+
+/** the theme of a session (cloze-select-v2); older sessions have none */
+export interface ClozeSessionPlan {
+  focus: string;
+  focusName: string;
+  review: string[];
 }
 
 export interface ClozeSessionView {
@@ -57,6 +73,7 @@ export interface ClozeSessionView {
   excluded: number;
   slots: ClozeSlotView[];
   nextPosition: number | null;
+  plan: ClozeSessionPlan | null;
 }
 
 export interface ClozeAnswerResult {
@@ -92,6 +109,46 @@ export interface ClozeAnalysisResult {
   explanation_ru: string;
   caution_ru: string;
 }
+export type ClozeAuditVerdict = ClozeAnalysisResult["verdict"];
+/** the background check of one sentence (grammar-cloze-audit-v1); advisory, it only hides doubtful sentences from new sessions */
+export interface ClozeAuditResult {
+  verdict: ClozeAuditVerdict;
+  other_correct: string[];
+  reason_ru: string;
+  cues: string[];
+  names: string[];
+}
+export interface ClozeAuditOverview {
+  enabled: boolean;
+  /** the open background job: null when none */
+  job: { state: string; reason: string | null } | null;
+  /** sentences of the active source that can be checked (validated, not excluded) */
+  total: number;
+  checked: number;
+  ok: number;
+  /** hidden by a check (without the learner's restores) or by hand */
+  hidden: number;
+  /** of `hidden`: already answered in Stage 1 (they stay in its progress) */
+  hiddenAnswered: number;
+  byVerdict: Record<string, number>;
+  failed: number;
+  restored: number;
+  remaining: number;
+}
+export interface ClozeAuditRow {
+  itemId: string;
+  gappedText: string;
+  solution: string;
+  options: string[];
+  verdict: string;
+  otherCorrect: string[];
+  reasonRu: string;
+  /** the learner's decision, if any */
+  override: "restore" | "hide" | null;
+  hidden: boolean;
+  checkedAt: string;
+}
+
 export interface ClozeAnalysisView {
   id: string;
   status: "pending" | "done" | "failed";

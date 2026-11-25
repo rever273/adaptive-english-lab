@@ -1,4 +1,4 @@
-import { alignWords, mergeContractions, rawTokens, sameWord, tokenize } from "./check.js";
+import { alignWords, mergeContractions, rawTokens, sameWord, tokenize, type DiffOp } from "./check.js";
 
 /** a word as written in the sentence ("well-known," -> parts ["well", "known"]) */
 export interface DisplayWord {
@@ -13,7 +13,23 @@ export function displayWords(text: string): DisplayWord[] {
     .map((display) => ({ display, parts: rawTokens(display) }));
 }
 
-/** Display words missing or substituted in an answer, using the same alignment as grading. */
+/**
+ * Enter only checks: a word the learner has not reached is never revealed by a wrong answer, even when the alignment pairs the last typed words with
+ * the end of the sentence. A word counts as reached up to the last word typed right, plus one more per word typed after it. Words further on are only
+ * shown by Hint and Show answer.
+ */
+function reachedWords(expected: ReadonlyArray<{ owner: number }>, ops: readonly DiffOp[]): number {
+  let at = 0;
+  let anchor = -1;
+  let typedAfter = 0;
+  for (const op of ops) {
+    if (op.expected !== null) at++;
+    if (op.op === "same") { anchor = expected[at - 1]!.owner; typedAfter = 0; } else if (op.typed !== null) typedAfter++;
+  }
+  return anchor + 1 + typedAfter;
+}
+
+/** Display words missing or substituted in an answer, using the same alignment as grading, among the words the learner has reached. */
 export function wrongAnswerWords(words: readonly DisplayWord[], typedText: string): number[] {
   const expected = mergeContractions(words.flatMap((w, owner) => w.parts.map((tok) => ({ tok, owner }))));
   const ops = alignWords(expected.map((w) => w.tok), tokenize(typedText)).ops;
@@ -25,7 +41,8 @@ export function wrongAnswerWords(words: readonly DisplayWord[], typedText: strin
       i++;
     }
   }
-  return [...wrong];
+  const reach = reachedWords(expected, ops);
+  return [...wrong].filter((i) => i < reach);
 }
 
 /** Show the prefix through the first error, plus other errors in the attempted portion. */
@@ -49,7 +66,7 @@ export function attemptedAnswerWords(words: readonly DisplayWord[], typedText: s
   if (wrong.size === 0 && firstExtraAfter === undefined && lastTyped >= 0 && expectedIndex < expected.length) wrong.add(expected[expectedIndex]!.owner);
   const firstWrong = Math.min(...wrong, firstExtraAfter ?? Infinity);
   if (!Number.isFinite(firstWrong)) return [];
-  return [...new Set([...Array.from({ length: firstWrong + 1 }, (_, i) => i), ...wrong])].sort((a, b) => a - b);
+  return [...new Set([...Array.from({ length: firstWrong + 1 }, (_, i) => i), ...wrong])].filter((i) => i < reachedWords(expected, ops)).sort((a, b) => a - b);
 }
 
 /** index of the first display word that differs from what was typed; null when everything matches */

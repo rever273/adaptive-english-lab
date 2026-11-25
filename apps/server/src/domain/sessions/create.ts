@@ -4,7 +4,7 @@ import {
   DEFAULT_QUOTAS,
   DISCOVERY_V1,
   GRAMMAR_REPEAT_CONFIG,
-  GRAMMAR_SELECTION_V4,
+  GRAMMAR_SELECTION_V5,
   SELECTION_VERSION,
   canonicalJson,
   clampMultiplier,
@@ -40,13 +40,13 @@ export interface CreateOptions {
 
 /** Version the expanded search separately; earlier session records remain unchanged. */
 export function ensureSelectionVersion(db: Db, deps: SessionDeps, discovery: DiscoveryConfig): string {
-  const cfg = { version: GRAMMAR_SELECTION_V4, base: SELECTION_VERSION, defaultQuotas: DEFAULT_QUOTAS, familyCap: 0.35, formatCap: 0.4, discovery: discovery.version, repeats: GRAMMAR_REPEAT_CONFIG };
+  const cfg = { version: GRAMMAR_SELECTION_V5, base: SELECTION_VERSION, defaultQuotas: DEFAULT_QUOTAS, familyCap: 0.35, formatCap: 0.4, discovery: discovery.version, repeats: GRAMMAR_REPEAT_CONFIG, extraNoMistakePenalty: 3 };
   const json = canonicalJson(cfg);
   const hash = sha256(json);
-  const row = db.prepare("SELECT config_hash AS h FROM algorithm_versions WHERE id = ?").get(GRAMMAR_SELECTION_V4) as { h: string } | undefined;
-  if (row) return GRAMMAR_SELECTION_V4;
-  db.prepare("INSERT INTO algorithm_versions(id, config_json, config_hash, source_version, created_at) VALUES (?,?,?,?,?)").run(GRAMMAR_SELECTION_V4, json, hash, "packages/learning@0.1.0", deps.now().toISOString());
-  return GRAMMAR_SELECTION_V4;
+  const row = db.prepare("SELECT config_hash AS h FROM algorithm_versions WHERE id = ?").get(GRAMMAR_SELECTION_V5) as { h: string } | undefined;
+  if (row) return GRAMMAR_SELECTION_V5;
+  db.prepare("INSERT INTO algorithm_versions(id, config_json, config_hash, source_version, created_at) VALUES (?,?,?,?,?)").run(GRAMMAR_SELECTION_V5, json, hash, "packages/learning@0.1.0", deps.now().toISOString());
+  return GRAMMAR_SELECTION_V5;
 }
 
 /** What the allocator needs from the bank, reused by readiness simulation. */
@@ -65,6 +65,7 @@ export function solveForBank(args: {
   const quotas = scaleQuotas(args.policy.quotas, args.n);
   const exploreSlots = args.n - Math.round(args.n * args.weakRatio);
   const result = selectSession({
+    preferSingleNoMistake: true,
     n: args.n,
     weakRatio: args.weakRatio,
     voiceTarget: args.voiceTarget,

@@ -106,6 +106,23 @@ export interface VocabAnalytics {
   words: Array<{ lemma: string; attempts: number; misses: number; lastSeen: string; lastResult: string | null }>;
   retention: Rate;
   repeats?: { count: number; correct: number; miss: number; assisted: number; pending: number };
+  progress: VocabProgress;
+}
+
+/** vocabulary-progress-v1: saved words over time and per-word strength tracks (all three vocabulary modes) */
+export interface VocabProgress {
+  version: string;
+  strengthVersion: string;
+  strong: number;
+  grouping: "day" | "week";
+  points: Array<{ date: string; total: number; notStarted: number; learning: number; strong: number; markedLearned: number; right: number; missed: number; words: number }>;
+  bands: Array<{ from: number; to: number; words: number }>;
+  practisedWords: number;
+  groups: Record<"active" | "weak" | "recent", string[]>;
+  tracks: Array<{ entryId: string; lemma: string; strength: Array<number | null>; right: number[]; missed: number[]; now: number; evidence: number; timeMs: number }>;
+  modes: Array<{ source: "practice" | "oneWord" | "contextLoop" | "checks"; answers: number; right: number; words: number; timeMs: number }>;
+  timeTop: Array<{ entryId: string; lemma: string; timeMs: number; answers: number }>;
+  timeTotalMs: number;
 }
 
 export const fetchVocabAnalytics = (days: "7" | "30" | "90" | "all") =>
@@ -114,13 +131,30 @@ export const fetchVocabAnalytics = (days: "7" | "30" | "90" | "all") =>
 
 export const announceXp = () => window.dispatchEvent(new Event("el:xp"));
 
-export type JourneyMode = "grammar" | "vocabulary" | "words" | "books" | "dictation" | "wordLesson" | "grammarCloze" | "conversation";
+export type JourneyMode = "grammar" | "vocabulary" | "words" | "books" | "dictation" | "wordLesson" | "grammarCloze" | "conversation" | "contextLoop" | "vocabTyping";
 
 export type JourneyData = { version: string; timezone: string; today: string; totals: Record<JourneyMode, number>; todayMs: Record<JourneyMode, number>; activeDays: number; journeyHours: {b2:number;c1:number;c2:number}; dailyMinutes: Record<JourneyMode,number>; dailyOrder: JourneyMode[]; bookMinutes:number };
 
 export const fetchJourney = () => send("GET", "/api/v1/journey", typed<JourneyData>());
 
-export type ConversationAnalyticsData = { conversations:number; answers:number; activeMs:number; sentences:number; availableAnswers:number; good:number; suggestions:number; unclassified:number; deletedSessions:number; series:Array<{startedAt:string;answers:number;activeMs:number;good:number;suggestions:number}>; sessions:Array<{topic:string;startedAt:string;updatedAt:string;activeMs:number;answers:number;historyDeleted:number}> };
+export type ConversationAnalyticsData = { conversations:number; answers:number; activeMs:number; sentences:number; availableAnswers:number; good:number; suggestions:number; unclassified:number; deletedSessions:number; series:Array<{startedAt:string;answers:number;activeMs:number;good:number;suggestions:number}>; sessions:Array<{topic:string;startedAt:string;updatedAt:string;activeMs:number;answers:number;historyDeleted:number}>; insights: ConversationInsights };
+
+/** conversation-insights-v1: counted from the retained answers plus the tentative local-model figures stored with them */
+export interface ConversationInsights {
+  version: string;
+  answers: number;
+  totalWords: number;
+  distinctWords: number;
+  wordsPerAnswer: number | null;
+  longest: number;
+  savedWordsUsed: number;
+  savedWords: number;
+  levels: { ok: number; tip: number; error: number };
+  issues: Record<"grammar" | "vocabulary" | "spelling" | "word_order" | "naturalness", number>;
+  cefr: Record<"A1" | "A2" | "B1" | "B2" | "C1" | "C2", number>;
+  skills: Array<{ id: string; label: string; count: number }>;
+  perConversation: Array<{ startedAt: string; topic: string; answers: number; wordsPerAnswer: number | null; longest: number | null; distinctWords: number; savedWordsUsed: number; replyMedianMs: number | null; cefr: number | null; levels: { ok: number; tip: number; error: number } }>;
+}
 
 export const fetchConversationAnalytics = (days: "7" | "30" | "90" | "all") => send("GET", `/api/v1/analytics/conversation?days=${days}`, typed<ConversationAnalyticsData>());
 

@@ -1,6 +1,7 @@
 /** Prompts and JSON shapes of Single Word Context Practice (TASK_031). Pure text: no imports, so the prompt registry can use it. */
 
 export const WORD_LESSON_PROMPT = "word-lesson-v13";
+export const WORD_LESSON_PROMPT_V2 = "word-lesson-v14";
 export const WORD_LESSON_REVIEW_PROMPT = "word-lesson-review-v5";
 export const WORD_LESSON_PAIRS_PROMPT = "word-lesson-pairs-v3";
 export const WORD_LESSON_SENSE_PROMPT = "word-lesson-sense-v1";
@@ -137,6 +138,13 @@ export function checkFormat(): object {
 }
 
 /** the one JSON the prompt registry hashes for a prompt id */
+export const WORD_LESSON_SYSTEM_V2 = WORD_LESSON_SYSTEM_V1
+  .replace("the first half of expected_en, whole words, at least two words shorter than expected_en", "a brief Russian cue about the rule with placeholders")
+  .replace("first half of expected_en, whole words, at least two words shorter", "a brief Russian cue about the rule with placeholders")
+  .replace(/an everyday scene in one or two complete sentences[^;]+;/, "one direct question or instruction of 3 to 10 words;")
+  .replace("the first half of sample_en, whole words, at least two words shorter", "a brief Russian suggestion for what to say")
+  + "\nThe stage_requirements_override field specifies the requirements for this version. Use the planned construction and its exact supplied name for every stage 3 and 4 item.";
+
 export const wordLessonSchemaText = (): string => JSON.stringify({ stage12: stage12Format(), stage3: stage3Format(), stage4: stage4Format(), stage5: stage5Format() });
 export const wordLessonReviewSchemaText = (): string => JSON.stringify(reviewFormat());
 export const wordLessonPairsSchemaText = (): string => JSON.stringify(pairsFormat());

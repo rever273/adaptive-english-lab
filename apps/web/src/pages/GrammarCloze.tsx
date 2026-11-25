@@ -1,4 +1,5 @@
-import { useCallback, useEffect, useRef, useState } from 'react';
+import { useCallback, useEffect, useRef, useState, type ReactNode } from 'react';
+import { fmtDuration } from "../format";
 import * as api from '../api';
 import { DailyGoalCheck } from '../components/DailyGoalNotice';
 import { HOTKEYS, Kbd, isPressable, isTextField, useEnterContinue, useKeys } from '../components/hotkeys';
@@ -25,6 +26,10 @@ function tabId(): string {
 const errorText = (e: unknown): string => (e instanceof api.ApiRequestError ? e.message : e instanceof Error ? e.message : 'Something went wrong.');
 const level = (n: number): string => `L${String(n).padStart(2, '0')}`;
 
+type Prefs = { sounds: boolean; autoAdvance: boolean; names: boolean };
+/** after a correct answer the next sentence opens by itself after this long (Settings can turn it off) */
+const AUTO_ADVANCE_MS = 1200;
+
 type Screen = { kind: 'overview' } | { kind: 'session'; session: api.ClozeSessionView } | { kind: 'summary'; summary: api.ClozeSummary };
 
 /** Grammar Cloze / Sentence Survival (TASK_032): Stage 1 plays; later stages are shown, not playable yet. */
@@ -32,7 +37,7 @@ export function GrammarCloze({ dailyStart = false, onDailyDone }: { dailyStart?:
     const [screen, setScreen] = useState<Screen>({ kind: 'overview' });
     const [overview, setOverview] = useState<api.ClozeOverview | null>(null);
     const [error, setError] = useState<string | null>(null);
-    const [sounds, setSounds] = useState(true);
+    const [prefs, setPrefs] = useState<Prefs>({ sounds: true, autoAdvance: true, names: true });
     const tab = useRef(tabId());
     const loadOverview = useCallback(async () => {
         try {
@@ -51,7 +56,12 @@ export function GrammarCloze({ dailyStart = false, onDailyDone }: { dailyStart?:
             void api
                 .fetchSettings()
                 .then((s) => {
-                    if (active) setSounds(s.values.practiceSoundsEnabled ?? true);
+                    if (active)
+                        setPrefs({
+                            sounds: s.values.practiceSoundsEnabled ?? true,
+                            autoAdvance: s.values.clozeAutoAdvance ?? true,
+                            names: s.values.clozeHighlightNames ?? true,
+                        });
                 })
                 .catch(() => undefined);
         };
@@ -79,20 +89,16 @@ export function GrammarCloze({ dailyStart = false, onDailyDone }: { dailyStart?:
         if (overview.stages[0]?.ready || overview.activeSession) void start();
     }, [dailyStart, overview, start]);
 
-    // Enter on the final statistics continues: the daily practice, else the next session when there is one, else the stages
+    // Enter on the final statistics continues THIS training: the next session when there is one (never the daily practice or the stages)
     const summary = screen.kind === 'summary' ? screen.summary : null;
-    useEnterContinue(
-        summary
-            ? onDailyDone ?? (summary.stageProgress.ready ? () => void start() : () => setScreen({ kind: 'overview' }))
-            : null,
-    );
+    useEnterContinue(summary?.stageProgress.ready ? () => void start() : null);
 
     if (screen.kind === 'session') {
         return (
             <ClozeSession
                 initial={screen.session}
                 tab={tab.current}
-                sounds={sounds}
+                prefs={prefs}
                 onExit={() => {
                     setScreen({ kind: 'overview' });
                     void loadOverview();
@@ -117,8 +123,8 @@ export function GrammarCloze({ dailyStart = false, onDailyDone }: { dailyStart?:
                         </button>
                     )}
                     {s.stageProgress.ready && (
-                        <button className="btn btn-primary" onClick={() => void start()} data-testid="cloze-next">
-                            Next session ({level(s.levelNo + 1)})
+                        <button className="btn btn-primary has-kbd" onClick={() => void start()} data-testid="cloze-next">
+                            <kbd>Enter</kbd> Next session ({level(s.levelNo + 1)})
                         </button>
                     )}
                     <button className="btn" onClick={() => setScreen({ kind: 'overview' })}>
@@ -140,7 +146,7 @@ export function GrammarCloze({ dailyStart = false, onDailyDone }: { dailyStart?:
                         cls="info"
                         icon="pi-clock"
                         label="Active time"
-                        value={`${Math.floor(s.activeMs / 60000)}:${String(Math.floor((s.activeMs % 60000) / 1000)).padStart(2, '0')}`}
+                        value={fmtDuration(s.activeMs)}
                     />
                     <Tile cls="wait" icon="pi-arrow-right" label="Added to Stage 2" value={String(s.carriedToNext)} />
                 </div>
@@ -243,6 +249,7 @@ function StageCards({ stages, onStart, activeLabel }: { stages: api.ClozeStageVi
                     <p className="muted small">
                         Rules touched {s.rulesTouched} / {s.rulesPresent} (completed {s.rulesCompleted}) · Excluded {s.excluded} ·{' '}
                         {s.stage === 1 ? `Mistakes moved to Stage 2: ${s.carriedToNext}` : 'Stage 2 opens in a later update'}
+                        {s.stage === 1 && s.hiddenByCheck > 0 && ` · Hidden by the check (not counted): ${s.hiddenByCheck}`}
                     </p>
                     {s.stage === 1 ? (
                         <button className="btn btn-primary" disabled={!s.ready || !onStart} onClick={onStart} data-testid="cloze-start">
@@ -260,14 +267,74 @@ function StageCards({ stages, onStart, activeLabel }: { stages: api.ClozeStageVi
     );
 }
 
-/** the dialogue turns of a sentence ("- A - B" -> separate lines), with the gap drawn as a box (or the chosen word once answered) */
-function Sentence({ text, fill, state }: { text: string; fill: string | null; state: api.ClozeSlotView['state'] }) {
+const NOT_NAMES = new Set(['I', 'Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday', 'Sunday', 'January', 'February', 'March', 'April', 'May', 'June', 'July', 'August', 'September', 'October', 'November', 'December', 'OK']);
+const escapeRe = (x: string): string => x.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+type Mark = { start: number; end: number; cls: 'gc-name' | 'gc-cue' };
+
+/** proper names by spelling, when the background check has not listed them: capitalised words that do not start a sentence */
+function guessNames(line: string): Mark[] {
+    const out: Mark[] = [];
+    for (const m of line.matchAll(/\b[A-Z][a-z]+(?:\s+[A-Z][a-z]+)*\b/g)) {
+        const before = line.slice(0, m.index).replace(/\b(Mr|Mrs|Ms|Dr)\.\s*$/, 'Mr ').trimEnd();
+        if (before === '' || /[.!?:"“–-]$/.test(before)) continue; // the first word of a sentence or a turn
+        const words = m[0].split(/\s+/).filter((w) => !NOT_NAMES.has(w));
+        if (words.length === 0) continue;
+        out.push({ start: m.index!, end: m.index! + m[0].length, cls: 'gc-name' });
+    }
+    return out;
+}
+
+/** ranges of the phrases (whole words, case-insensitive) */
+function findPhrases(line: string, phrases: readonly string[], cls: Mark['cls']): Mark[] {
+    const out: Mark[] = [];
+    for (const p of phrases) {
+        const re = new RegExp(`(^|[^\\p{L}\\p{N}'])(${escapeRe(p)})(?=$|[^\\p{L}\\p{N}'])`, 'giu');
+        for (const m of line.matchAll(re)) out.push({ start: m.index! + m[1]!.length, end: m.index! + m[1]!.length + m[2]!.length, cls });
+    }
+    return out;
+}
+
+/** the dialogue turns of a sentence ("- A - B" -> separate lines), with the gap drawn as a box (or the chosen word once answered).
+ *  Names (when on) are drawn muted; signal words (after a hint or the answer) are underlined. */
+function Sentence({
+    text,
+    fill,
+    state,
+    names,
+    cues,
+}: {
+    text: string;
+    fill: string | null;
+    state: api.ClozeSlotView['state'];
+    /** null = do not mark names; undefined = guess them by spelling */
+    names: readonly string[] | null | undefined;
+    cues: readonly string[];
+}) {
     const gap = (k: string) => (
         <span key={k} className={`gc-gap${state === 'correct' ? ' gc-gap-ok' : state === 'incorrect' ? ' gc-gap-bad' : ''}`}>
             {fill ?? '      '}
         </span>
     );
-    const line = (t: string, k: string) => t.split('___').flatMap((part, i, arr) => (i < arr.length - 1 ? [part, gap(`${k}-${i}`)] : [part]));
+    const withGaps = (t: string, k: string) => t.split('___').flatMap((part, i, arr) => (i < arr.length - 1 ? [part, gap(`${k}-${i}`)] : [part]));
+    const line = (t: string, k: string) => {
+        const marks = [...findPhrases(t, cues, 'gc-cue'), ...(names === null ? [] : names === undefined ? guessNames(t) : findPhrases(t, names, 'gc-name'))].sort(
+            (a, b) => a.start - b.start || b.end - a.end,
+        );
+        const out: ReactNode[] = [];
+        let at = 0;
+        marks.forEach((m, i) => {
+            if (m.start < at) return; // overlapping: the first wins
+            out.push(...withGaps(t.slice(at, m.start), `${k}-t${i}`));
+            out.push(
+                <span key={`${k}-m${i}`} className={m.cls}>
+                    {t.slice(m.start, m.end)}
+                </span>,
+            );
+            at = m.end;
+        });
+        out.push(...withGaps(t.slice(at), `${k}-end`));
+        return out;
+    };
     if (!text.trimStart().startsWith('- '))
         return (
             <p className="prompt gc-sentence" data-testid="cloze-sentence">
@@ -289,13 +356,13 @@ function Sentence({ text, fill, state }: { text: string; fill: string | null; st
 function ClozeSession({
     initial,
     tab,
-    sounds,
+    prefs,
     onExit,
     onDone,
 }: {
     initial: api.ClozeSessionView;
     tab: string;
-    sounds: boolean;
+    prefs: Prefs;
     onExit: () => void;
     onDone: (s: api.ClozeSummary) => void;
 }) {
@@ -306,9 +373,47 @@ function ClozeSession({
     const [chosenIdx, setChosenIdx] = useState<number | null>(null);
     const [confirmExclude, setConfirmExclude] = useState(false);
     const [reason, setReason] = useState('');
+    const sounds = prefs.sounds;
+    // F5: 1 = signal words underlined, 2 = the rule name as well; recorded with the answer (half XP, still correct)
+    const [hint, setHint] = useState(0);
+    const [autoNext, setAutoNext] = useState(false);
+    const autoTimer = useRef<number | null>(null);
+    // the Settings value is the starting point; the checkbox next to "Back to stages" changes it for this and later sessions in this browser
+    const [autoOn, setAutoOn] = useState<boolean>(() => {
+        try {
+            const v = window.localStorage.getItem('clozeAutoAdvance');
+            return v === null ? prefs.autoAdvance : v === '1';
+        } catch {
+            return prefs.autoAdvance;
+        }
+    });
+    const toggleAuto = (on: boolean) => {
+        setAutoOn(on);
+        try {
+            window.localStorage.setItem('clozeAutoAdvance', on ? '1' : '0');
+        } catch {
+            /* the choice then lasts for this session only */
+        }
+        if (!on && autoTimer.current !== null) {
+            window.clearTimeout(autoTimer.current);
+            autoTimer.current = null;
+            setAutoNext(false);
+        }
+    };
+    const stopAuto = () => {
+        if (autoTimer.current !== null) window.clearTimeout(autoTimer.current);
+        autoTimer.current = null;
+        setAutoNext(false);
+    };
     const shownAt = useRef(performance.now());
     const slot = session.slots.find((s) => s.position === pos) ?? session.slots[0]!;
     const answered = slot.state !== 'pending';
+    /** right answers without a hint in a row, in the order of the session (an excluded sentence does not break it) */
+    let streak = 0;
+    for (const x of session.slots) {
+        if (x.state === 'correct' && !(x.hintLevel ?? 0)) streak++;
+        else if (x.state === 'incorrect') streak = 0;
+    }
     const lastShown = useRef<number>(0);
     const [paused, setPaused] = useState(false);
     usePauseKeys(paused, setPaused, session.status === 'active');
@@ -390,6 +495,8 @@ function ClozeSession({
         setError(null);
         setSpeechMsg(null);
         setSpeaking(false);
+        setHint(0);
+        stopAuto();
         audio.current?.pause();
         if (slot.state === 'pending' && lastShown.current !== pos) {
             lastShown.current = pos;
@@ -401,6 +508,11 @@ function ClozeSession({
         const s = await api.fetchClozeSession(session.id);
         setSession(s);
         return s;
+    };
+    const cues = slot.cues ?? [];
+    const takeHint = () => {
+        if (answered || paused || auto.reason) return;
+        setHint((h) => (h === 0 && cues.length > 0 ? 1 : 2));
     };
     const choose = async (idx: number) => {
         if (busy || answered || paused || auto.reason) return;
@@ -414,10 +526,21 @@ function ClozeSession({
                 position: pos,
                 chosen: text,
                 responseMs: Math.round(performance.now() - shownAt.current),
+                hintLevel: hint,
             });
-            playPracticeSound(r.correct ? 'correct' : 'incorrect', sounds);
+            // a run of right answers lifts the pitch a little
+            const run = r.correct && hint === 0 ? streak + 1 : 0;
+            playPracticeSound(r.correct ? 'correct' : 'incorrect', sounds, undefined, run >= 2 ? 1 + Math.min(run - 1, 6) * 0.04 : 1);
             api.announceXp();
             await refresh();
+            if (r.correct && autoOn) {
+                setAutoNext(true);
+                autoTimer.current = window.setTimeout(() => {
+                    autoTimer.current = null;
+                    setAutoNext(false);
+                    void nextRef.current();
+                }, AUTO_ADVANCE_MS);
+            }
         } catch (e) {
             // a position answered elsewhere (another tab, a reload): show what was recorded
             if (e instanceof api.ApiRequestError && e.code === 'ALREADY_ANSWERED') await refresh().catch(() => undefined);
@@ -428,6 +551,7 @@ function ClozeSession({
         }
     };
     const next = async () => {
+        stopAuto();
         if (busy || !answered) return;
         setBusy(true);
         try {
@@ -461,8 +585,35 @@ function ClozeSession({
         }
     };
 
+    // the timer calls the latest `next` (the answered state it closes over would be stale)
+    const nextRef = useRef(next);
+    nextRef.current = next;
+    useEffect(() => () => stopAuto(), []); // eslint-disable-line react-hooks/exhaustive-deps
+    // any other key or click keeps the sentence on screen
+    useEffect(() => {
+        if (!autoNext) return;
+        const cancel = (e: Event) => {
+            if (e instanceof KeyboardEvent && e.key === 'Enter') return;
+            stopAuto();
+        };
+        window.addEventListener('keydown', cancel, true);
+        window.addEventListener('pointerdown', cancel, true);
+        return () => {
+            window.removeEventListener('keydown', cancel, true);
+            window.removeEventListener('pointerdown', cancel, true);
+        };
+    }, [autoNext]); // eslint-disable-line react-hooks/exhaustive-deps
+    useEffect(() => {
+        if (paused || auto.reason) stopAuto();
+    }, [paused, auto.reason]); // eslint-disable-line react-hooks/exhaustive-deps
+
     useKeys((e) => {
         if (paused || auto.reason) return;
+        if (e.key === HOTKEYS.hint && !e.repeat && !e.ctrlKey && !e.metaKey && !e.altKey) {
+            e.preventDefault();
+            takeHint();
+            return;
+        }
         if ((e.key === HOTKEYS.translate || e.key === HOTKEYS.listen) && !e.repeat && !e.ctrlKey && !e.metaKey && !e.altKey) {
             e.preventDefault();
             if (answered) {
@@ -489,6 +640,7 @@ function ClozeSession({
 
     const total = session.planned;
     const doneCount = session.slots.filter((s) => s.state !== 'pending').length;
+    const showCues = answered || hint >= 1;
     return (
         <section aria-labelledby="gc-s-h" data-testid="cloze-session">
             <div className="session-header">
@@ -496,11 +648,25 @@ function ClozeSession({
                 <p className="progress" data-testid="cloze-progress">
                     {Math.min(pos, total)} / {total}
                 </p>
+                {streak >= 3 && (
+                    <span className="gc-streak" key={streak} title="Right answers in a row without hints" data-testid="cloze-streak">
+                        <i className="pi pi-bolt" aria-hidden="true" /> {streak} in a row
+                    </span>
+                )}
                 <PauseButton paused={paused} onToggle={() => setPaused(!paused)} />
+                <label className="check small" title="Go to the next sentence by itself after a correct answer. Switch it off to read the reason first.">
+                    <input type="checkbox" checked={autoOn} onChange={(e) => toggleAuto(e.target.checked)} data-testid="cloze-auto-advance" /> Auto-next
+                </label>
                 <button className="btn" onClick={onExit}>
                     Back to stages
                 </button>
             </div>
+            {session.plan && (
+                <p className="gc-theme muted small" data-testid="cloze-theme">
+                    <i className="pi pi-compass" aria-hidden="true" /> Theme: <strong>{session.plan.focusName}</strong>
+                    {session.plan.review.length > 0 && <> · review: {session.plan.review.slice(0, 3).join(', ')}</>}
+                </p>
+            )}
             {paused && <PauseOverlay onResume={() => setPaused(false)} />}
             {!paused && auto.reason && <PauseOverlay auto={auto.reason} onResume={auto.resume} />}
             <div className="progress-bar" role="progressbar" aria-valuemin={0} aria-valuemax={total} aria-valuenow={doneCount} aria-label="Session progress">
@@ -511,12 +677,34 @@ function ClozeSession({
                     {error}
                 </p>
             )}
-            <div className="card gc-card">
-                <p className="gc-focus" data-testid="cloze-rule">
-                    <i className="pi pi-graduation-cap" aria-hidden="true" /> Choose the answer that best fits this grammar focus: <strong>{slot.ruleName}</strong>
-                    {!slot.exact && <span> · {slot.sourceTopic.replace(/_/g, ' ')}</span>}
-                </p>
-                <Sentence text={slot.gappedText} fill={answered ? (slot.correct ?? null) : null} state={slot.state} />
+            <div className="card gc-card gc-enter" key={pos}>
+                {/* the rule names the answer, so it is shown only once the answer is given */}
+                {answered && (
+                    <p className="gc-focus" data-testid="cloze-rule">
+                        <i className="pi pi-graduation-cap" aria-hidden="true" /> Grammar form: <strong>{slot.ruleName}</strong>
+                        {!slot.exact && <span> · {slot.sourceTopic.replace(/_/g, ' ')}</span>}
+                    </p>
+                )}
+                {!answered && hint >= 1 && (
+                    <p className="gc-hint muted small" role="status" data-testid="cloze-hint">
+                        <i className="pi pi-lightbulb" aria-hidden="true" />{' '}
+                        {hint >= 2 ? (
+                            <>
+                                Rule: <strong>{slot.ruleName}</strong>
+                                {!slot.exact && <span> · {slot.sourceTopic.replace(/_/g, ' ')}</span>}
+                            </>
+                        ) : (
+                            'The underlined words point to the answer. Press F5 again for the rule.'
+                        )}
+                    </p>
+                )}
+                <Sentence
+                    text={slot.gappedText}
+                    fill={answered ? (slot.correct ?? null) : null}
+                    state={slot.state}
+                    names={prefs.names ? slot.names : null}
+                    cues={showCues ? cues : []}
+                />
                 <fieldset className="options" aria-label="Answer options" disabled={answered || busy}>
                     {slot.options.map((o, i) => {
                         const isRight = answered && slot.correct !== undefined && o.toLowerCase() === slot.correct.toLowerCase();
@@ -546,7 +734,11 @@ function ClozeSession({
                 {answered && slot.state !== 'excluded' && !slot.excluded && (
                     <p className={`notice ${slot.state === 'correct' ? 'notice-info' : 'notice-warn'} small`} role="status" data-testid="cloze-feedback">
                         {slot.state === 'correct' ? (
-                            'Correct. +10 XP.'
+                            (slot.hintLevel ?? 0) > 0 ? (
+                                'Correct with a hint. +5 XP.'
+                            ) : (
+                                'Correct. +10 XP.'
+                            )
                         ) : (
                             <>
                                 Not this time. The answer is <strong>{slot.correct}</strong>. This sentence goes to Stage 2.
@@ -554,9 +746,27 @@ function ClozeSession({
                         )}
                     </p>
                 )}
+                {answered && slot.reasonRu && (
+                    <p lang="ru" className="gc-reason small" data-testid="cloze-reason">
+                        <i className="pi pi-info-circle" aria-hidden="true" /> {slot.reasonRu}
+                    </p>
+                )}
                 <div className="actions">
+                    {!answered && (
+                        <button type="button" className="btn has-kbd" onClick={takeHint} disabled={hint >= 2 || busy} title="Hint (F5)" data-testid="cloze-hint-btn">
+                            <Kbd k="F5" />
+                            <i className="pi pi-lightbulb" aria-hidden="true" /> Hint
+                        </button>
+                    )}
                     {answered && (
-                        <button className="btn btn-primary has-kbd" onClick={() => void next()} disabled={busy} data-testid="cloze-continue" autoFocus>
+                        <button
+                            className={`btn btn-primary has-kbd${autoNext ? ' gc-auto' : ''}`}
+                            style={{ ['--gc-auto-ms' as string]: `${AUTO_ADVANCE_MS}ms` }}
+                            onClick={() => void next()}
+                            disabled={busy}
+                            data-testid="cloze-continue"
+                            autoFocus
+                        >
                             <Kbd k="⏎" /> {session.nextPosition === null ? 'Finish' : 'Next'}
                         </button>
                     )}

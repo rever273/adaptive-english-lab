@@ -94,6 +94,21 @@ export function scriptedChat(over: Partial<Record<Task, () => unknown>> = {}): C
       const task: Task = system.includes("strict reviewer") ? "review" : system.includes("compare English sentences") ? "pairs" : system.includes("judge how a target English word") ? "uses" : system.includes("check sentence transformations") ? "keep" : system.includes("You check ONE sentence") ? "check" : (String(input.task) as Task);
       calls.push({ task, messages: req.messages });
       const base = goodAnswers(Number(input.count ?? 3));
+      if (input.stage_requirements_override) {
+        if (task === "stage3") {
+          const stage = base.stage3 as { items: Array<{ construction_en: string; hint_partial_en: string; used_skill: boolean }> };
+          const skills = input.skills as Array<{ construction: string }>;
+          for (const [i, item] of stage.items.entries()) {
+            item.construction_en = skills[i]!.construction;
+            item.hint_partial_en = RU;
+            item.used_skill = true;
+          }
+        } else if (task === "stage4") {
+          Object.assign(base.stage4 as object, { construction_en: (input.skill as { construction: string }).construction, hint_partial_en: RU });
+        } else if (task === "stage5") {
+          Object.assign(base.stage5 as object, { situation_en: "Describe what you missed this morning.", hint_start_en: RU });
+        }
+      }
       const reply = over[task] ? over[task]!() : task === "review" ? { problems: [] } : task === "pairs" ? { pairs: [] } : task === "uses" ? { uses: [] } : task === "keep" ? { items: [] } : base[task];
       return { text: typeof reply === "string" ? reply : JSON.stringify(reply), stats };
     },

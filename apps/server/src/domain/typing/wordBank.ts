@@ -12,6 +12,8 @@ export interface WordBankImportResult {
   lookupOnly: number;
   /** words that received irregular past / past participle forms */
   irregularVerbs: number;
+  /** archived words whose archive flag the reseed kept (D184) */
+  keptOut: number;
 }
 
 const COLUMN_NAMES = {
@@ -85,7 +87,7 @@ export function importWordBank(db: Db, csvText: string, sourceSha: string, deps:
   const skipped = { notLetters: 0, badLength: 0, noTranslation: 0, duplicate: 0 };
   const seen = new Set<string>();
   let lookupOnly = 0;
-  const rows: Array<Record<string, string | number>> = [];
+  const rows: Array<Record<string, string | number | null>> = [];
   for (let i = 1; i < lines.length; i++) {
     if (lines[i] === "") continue;
     const r = splitLine(lines[i]!);
@@ -126,18 +128,32 @@ export function importWordBank(db: Db, csvText: string, sourceSha: string, deps:
       source_sha256: sourceSha,
       imported_at: deps.now().toISOString(),
       typing_ok: typingOk,
+      frequency: Number.isFinite(Number((r[2] ?? "").trim().replace(",", "."))) && (r[2] ?? "").trim() !== "" ? Number((r[2] ?? "").trim().replace(",", ".")) : null,
       past_forms: JSON.stringify(forms?.past ?? []),
       participle_forms: JSON.stringify(forms?.participle ?? []),
     });
   }
 
+  let keptOut = 0;
+  let archivedBefore: Array<{ lemma: string; archBy: string | null; archAt: string | null; archReason: string | null }> = [];
   db.transaction(() => {
+    // Vocabulary Typing refines translations and archives words in the bank (D175, D184): a reseed must neither undo a refinement nor bring an archived word back into practice
+    if (db.prepare("SELECT 1 FROM sqlite_master WHERE type = 'table' AND name = 'vocab_typing_lexicon'").get()) {
+      const refined = new Map((db.prepare("SELECT lemma, primary_translation_ru AS tr FROM vocab_typing_lexicon WHERE primary_translation_ru IS NOT NULL").all() as Array<{ lemma: string; tr: string }>).map((l) => [l.lemma, l.tr]));
+      for (const row of rows) if (refined.has(row.lemma as string)) row.translation_ru = refined.get(row.lemma as string)!;
+    }
+    const hasArchive = (db.prepare("PRAGMA table_info(typing_word_bank)").all() as Array<{ name: string }>).some((c) => c.name === "archived");
+    archivedBefore = hasArchive ? (db.prepare("SELECT lemma, archived_by AS archBy, archived_at AS archAt, archive_reason AS archReason FROM typing_word_bank WHERE archived = 1").all() as Array<{ lemma: string; archBy: string | null; archAt: string | null; archReason: string | null }>) : [];
     db.prepare("DELETE FROM typing_word_bank").run();
     const ins = db.prepare(
-      "INSERT INTO typing_word_bank(lemma, char_count, part_of_speech, translation_ru, definition_ru, transcription, difficulty, status, source_sha256, imported_at, typing_ok, past_forms, participle_forms) VALUES (@lemma, @char_count, @part_of_speech, @translation_ru, @definition_ru, @transcription, @difficulty, @status, @source_sha256, @imported_at, @typing_ok, @past_forms, @participle_forms)",
+      "INSERT INTO typing_word_bank(lemma, char_count, part_of_speech, translation_ru, definition_ru, transcription, difficulty, status, source_sha256, imported_at, typing_ok, past_forms, participle_forms, frequency) VALUES (@lemma, @char_count, @part_of_speech, @translation_ru, @definition_ru, @transcription, @difficulty, @status, @source_sha256, @imported_at, @typing_ok, @past_forms, @participle_forms, @frequency)",
     );
     for (const row of rows) ins.run(row);
+    if (archivedBefore.length > 0) {
+      const put = db.prepare("UPDATE typing_word_bank SET archived = 1, archived_by = ?, archived_at = ?, archive_reason = ? WHERE lemma = ?");
+      for (const x of archivedBefore) keptOut += put.run(x.archBy, x.archAt, x.archReason, x.lemma).changes;
+    }
   }).immediate();
 
-  return { imported: rows.length, skipped, lookupOnly, irregularVerbs };
+  return { imported: rows.length, skipped, lookupOnly, irregularVerbs, keptOut };
 }

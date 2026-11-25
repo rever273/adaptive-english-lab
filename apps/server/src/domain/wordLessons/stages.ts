@@ -84,7 +84,13 @@ const base = (f: WordFacts, plan: LessonPlan, task: string) => ({
 
 /** the user message of each task; `avoid` carries the reviewer's remark when a stage is written again */
 export function stageInput(f: WordFacts, plan: LessonPlan, stage: "stage12" | "stage3" | "stage4" | "stage5", avoid: string[]): string {
-  const extra = avoid.length ? { avoid_problems: avoid } : {};
+  const guidance = {
+    stage12: "",
+    stage3: "Use different actions within meaning-preserving rewrites. In hint_partial_en write one Russian rule cue specific to this item, with placeholders. Do not copy the start of the answer. Apply each planned construction and use its exact supplied name.",
+    stage4: "Apply the planned construction and use its exact supplied name. Vary the intent across comparison, condition, preference, advice, cause, consequence, past habit or quantity when appropriate. In hint_partial_en write one Russian rule cue with placeholders, not the start of the answer.",
+    stage5: "Write a single direct question or instruction of 3 to 10 English words. No introduction, scene setting or Imagine that. In hint_start_en give one short Russian suggestion for what to say, not the start of the sample.",
+  }[stage];
+  const extra = { ...(avoid.length ? { avoid_problems: avoid } : {}), ...(plan.version === "word-lesson-plan-v2" && guidance ? { stage_requirements_override: guidance } : {}) };
   switch (stage) {
     case "stage12":
       return JSON.stringify({ ...base(f, plan, "stage12"), topics: plan.topics.slice(0, 4), ...extra });
@@ -210,7 +216,9 @@ export function validateStage3(text: string, f: WordFacts, plan: LessonPlan, led
     if (!instruction || /[Ѐ-ӿ]/.test(instruction) || wordCount(instruction) < 6) return bad("T_INSTRUCTION", `item ${n}: instruction_en must say exactly what to do, in a full English sentence (a grammar label is not an instruction)`);
     if (plan.skills[k]?.id?.startsWith("questions.embedded") && /\bdirect\b/i.test(instruction)) return bad("T_INSTRUCTION", `item ${n}: an embedded question is an indirect question; do not call it a direct question`);
     // code rules that small models break most often: a transformation must not grow a new clause, and the embedded-question and relative-clause tasks need the right kind of source
-    const skillId = plan.skills[k]?.id ?? "";
+    const planned = plan.skills[k];
+    if (plan.version === "word-lesson-plan-v2" && planned && (construction.toLowerCase() !== planned.label.toLowerCase() || r.used_skill !== true)) return bad("T_PLAN_SKILL", "Use the requested construction and its exact name");
+    const skillId = planned?.id ?? "";
     const embedded = skillId.startsWith("questions.embedded");
     if (wordCount(expected) > wordCount(source) + (embedded ? 5 : 4)) return bad("T_GROWS", `item ${n}: expected_en is much longer than source_en; a transformation must not add new information or a new clause`);
     // the rewritten sentence keeps the details of the source: only the words the construction replaces may disappear (a learner who keeps "in her old job" must be right too)
@@ -218,7 +226,8 @@ export function validateStage3(text: string, f: WordFacts, plan: LessonPlan, led
     if (gone.length > 1) return bad("T_DROPS", `item ${n}: expected_en loses ${gone.map((w) => `"${w}"`).join(", ")} from source_en; keep every detail (people, places, things, manner) of the source and change only what the construction needs`);
     if (embedded && !(/[?]$/.test(source.trim()) || /^(i wonder|i don't know|i do not know|i want to know|i'd like to know|i would like to know)\b/i.test(source.trim()))) return bad("T_SOURCE", `item ${n}: for an embedded-question task source_en must be a direct question (ending with ?) or start with "I wonder" / "I don't know"`);
     if (skillId === "relatives.defining" && !/\b(who|whom|which|that|whose)\b/i.test(expected)) return bad("T_RELATIVE", `item ${n}: expected_en must contain a relative clause (who, which or that)`);
-    if (!isProperStart(hint, expected)) return bad("T_HINT", `item ${n}: hint_partial_en must be the first words of expected_en and at least two words shorter`);
+    if (plan.version === "word-lesson-plan-v2" && (russianIssue(hint) || hint.length > 180 || hint.includes(expected))) return bad("T_RULE_HINT", "Give a brief Russian cue about the rule without the full answer");
+    if (plan.version === "word-lesson-plan-v1" && !isProperStart(hint, expected)) return bad("T_HINT", `item ${n}: hint_partial_en must be the first words of expected_en and at least two words shorter`);
     if (russianIssue(tr)) return bad("T_RU", `item ${n}: translation_ru ${russianIssue(tr)}`);
     if (chained && k > 0 && sentenceKey(source) !== sentenceKey(items[k - 1]!.expected_en)) return bad("T_CHAIN", `item ${n}: in a chain source_en must be exactly the previous expected_en`);
     const accepted = variants(expected, strList(r.accepted_en), f);
@@ -265,7 +274,10 @@ export function validateStage4(text: string, f: WordFacts, plan: LessonPlan, led
   if (!construction || /[Ѐ-ӿ]/.test(construction) || construction.length > 120) return bad("S4_CONSTRUCTION", "construction_en must be a short English name");
   if (russianIssue(cue)) return bad("S4_CUE", `cue_ru ${russianIssue(cue)}`);
   if (russianIssue(tr)) return bad("S4_RU", `translation_ru ${russianIssue(tr)}`);
-  if (!isProperStart(hint, expected)) return bad("S4_HINT", "hint_partial_en must be the first words of expected_en and at least two words shorter");
+  const planned = plan.skills[plan.transformations];
+  if (plan.version === "word-lesson-plan-v2" && planned && (construction.toLowerCase() !== planned.label.toLowerCase() || o.used_skill !== true)) return bad("S4_PLAN_SKILL", "Use the requested construction and its exact name");
+  if (plan.version === "word-lesson-plan-v2" && (russianIssue(hint) || hint.length > 180 || hint.includes(expected))) return bad("S4_RULE_HINT", "Give a brief Russian cue about the rule without the full answer");
+  if (plan.version === "word-lesson-plan-v1" && !isProperStart(hint, expected)) return bad("S4_HINT", "hint_partial_en must be the first words of expected_en and at least two words shorter");
   const accepted = variants(expected, strList(o.accepted_en), f);
   if (typeof accepted === "string") return bad("S4_ACCEPTED", accepted);
   const why = ledger.fork().reason(expected, { independent: true });
@@ -283,13 +295,13 @@ export function validateStage4(text: string, f: WordFacts, plan: LessonPlan, led
   });
 }
 
-export function validateStage5(text: string, f: WordFacts, ledger: SentenceLedger): Validated<Stage5> {
+export function validateStage5(text: string, f: WordFacts, ledger: SentenceLedger, concise = false): Validated<Stage5> {
   const o = parseObject(text);
   const keys = ["situation_en", "situation_ru", "suggested_words", "sample_en", "sample_ru", "hint_start_en"];
   if (!o || !hasOnly(o, keys)) return bad("SHAPE", "unexpected shape");
   const situation = str(o.situation_en);
   const sample = str(o.sample_en);
-  const sitIssue = englishIssue(situation, { min: 4, max: 30 });
+  const sitIssue = englishIssue(situation, concise ? { min: 3, max: 10 } : { min: 4, max: 30 });
   if (sitIssue) return bad("S5_SITUATION", `situation_en ${sitIssue}`);
   if (russianIssue(str(o.situation_ru))) return bad("S5_SITUATION_RU", "situation_ru must be Russian");
   const sIssue = englishIssue(sample, { min: 5, max: 24 });
@@ -307,7 +319,8 @@ export function validateStage5(text: string, f: WordFacts, ledger: SentenceLedge
     const syn = f.synonyms.map((x) => x.toLowerCase().trim()).filter((x) => x.length >= 3).find((x) => new RegExp(`(^|[^a-z])${x.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")}([^a-z]|$)`).test(lw));
     if (syn) return bad("S5_WORD_SYNONYM", `"${w}" is a synonym of the target word ("${syn}"); suggest words that go WITH the target word, not instead of it`);
   }
-  if (!isProperStart(str(o.hint_start_en), sample)) return bad("S5_HINT", "hint_start_en must be the first words of sample_en and at least two words shorter");
+  if (concise && (/^imagine\b|^you are\b/i.test(situation) || russianIssue(str(o.hint_start_en)) || str(o.hint_start_en).length > 140 || str(o.hint_start_en).includes(sample))) return bad("S5_DIRECT", "Use a direct cue and one brief Russian suggestion without the full answer");
+  if (!concise && !isProperStart(str(o.hint_start_en), sample)) return bad("S5_HINT", "hint_start_en must be the first words of sample_en and at least two words shorter");
   const why = ledger.fork().reason(sample, { independent: true });
   if (why) return bad("S5_REPEAT", `sample_en ${why}`);
   return ok({ situation_en: situation, situation_ru: str(o.situation_ru), suggested_words: words, hint_start_en: str(o.hint_start_en), sample_en: sample, sample_ru: str(o.sample_ru) });

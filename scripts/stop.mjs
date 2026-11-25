@@ -36,7 +36,8 @@ try {
   });
   if (res.status !== 202) console.error(`Shutdown endpoint answered ${res.status}`);
 } catch (err) {
-  console.error(`Graceful shutdown request failed: ${err.message}`);
+  // usually harmless: the previous server is already closing (its port is shut) or was left half-closed by a closed console window
+  console.log(`The previous server (pid ${lock.pid}, port ${lock.port}) did not answer the shutdown request (${err.message}); waiting for it to exit.`);
 }
 
 const deadline = Date.now() + 20_000;

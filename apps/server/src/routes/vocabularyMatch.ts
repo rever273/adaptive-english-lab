@@ -7,7 +7,7 @@ import { lookupWord } from "../domain/vocabulary/repository.js";
 
 export const MATCH_RULE_VERSION = "vocabulary-match-v1";
 /** the rush mode's repeat count when the client does not say (the default of Settings: Matching game repeats) */
-const DEFAULT_ROUNDS = 4;
+const DEFAULT_ROUNDS = 3;
 
 /**
  * The word list of the matching game that follows a finished vocabulary practice: every tested word of the session once, with its Russian meaning.

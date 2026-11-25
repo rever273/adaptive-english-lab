@@ -28,6 +28,8 @@ import { registerGroqStatusRoute } from "./routes/groqStatus.js";
 import { registerVocabularyImageRoutes } from "./routes/vocabularyImages.js";
 import { registerVocabularyPracticeRoutes } from "./routes/vocabularyPractice.js";
 import { registerWordLessonRoutes } from "./routes/wordLessons.js";
+import { registerContextLoopRoutes } from "./routes/contextLoop.js";
+import { registerVocabTypingRoutes } from "./routes/vocabTyping.js";
 import { registerGrammarClozeRoutes } from "./routes/grammarCloze.js";
 import { registerUiRoutes } from "./routes/ui.js";
 import { registerTutorRoutes } from "./routes/tutor.js";
@@ -138,7 +140,9 @@ export async function buildApp(deps: AppDeps): Promise<FastifyInstance> {
   registerSessionRoutes(app, db, base, { ...(deps.sessions ?? {}), onLease: () => deps.scheduler?.kick(), onSessionEnd: (id) => void deps.stt?.stopForSession(id), onVoiceDone: async (id) => { deps.scheduler?.releaseVoiceHold(id); await deps.stt?.stopForSession(id); deps.scheduler?.kick(); } });
   registerVocabularyPracticeRoutes(app, db, base);
   registerWordLessonRoutes(app, db, base, { onQueued: () => deps.scheduler?.kick(), stt: deps.stt });
+  registerContextLoopRoutes(app, db, base, { onQueued: () => deps.scheduler?.kick(), stt: deps.stt });
   registerGrammarClozeRoutes(app, db, base, { onQueued: () => deps.scheduler?.kick() });
+  registerVocabTypingRoutes(app, db, base);
   const dictation = deps.dictation ?? createDictationEnv(config, deps.groqKey);
   // Chat verification runs outside the GPU queue: cloud Whisper, or a dedicated CPU worker when no Groq key exists.
   const conversationAsr = deps.conversationAsr ?? (deps.groqKey ? dictation.asr : new LocalDictationAsr({ script: path.join(config.projectRoot, "workers", "dictation_asr", "check.py"), device: "cpu" }));
@@ -147,7 +151,7 @@ export async function buildApp(deps: AppDeps): Promise<FastifyInstance> {
   registerTypingRoutes(app, db, base, { booksDir: path.join(config.dataRoot, "typing-books"), projectRoot: config.projectRoot, dictation });
   registerTypingBookSpeechRoutes(app, db, dictation);
   registerVoiceRoutes(app, db, { env: dictation, sampleDir: path.join(config.dataRoot, "voice-samples") });
-  registerTypingDictationRoutes(app, db, base, { env: dictation, onQueued: () => deps.scheduler?.kick(), ...(deps.realAudit ? { realAudit: deps.realAudit } : {}) });
+  registerTypingDictationRoutes(app, db, base, { env: dictation, projectRoot: config.projectRoot, onQueued: () => deps.scheduler?.kick(), ...(deps.realAudit ? { realAudit: deps.realAudit } : {}) });
   registerTranslateRoutes(app, { ...(deps.translateEmail ? { email: deps.translateEmail } : {}), ...(deps.deeplKey ? { deeplKey: deps.deeplKey } : {}) });
   registerVocabularyImageRoutes(app, config.vocabularyImagesDir, db);
   registerVocabularySpeechRoutes(app, db, base, { key: deps.elevenLabsKey, voiceId: deps.elevenLabsVoiceId, voiceIds: deps.elevenLabsVoiceIds, cacheDir: path.join(config.dataRoot, "vocabulary-speech") });
@@ -216,14 +220,26 @@ export async function buildApp(deps: AppDeps): Promise<FastifyInstance> {
   });
 
   if (uiBuilt) {
+    // a page address (/typing, /practice/cloze, ...) is answered with the app shell before the file lookup: public/typing and public/practice hold
+    // pictures, and a request for the folder of the same name got an empty 200 from the file server (a white page on every reload of /typing)
+    app.addHook("onRequest", async (req, reply) => {
+      if ((req.method !== "GET" && req.method !== "HEAD") || !(req.headers.accept ?? "").includes("text/html")) return;
+      const pathname = req.url.split("?")[0]!;
+      if (pathname.startsWith("/api/") || pathname.startsWith("/internal/") || /\.[a-z0-9]+$/i.test(pathname)) return;
+      await reply.sendFile("index.html");
+      return reply;
+    });
     // wildcard: true looks files up on every request; with false the file list is read once at start, so a rebuild of the web app (new hashed file names) left a running server answering 404 for its own scripts
     await app.register(fastifyStatic, { root: config.webDist, wildcard: true, index: ["index.html"] });
   }
 
-  app.setNotFoundHandler((req, reply) => {
+  app.setNotFoundHandler(async (req, reply) => {
     const isApi = req.url.startsWith("/api/") || req.url.startsWith("/internal/");
     if (!isApi && uiBuilt && req.method === "GET" && (req.headers.accept ?? "").includes("text/html")) {
-      return reply.sendFile("index.html");
+      // a page address such as /typing is served the app shell. sendFile is asynchronous: it must be awaited, or the handler returns before the
+      // file is sent and the browser gets an empty 200 (a white page on every reload of a page other than "/")
+      await reply.sendFile("index.html");
+      return reply;
     }
     return reply.status(404).send(envelope(req.id, "NOT_FOUND", "Not found"));
   });

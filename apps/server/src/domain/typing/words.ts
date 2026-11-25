@@ -137,7 +137,7 @@ function bankWords(db: Db, level: number): BankWord[] {
   const b = levelBucket(level);
   const maxLen = b.maxLen === Number.POSITIVE_INFINITY ? 32 : b.maxLen;
   const rows = db
-    .prepare("SELECT lemma, part_of_speech, translation_ru, definition_ru, transcription, difficulty, char_count FROM typing_word_bank WHERE typing_ok = 1 AND difficulty <= ? AND char_count >= 3 AND char_count <= ?")
+    .prepare("SELECT lemma, part_of_speech, translation_ru, definition_ru, transcription, difficulty, char_count FROM typing_word_bank WHERE typing_ok = 1 AND archived = 0 AND difficulty <= ? AND char_count >= 3 AND char_count <= ?")
     .all(b.difficultyMax, maxLen) as BankWord[];
   if (!b.restrict) return rows;
   const hasAtMostOneRare = (w: string) => (w.match(/[qjzx]/g) ?? []).length <= 1;
@@ -304,7 +304,7 @@ export function buildWordsPlan(db: Db, level: number, settings: SettingsV1, deps
 export function wordsOverview(db: Db): { nextLevel: number; completedLevel: number; activeSessionId: string | null; bankWords: number; drills: ReturnType<typeof drillsOverview> } {
   const active = db.prepare("SELECT id FROM typing_sessions WHERE mode = 'words' AND variant = 'meteors' AND status = 'active' LIMIT 1").get() as { id: string } | undefined;
   const completed = db.prepare("SELECT COALESCE(MAX(level_number), 0) AS n FROM typing_sessions WHERE mode = 'words' AND variant = 'meteors' AND status = 'completed'").get() as { n: number };
-  const bank = db.prepare("SELECT COUNT(*) AS n FROM typing_word_bank WHERE typing_ok = 1").get() as { n: number };
+  const bank = db.prepare("SELECT COUNT(*) AS n FROM typing_word_bank WHERE typing_ok = 1 AND archived = 0").get() as { n: number };
   return { nextLevel: completed.n + 1, completedLevel: completed.n, activeSessionId: active?.id ?? null, bankWords: bank.n, drills: drillsOverview(db) };
 }
 

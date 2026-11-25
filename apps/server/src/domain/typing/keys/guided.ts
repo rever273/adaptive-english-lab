@@ -32,6 +32,8 @@ export function wilsonLower(p: number, n: number, z = ERROR_Z): number {
 const alphaAt = (n: number): number => Math.max(SMOOTHING_ALPHA, 1 / n);
 /** letters open from the start */
 export const MIN_KEYS = 6;
+/** a key counts as reached only after this many timed lessons with it, so one good lesson with a new key does not open the next one */
+export const MIN_KEY_LESSONS = 3;
 /** a lesson's per-key mean outside this range says nothing (keybr validateSample: 300 WPM .. 1 WPM) */
 export const MIN_KEY_MS = 40;
 export const MAX_KEY_MS = 12000;
@@ -49,11 +51,20 @@ export interface KeyLessonRow {
   lessonIndex: number;
   /** lesson end, epoch ms */
   at: number;
+  /** how many letters were open in that lesson (more keys = harder, so its errors weigh more); missing = weight 1 */
+  openKeys?: number;
   letter: string;
   hits: number;
   misses: number;
   meanMs: number;
 }
+
+/**
+ * Weight of one lesson's presses in a key's error rate: the lesson's open keys over the most keys open so far. A miss made with
+ * 6 keys open says less about typing all 26 than one made with 20 open, so early easy lessons fade by difficulty as well as by age.
+ */
+export const difficultyWeight = (openKeys: number | undefined, mostOpen: number): number =>
+  openKeys && mostOpen > 0 ? Math.min(1, openKeys / mostOpen) : 1;
 
 export interface KeySample {
   index: number;
@@ -72,8 +83,9 @@ export interface KeyStats {
   /** best smoothed time ever reached, ms */
   bestTimeToType: number | null;
   /**
-   * smoothed share of wrong presses: wrong and all presses are each summed with the weight 0.9 per later lesson, so a lesson counts
-   * by its number of presses (one miss in 15 presses weighs less than in 40); null before any press
+   * smoothed share of wrong presses: wrong and all presses are each summed with the weight 0.9 per later lesson with the key times
+   * difficultyWeight (open keys then / most open keys now), so a lesson counts by its number of presses (one miss in 15 presses
+   * weighs less than in 40), by recency and by how many keys were in play; null before any press
    */
   errorRate: number | null;
   /** the smoothed number of presses behind errorRate (how much evidence it has) */
@@ -90,10 +102,12 @@ export function keyStats(letter: string, rows: readonly KeyLessonRow[]): KeyStat
   let best: number | null = null;
   let misses = 0;
   let presses = 0;
+  const mostOpen = rows.reduce((a, r) => Math.max(a, r.openKeys ?? 0), 0);
   for (const r of [...rows].filter((x) => x.letter === letter).sort((a, b) => a.lessonIndex - b.lessonIndex)) {
     if (r.hits + r.misses > 0) {
-      misses = (1 - SMOOTHING_ALPHA) * misses + r.misses;
-      presses = (1 - SMOOTHING_ALPHA) * presses + r.hits + r.misses;
+      const w = difficultyWeight(r.openKeys, mostOpen);
+      misses = (1 - SMOOTHING_ALPHA) * misses + w * r.misses;
+      presses = (1 - SMOOTHING_ALPHA) * presses + w * (r.hits + r.misses);
     }
     if (!(r.meanMs >= MIN_KEY_MS && r.meanMs <= MAX_KEY_MS)) continue;
     const a = alphaAt(samples.length + 1);
@@ -120,6 +134,19 @@ export interface LessonKey {
   focused: boolean;
 }
 
+/**
+ * The accuracy gate: the wrong presses of all open keys together (each key's smoothed wrong and all presses summed) must not be above
+ * the limit beyond chance (lower Wilson bound). One unlucky key is carried by the others; a keyboard that is sloppy overall is not.
+ */
+export function overallAccuracy(stats: readonly KeyStats[], minAccuracy: number): { errorRate: number | null; errorBound: number | null; presses: number; reached: boolean } {
+  const presses = stats.reduce((a, k) => a + k.errorPresses, 0);
+  const misses = stats.reduce((a, k) => a + k.errorMisses, 0);
+  if (presses <= 0) return { errorRate: null, errorBound: null, presses: 0, reached: true };
+  const errorRate = misses / presses;
+  const errorBound = wilsonLower(errorRate, presses);
+  return { errorRate, errorBound, presses, reached: errorBound <= 1 - minAccuracy + 1e-9 };
+}
+
 /** accuracy part of readiness (pass KeyStats.errorBound): 1 at or below the allowed error rate, falling by a quarter per 5 extra points of errors */
 export function accuracyScore(errorRate: number | null, minAccuracy: number): number {
   if (errorRate == null) return 1;
@@ -138,24 +165,33 @@ export interface GuidedOptions {
 
 /**
  * keybr GuidedLesson.update: letters open in frequency order; the first MIN_KEYS are open from the start, every key that was ever
- * at the target stays open, and the next letter opens only when every open key has reached the target. The weakest open key below
- * the target is the focused one. Unlike keybr, "reached" needs accuracy too: readiness = min(speed confidence, accuracy score of the
- * error rate's lower bound).
+ * at the target stays open, and the next letter opens only when every open key has reached the target in at least MIN_KEY_LESSONS lessons. Focus combines speed and
+ * smoothed accuracy, with speed weighted more heavily. Unlike keybr, the next letter also needs the open keys' wrong presses taken together to be within the
+ * limit (overallAccuracy); a single key's accuracy does not hold it back.
  */
 export function lessonKeys(lettersByFrequency: readonly string[], rows: readonly KeyLessonRow[], opts: GuidedOptions): LessonKey[] {
   const keys: LessonKey[] = lettersByFrequency.map((letter) => {
     const stats = keyStats(letter, rows);
     const conf = confidence(stats.timeToType, opts.targetCpm);
     const best = confidence(stats.bestTimeToType, opts.targetCpm);
-    const speed = opts.recoverKeys ? (conf ?? 0) : (best ?? 0);
-    return { letter, stats, confidence: conf, bestConfidence: best, readiness: Math.min(speed, accuracyScore(stats.errorBound, opts.minAccuracy ?? DEFAULT_MIN_ACCURACY)), included: false, focused: false };
+    const raw = opts.recoverKeys ? (conf ?? 0) : (best ?? 0);
+    // below MIN_KEY_LESSONS lessons the key is never counted as reached, however fast it was
+    const speed = stats.samples.length < MIN_KEY_LESSONS ? Math.min(raw, 0.99) : raw;
+    // a key's own readiness is its speed: a few wrong presses on a rarely met key say little (10-40 presses a lesson); accuracy is judged over all open keys together
+    return { letter, stats, confidence: conf, bestConfidence: best, readiness: speed, included: false, focused: false };
   });
+  const accuracyOk = (open: readonly LessonKey[]): boolean => overallAccuracy(open.map((k) => k.stats), opts.minAccuracy ?? DEFAULT_MIN_ACCURACY).reached;
   const judged = (k: LessonKey): number => k.readiness;
   for (const key of keys) {
     const included = keys.filter((k) => k.included);
-    if (included.length < MIN_KEYS || opts.alreadyOpen?.has(key.letter) || judged(key) >= 1 || included.every((k) => judged(k) >= 1)) key.included = true;
+    if (included.length < MIN_KEYS || opts.alreadyOpen?.has(key.letter) || judged(key) >= 1 || (included.every((k) => judged(k) >= 1) && accuracyOk(included))) key.included = true;
   }
-  const weakest = keys.filter((k) => k.included && judged(k) < 1).sort((a, b) => judged(a) - judged(b))[0];
+  const open = keys.filter((k) => k.included);
+  // Focus is separate from the opening gate: 80% best speed against target, 20% smoothed accuracy.
+  // Cap speed at the target so exceptional speed cannot hide poor accuracy; unknown accuracy is neutral.
+  const focusScore = (k: LessonKey): number => 0.8 * Math.min(1, judged(k)) + 0.2 * (1 - (k.stats.errorRate ?? 0));
+  const needsPractice = open.some((k) => judged(k) < 1) || !accuracyOk(open);
+  const weakest = needsPractice ? [...open].sort((a, b) => focusScore(a) - focusScore(b))[0] : undefined;
   if (weakest) weakest.focused = true;
   return keys;
 }

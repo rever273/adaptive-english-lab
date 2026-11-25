@@ -91,7 +91,7 @@ export const prepareDictationTracks = (count: number) => send("POST", `${DICT}/p
 
 export const openDictationTranslation = (exerciseId: string) => send("POST", `${DICT}/exercises/${encodeURIComponent(exerciseId)}/translation`, typed<{ translationRu: string }>(), {});
 
-export const answerDictation = (exerciseId: string, body: { attemptId: string; text: string; activeMs: number; typingMs?: number; keystrokes?: number }) => send("POST", `${DICT}/exercises/${encodeURIComponent(exerciseId)}/answer`, typed<DictationAnswerResponse>(), body);
+export const answerDictation = (exerciseId: string, body: { attemptId: string; text: string; activeMs: number; typingMs?: number; keystrokes?: number; keyTimes?: Array<{ letter: string; ms: number; timed: number }> }) => send("POST", `${DICT}/exercises/${encodeURIComponent(exerciseId)}/answer`, typed<DictationAnswerResponse>(), body);
 
 export const sendDictationTime = (lessonId: string, activeMs: number) => send("POST", `${DICT}/lessons/${encodeURIComponent(lessonId)}/time`, typed<{ ok: true; applied: boolean }>(), { activeMs });
 

@@ -37,6 +37,12 @@ const REVIEWER = "agent:test-reviewer@vocab-test-v1";
 type Item = { id: string; type: string; payload: { options?: Array<{ id: string; text: string }>; accepted_option_ids?: string[]; accepted_answers?: string[] }; vocabulary: { family: string; target: { lemma: string } } };
 
 /** the starter pack, published through the same repository calls `npm run pack -- publish` uses (individual review, then release) */
+function useStandardVocabulary(e: SliceEnv): void {
+  e.db.prepare(`INSERT INTO settings_revisions(id, revision, values_json, created_at)
+    SELECT ?, revision + 1, json_set(values_json, '$.vocabularyFocus', json('false')), ?
+    FROM settings_revisions ORDER BY revision DESC LIMIT 1`).run(e.deps.newId(), e.deps.now().toISOString());
+}
+
 async function publishStarter(e: SliceEnv): Promise<Item[]> {
   const { pack } = (await import(pathToFileURL(path.join(projectRoot, "content", "packs", "vocab-starter", "index.mjs")).href)) as { pack: { items: Item[] } };
   const actor = { type: "agent" as const, id: "test-author@v1" };
@@ -182,7 +188,9 @@ describe("Vocabulary Practice (vocabulary TZ)", () => {
   it("offers approved exercises only for words in the dictionary, fresh sentences first (shown ones return only as labelled repeats); never an empty session", async () => {
     env = openSliceCopy();
     const items = await publishStarter(env);
-    expect(vocabularyPracticeStatus(env.db)).toMatchObject({ available: 0, words: 0, taskCount: 8 });
+    expect(vocabularyPracticeStatus(env.db)).toMatchObject({ available: 0, words: 0, taskCount: 6, focus: true });
+    useStandardVocabulary(env);
+    expect(vocabularyPracticeStatus(env.db)).toMatchObject({ taskCount: 8, focus: false });
     expect(() => createVocabularySession(env!.db, env!.deps, { timezone: "Australia/Brisbane" })).toThrow(ApiError);
     for (const w of ["home", "dog"]) addWord(env.db, env.deps, { word: w });
     const st = vocabularyPracticeStatus(env.db);
@@ -203,6 +211,7 @@ describe("Vocabulary Practice (vocabulary TZ)", () => {
 
   it("a full session: separate category, no grammar evidence, Vocabulary XP once per task, first try kept, analytics with honest denominators", async () => {
     env = openSliceCopy();
+    useStandardVocabulary(env);
     const items = await publishStarter(env);
     for (const w of ["home", "endeavour", "dog", "great"]) addWord(env.db, env.deps, { word: w });
     const grammarOpps = count(env, "SELECT COUNT(*) AS n FROM skill_opportunities");
@@ -265,16 +274,16 @@ describe("Vocabulary Practice (vocabulary TZ)", () => {
     expect(new Set(words.map((w) => w.id)).size).toBe(words.length);
     const body = (mode: string, results: unknown) => ({ method: "POST" as const, url: `${url}/match-results`, payload: { mode, results } });
     const [weak, ...others] = words;
-    const good = [{ lemma: weak!.id, matched: 1, wrong: 3 }, ...others.map((w) => ({ lemma: w.id, matched: 4, wrong: 0 }))];
+    const good = [{ lemma: weak!.id, matched: 1, wrong: 3 }, ...others.map((w) => ({ lemma: w.id, matched: 3, wrong: 0 }))];
     expect((await app.inject(body("rush", [{ lemma: "nonsense", matched: 1, wrong: 0 }]))).statusCode).toBe(400);
-    expect((await app.inject(body("rush", [{ lemma: weak!.id, matched: 5, wrong: 0 }]))).statusCode).toBe(400); // more than the 4 needed (the default)
+    expect((await app.inject(body("rush", [{ lemma: weak!.id, matched: 4, wrong: 0 }]))).statusCode).toBe(400); // more than the 3 needed (the default)
     expect((await app.inject(body("once", [{ lemma: weak!.id, matched: 2, wrong: 0 }]))).statusCode).toBe(400);
     expect(count(env, "SELECT COUNT(*) AS n FROM vocabulary_match_results")).toBe(0);
     const withRounds = (rounds: unknown) => ({ ...body("rush", good), payload: { mode: "rush", results: good, rounds } });
     expect((await app.inject(withRounds(0))).statusCode).toBe(400);
     expect((await app.inject(withRounds(11))).statusCode).toBe(400);
-    expect((await app.inject(body("rush", good.map((r) => ({ ...r, matched: 5 }))))).statusCode).toBe(400); // the default is 4
-    expect((await app.inject({ ...body("rush", good), payload: { mode: "rush", results: good.map((r) => ({ ...r, matched: r.matched === 4 ? 6 : r.matched })), rounds: 6 } })).statusCode).toBe(201); // a learner who set 6 repeats
+    expect((await app.inject(body("rush", good.map((r) => ({ ...r, matched: 4 }))))).statusCode).toBe(400); // the default is 3
+    expect((await app.inject({ ...body("rush", good), payload: { mode: "rush", results: good.map((r) => ({ ...r, matched: r.matched === 3 ? 6 : r.matched })), rounds: 6 } })).statusCode).toBe(201); // a learner who set 6 repeats
     expect(count(env, "SELECT COUNT(*) AS n FROM vocabulary_match_results WHERE needed = 6")).toBe(words.length);
     expect((await app.inject(body("rush", good))).statusCode).toBe(200); // saved once: a repeat changes nothing
     expect((await app.inject(body("rush", good.map((r) => ({ ...r, matched: 0 }))))).statusCode).toBe(200); // a repeat changes nothing
@@ -324,6 +333,7 @@ describe("Vocabulary Practice (vocabulary TZ)", () => {
 
   it("adaptive selection (D64): a missed word comes back as a labelled repeat that reserves and exposes only its never-exposed units", async () => {
     env = openSliceCopy();
+    useStandardVocabulary(env);
     const items = await publishStarter(env);
     for (const w of ["home", "dog"]) addWord(env.db, env.deps, { word: w });
     const s1 = createVocabularySession(env.db, env.deps, { timezone: "Australia/Brisbane", count: 4, seed: "one" });
@@ -400,6 +410,7 @@ describe("Vocabulary Practice (vocabulary TZ)", () => {
 
   it("repeat-only stock still forms a session (all slots are labelled repeats, reservations only for unexposed units); mixed stock starts at count = available", async () => {
     env = openSliceCopy();
+    useStandardVocabulary(env);
     const items = await publishStarter(env);
     addWord(env.db, env.deps, { word: "dog" });
     const s = createVocabularySession(env.db, env.deps, { timezone: "Australia/Brisbane", count: 3 });

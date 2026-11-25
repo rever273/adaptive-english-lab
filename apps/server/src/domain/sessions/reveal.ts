@@ -155,6 +155,7 @@ export function revealSlot(db: Db, deps: SessionDeps, sessionId: string, slotId:
       }
 
       const hints = (JSON.parse(slot.content) as { hints_ru?: string[] }).hints_ru ?? [];
+      const usedHints = (db.prepare("SELECT COUNT(*) AS n FROM session_events WHERE slot_id = ? AND event_type = 'hint' AND json_extract(payload_json, '$.kind') IS NULL").get(slotId) as { n: number }).n;
       return {
         slotId: slot.slotId,
         ordinal: slot.ordinal,
@@ -165,7 +166,8 @@ export function revealSlot(db: Db, deps: SessionDeps, sessionId: string, slotId:
         questionId: slot.questionId,
         readingGroupId: slot.readingGroupId,
         prompt: buildPrompt(slot.format, slot.content, slot.questionId, slot.slotId),
-        hintsAvailable: hints.length,
+        hintsAvailable: Math.max(0, hints.length - usedHints),
+        ...(usedHints > 0 && hints.length > 0 ? { lastHint: hints[Math.min(usedHints, hints.length) - 1] } : {}),
         alreadyRevealed: already,
         state: slotState(db, slotId),
       };

@@ -8,6 +8,9 @@ type Batch = { asr_checks_completed?: boolean; active_model?: string | null; act
 export type AuditStatus = { enabled: boolean; running: boolean; checked: number; matched: number; error: string | null; progress: string | null; batch: { total: number; largeDone: number; mediumDone: number; activeModel: string | null; etaSeconds: number | null } | null };
 const alive = (pid?: number): boolean => { if (!pid || !Number.isSafeInteger(pid) || pid <= 0) return false; try { process.kill(pid, 0); return true; } catch { return false; } };
 
+/** the checks keep going in the background until this many checked recordings are waiting unused (10 sentences a lesson: hundreds of lessons) */
+export const AUDIT_STOCK_CEILING = 5000;
+
 /** CPU-only checks against the existing source transcript; no generated text is approved. */
 export class RealAudit {
   private child: ChildProcess | null = null;
@@ -105,8 +108,8 @@ export class RealAudit {
     if (this.stopped || this.child || !this.enabled() || this.error) return;
     const status = this.status();
     if (this.error) return;
-    if ((this.remaining?.() ?? status.matched) >= 100) {
-      this.progress = "Enough checked recordings are ready";
+    if ((this.remaining?.() ?? status.matched) >= AUDIT_STOCK_CEILING) {
+      this.progress = `${AUDIT_STOCK_CEILING} unused checked recordings are ready; checks continue as they are used`;
       this.timer = setTimeout(() => { this.timer = null; this.kick(); }, 60_000);
       this.timer.unref();
       return;

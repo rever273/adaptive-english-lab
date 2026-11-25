@@ -44,7 +44,7 @@ export function skillCards(version = "generation-v10"): Record<string, SkillCard
     cards = pick(["taxonomy-v1"]);
     cardsV10 = pick(["taxonomy-v1", "taxonomy-v2"]);
   }
-  return version === "generation-v10" ? cardsV10! : cards;
+  return (version === "generation-v10" || version === "generation-v11") ? cardsV10! : cards;
 }
 const CYRILLIC = /[Ѐ-ӿ]/;
 /** an option that is only an article or a determiner (such an item is capped at three options) */
@@ -56,7 +56,7 @@ const opts = (min: number, max: number) => ({ type: "array", minItems: min, maxI
 const common = { explanation_ru: str(MIN_EXPLANATION), hint_ru: str(5) };
 
 /** which draft shapes a generation prompt version uses: v7 adds the key words of a translation, v8 marks an error by its exact words */
-export const flagsFor = (version: string): { wordHint: boolean; wordErrors: boolean } => ({ wordHint: version === "generation-v7" || version === "generation-v8" || (version === "generation-v9" || version === "generation-v10"), wordErrors: version === "generation-v8" || (version === "generation-v9" || version === "generation-v10") });
+export const flagsFor = (version: string): { wordHint: boolean; wordErrors: boolean } => ({ wordHint: version === "generation-v7" || version === "generation-v8" || (version === "generation-v9" || (version === "generation-v10" || version === "generation-v11")), wordErrors: version === "generation-v8" || (version === "generation-v9" || (version === "generation-v10" || version === "generation-v11")) });
 
 /** generation-v8: an error is given as its exact words and their corrected wording; the code builds the word segments and the corrected sentence */
 const DETECT_WORDS_PROPS = { ...({ explanation_ru: str(MIN_EXPLANATION), hint_ru: str(5) }), sentence: str(10), error_words: { type: "string", maxLength: 100 }, fix_words: { type: "string", maxLength: 100 } };
@@ -99,7 +99,7 @@ export function draftFormat(type: AnyExerciseType, count: number, version = "", 
 /** Hash input of the prompt version: all schemas + the examples (so changing any of them needs a new version id). */
 export function draftFormatsText(version = ""): string {
   snapshotTexts();
-  return JSON.stringify({ formats: Object.fromEntries((Object.keys(DRAFT_PROPS) as ExerciseType[]).map((t) => [t, draftFormat(t, 2, version)])), examples: EXAMPLES, cards: version === "generation-v10" ? cardsText + extraCardsText : cardsText });
+  return JSON.stringify({ formats: Object.fromEntries((Object.keys(DRAFT_PROPS) as ExerciseType[]).map((t) => [t, draftFormat(t, 2, version)])), examples: EXAMPLES, cards: (version === "generation-v10" || version === "generation-v11") ? cardsText + extraCardsText : cardsText });
 }
 
 const DETECT_WORDS_RULES = "One natural sentence. If it contains ONE clear mistake: error_words are the exact faulty words (one to three consecutive words) copied from the sentence, fix_words is their corrected wording. If it is fully correct: error_words and fix_words are empty strings. Do not invent errors in correct sentences.";
@@ -490,3 +490,5 @@ function rubricPayload(d: Record<string, unknown>, answers: string[], maxWords: 
     allow_voice: true,
   };
 }
+
+export const GENERATION_SYSTEM_V11 = GENERATION_SYSTEM_V9 + "\nFor Russian-to-English tasks, hint_ru must name the decision the learner needs to make in this situation, then offer a short pattern with placeholders. Contrast the tempting wrong form where useful. Do not give the entire answer.";

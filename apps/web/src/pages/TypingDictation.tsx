@@ -100,7 +100,7 @@ export function DictationGame({ state, onResult, onExit }: { state: DictationSta
   // wrong words are shown only after Enter or Hint, for exactly the text that was checked; any edit clears them
   const [marks, setMarks] = useState<{ text: string; segments: MarkedSegment[] } | null>(null);
   // typing time of the current attempt (gaps over 5 s between keys do not count) and keys pressed; sent with every answer
-  const typing = useRef({ ms: 0, last: 0, keys: 0 });
+  const typing = useRef({ ms: 0, last: 0, keys: 0, letters: new Map<string, { ms: number; timed: number }>() });
 
   useEffect(() => {
     let active = true;
@@ -219,8 +219,8 @@ export function DictationGame({ state, onResult, onExit }: { state: DictationSta
     markChecking(engine);
     bump();
     try {
-      const r = await api.answerDictation(ex.id, { attemptId: engine.attemptId, text: engine.text, activeMs: Math.round(clock.current.ms), typingMs: Math.round(typing.current.ms), keystrokes: typing.current.keys });
-      typing.current = { ms: 0, last: 0, keys: 0 };
+      const r = await api.answerDictation(ex.id, { attemptId: engine.attemptId, text: engine.text, activeMs: Math.round(clock.current.ms), typingMs: Math.round(typing.current.ms), keystrokes: typing.current.keys, keyTimes: [...typing.current.letters].map(([letter, f]) => ({ letter, ms: Math.round(f.ms), timed: f.timed })) });
+      typing.current = { ms: 0, last: 0, keys: 0, letters: new Map() };
       const verdict = applyAnswer(engine, r);
       checkDailyGoal("dictation");
       if (verdict === "wrong") {
@@ -357,6 +357,13 @@ export function DictationGame({ state, onResult, onExit }: { state: DictationSta
               if (!e.ctrlKey && !e.metaKey && !e.altKey && (e.key.length === 1 || e.key === "Backspace")) {
                 const t = typing.current;
                 if (t.last > 0 && now - t.last <= 5000) t.ms += now - t.last;
+                // time of a letter key: the interval since the previous key, when it is not a pause (as in the other modes)
+                if (/^[a-z]$/i.test(e.key) && t.last > 0 && now - t.last <= 2000) {
+                  const k = e.key.toLowerCase();
+                  const f = t.letters.get(k) ?? { ms: 0, timed: 0 };
+                  f.ms += now - t.last; f.timed++;
+                  t.letters.set(k, f);
+                }
                 t.last = now;
                 t.keys++;
               }
@@ -401,7 +408,7 @@ export function DictationResultView({ result, onNext, onDone, onDailyDone }: { r
     ["Time", fmtTotalTime(result.activeMs / 1000), "Active time: listening and typing, not pauses."],
   ];
   const columns = Math.ceil(stats.length / 2); // exactly two rows, like Words and Books
-  useEnterContinue(onDailyDone ?? onNext);
+  useEnterContinue(onNext); // Enter continues this training, not the daily practice
   return (
     <section className="typing-result card" aria-label="Audio Dictation result">
       <DailyGoalCheck mode="dictation" />
@@ -426,7 +433,7 @@ export function DictationResultView({ result, onNext, onDone, onDailyDone }: { r
         </ol>
       </details>
       <div className="actions">
-        <button className="btn btn-primary" onClick={onNext}>Generate next lesson</button>
+        <button className="btn btn-primary has-kbd" onClick={onNext}><kbd>Enter</kbd> Generate next lesson</button>
         {onDailyDone && <button className="btn btn-primary" onClick={onDailyDone}>Continue Daily Practice</button>}
         <button className="btn" onClick={onDone}>Back to Typing</button>
       </div>

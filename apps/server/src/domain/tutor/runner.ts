@@ -12,6 +12,7 @@ import { bankTexts } from "../vocabulary/forms.js";
 import { TUTOR_PROMPT } from "./repository.js";
 import { runConversation, type ConversationPayload } from "../conversation/runner.js";
 import { runGrammarClozeAnalysis, type AnalysisPayload } from "../grammarCloze/analysis.js";
+import { runGrammarClozeAudit, type AuditPayload } from "../grammarCloze/audit.js";
 
 export interface TutorPayload {
   messageId: string;
@@ -71,7 +72,7 @@ export interface TutorRunnerOptions {
 }
 
 /** Background tutor answer. Context is the exercise, its approved rule and skill ids; it can only append a DRAFT message and touches no score. */
-export class TutorJobRunner implements JobRunner<TutorPayload | ConversationPayload> {
+export class TutorJobRunner implements JobRunner<TutorPayload | ConversationPayload | AnalysisPayload | AuditPayload> {
   readonly kind = "tutor" as const;
   private modelVersionId: string | null = null;
   constructor(private readonly o: TutorRunnerOptions) {}
@@ -104,7 +105,11 @@ export class TutorJobRunner implements JobRunner<TutorPayload | ConversationPayl
     return this.modelVersionId ? { modelVersionId: this.modelVersionId, configHash: configHashOf(TUTOR_PARAMS) } : null;
   }
 
-  async run(ctx: RunnerContext<TutorPayload | ConversationPayload | AnalysisPayload>): Promise<RunnerOutput> {
+  async run(ctx: RunnerContext<TutorPayload | ConversationPayload | AnalysisPayload | AuditPayload>): Promise<RunnerOutput> {
+    if ("grammarClozeAudit" in ctx.job.payload) {
+      if (await this.o.installedDigest(this.pinned.tag) !== this.pinned.digest) throw new RunnerError("model_digest_mismatch", "The installed model differs from the pinned model", false);
+      return runGrammarClozeAudit(this.o.db, this.o.chat, ctx as RunnerContext<AuditPayload>, this.modelVersionId);
+    }
     if ("grammarClozeAnalysisId" in ctx.job.payload) {
       if (await this.o.installedDigest(this.pinned.tag) !== this.pinned.digest) throw new RunnerError("model_digest_mismatch", "The installed model differs from the pinned model", false);
       return runGrammarClozeAnalysis(this.o.db, this.o.chat, ctx as RunnerContext<AnalysisPayload>);

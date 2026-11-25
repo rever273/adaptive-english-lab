@@ -7,7 +7,7 @@ import { runStructured } from "../ai/structured.js";
 import type { Validated } from "../ai/validate.js";
 import type { LessonPlan, PlanSkill } from "./plan.js";
 import { ensurePromptVersion } from "../ai/prompts.js";
-import { WORD_LESSON_KEEP_PROMPT, WORD_LESSON_KEEP_SYSTEM_V1, keepFormat, wordLessonKeepSchemaText, WORD_LESSON_SENSE_PROMPT, WORD_LESSON_SENSE_SYSTEM_V1, senseFormat, wordLessonSenseSchemaText, WORD_LESSON_PAIRS_PROMPT, WORD_LESSON_PAIRS_SYSTEM_V1, WORD_LESSON_PROMPT, WORD_LESSON_REVIEW_PROMPT, WORD_LESSON_REVIEW_SYSTEM_V1, pairsFormat, wordLessonPairsSchemaText, wordLessonReviewSchemaText, wordLessonSchemaText, WORD_LESSON_SYSTEM_V1, reviewFormat, stage12Format, stage3Format, stage4Format, stage5Format } from "./prompts.js";
+import { WORD_LESSON_KEEP_PROMPT, WORD_LESSON_KEEP_SYSTEM_V1, keepFormat, wordLessonKeepSchemaText, WORD_LESSON_SENSE_PROMPT, WORD_LESSON_SENSE_SYSTEM_V1, senseFormat, wordLessonSenseSchemaText, WORD_LESSON_PAIRS_PROMPT, WORD_LESSON_PAIRS_SYSTEM_V1, WORD_LESSON_PROMPT, WORD_LESSON_PROMPT_V2, WORD_LESSON_SYSTEM_V2, WORD_LESSON_REVIEW_PROMPT, WORD_LESSON_REVIEW_SYSTEM_V1, pairsFormat, wordLessonPairsSchemaText, wordLessonReviewSchemaText, wordLessonSchemaText, WORD_LESSON_SYSTEM_V1, reviewFormat, stage12Format, stage3Format, stage4Format, stage5Format } from "./prompts.js";
 import { keepPairs, pairsOf, senseSentences, reviewInput, reviewSentences, stageInput, stageOfReviewId, validateStage12, validateStage3, validateStage4, validateStage5, type Stage12, type Stage3, type Stage4, type Stage5, type WordFacts } from "./stages.js";
 import { SentenceLedger, bad, findTarget, lessonWord, ok, parseObject, sentenceKey, sentencesOfContent, str } from "./validate.js";
 
@@ -236,6 +236,7 @@ export async function runWordLessonJob(ctx: RunnerContext<WordLessonPayload>, o:
   for (const s of [...(JSON.parse(row.plan_json) as LessonPlan).skills, ...SAFE_SKILLS]) if (unsuitableSkill(s, (JSON.parse(row.sense_json) as SenseSnapshot).pos)) avoid.add(skillKey(s));
   const storedPlan = JSON.parse(row.plan_json) as LessonPlan;
   const plan = replanAvoiding(storedPlan, avoid);
+  if (plan.version === "word-lesson-plan-v2") ensurePromptVersion(db, WORD_LESSON_PROMPT_V2, wordLessonSchemaText());
   const facts = factsOf(row.lemma, sense);
   const cp: Checkpoint = { ...(ctx.job.checkpoint as Checkpoint | undefined) };
   cp.notes ??= {};
@@ -273,7 +274,7 @@ export async function runWordLessonJob(ctx: RunnerContext<WordLessonPayload>, o:
         client: o.chat,
         model: o.model.tag,
         messages: [
-          { role: "system", content: WORD_LESSON_SYSTEM_V1 },
+          { role: "system", content: plan.version === "word-lesson-plan-v2" ? WORD_LESSON_SYSTEM_V2 : WORD_LESSON_SYSTEM_V1 },
           { role: "user", content: stageInput(facts, plan, stage, [...(cp.notes?.[stage] ?? []), ...earlier]) },
         ],
         format,
@@ -305,7 +306,7 @@ export async function runWordLessonJob(ctx: RunnerContext<WordLessonPayload>, o:
     if (s === "stage12") cp.s12 = await ask("stage12", stage12Format(), (t) => validateStage12(t, facts, ledger));
     else if (s === "stage3") cp.s3 = await ask("stage3", stage3Format(), (t) => validateStage3(t, facts, plan, ledger));
     else if (s === "stage4") cp.s4 = await ask("stage4", stage4Format(), (t) => validateStage4(t, facts, plan, ledger));
-    else cp.s5 = await ask("stage5", stage5Format(), (t) => validateStage5(t, facts, ledger));
+    else cp.s5 = await ask("stage5", stage5Format(), (t) => validateStage5(t, facts, ledger, plan.version === "word-lesson-plan-v2"));
     ctx.checkpoint(cp);
   };
 

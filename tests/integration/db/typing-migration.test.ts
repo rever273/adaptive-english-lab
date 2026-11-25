@@ -25,7 +25,7 @@ describe("typing migration 026 (triggers and indexes)", () => {
     const d = await setup();
     expect((d.prepare("SELECT MAX(version) AS n FROM schema_migrations").get() as { n: number }).n).toBe(SCHEMA_VERSION);
     const tables = d.prepare("SELECT name FROM sqlite_master WHERE type='table' AND name LIKE 'typing_%'").all() as Array<{ name: string }>;
-    expect(tables.map((t) => t.name).sort()).toEqual(["typing_book_encounters", "typing_books", "typing_dictation_attempts", "typing_dictation_events", "typing_dictation_exercises", "typing_dictation_lessons", "typing_dictation_pool", "typing_dictation_pool_use", "typing_dictation_voice_checks", "typing_dictation_xp_events", "typing_key_stats", "typing_recall_results", "typing_sessions", "typing_word_bank", "typing_word_results", "typing_words", "typing_xp_events"]);
+    expect(tables.map((t) => t.name).sort()).toEqual(["typing_book_encounters", "typing_book_word_mistakes", "typing_book_word_tracking", "typing_books", "typing_dictation_attempts", "typing_dictation_events", "typing_dictation_exercises", "typing_dictation_keys", "typing_dictation_lessons", "typing_dictation_pool", "typing_dictation_pool_use", "typing_dictation_real_flags", "typing_dictation_real_provenance", "typing_dictation_voice_checks", "typing_dictation_xp_events", "typing_key_hits", "typing_key_lessons", "typing_key_pairs", "typing_key_stats", "typing_key_xp_events", "typing_recall_results", "typing_sessions", "typing_word_bank", "typing_word_results", "typing_words", "typing_xp_events"]);
   });
 
   it("freezes a finished session: no update is allowed", async () => {

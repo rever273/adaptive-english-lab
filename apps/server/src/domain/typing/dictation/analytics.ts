@@ -5,6 +5,7 @@ import { dictationAccuracy } from "./check.js";
 import { exerciseCoefficient } from "./lessons.js";
 import { cpmOf, wpmOf } from "./result.js";
 import { classifyAnswer, errorTypeSummary } from "./errorTypes.js";
+import { dictationKeyboardAnalytics } from "../keyAnalytics.js";
 import type { VoiceListing } from "../../voices/service.js";
 
 export interface DictationAnalyticsInput {
@@ -13,6 +14,8 @@ export interface DictationAnalyticsInput {
   now: Date;
   /** the voices in use, for the voice balance table */
   voices?: readonly VoiceListing[];
+  /** where the Key Builder letter order is read from; without it the per-key view is left out */
+  projectRoot?: string;
 }
 
 /** a voice is shown only with at least this many exercises */
@@ -163,6 +166,7 @@ export function dictationAnalytics(db: Db, input: DictationAnalyticsInput): Dict
     // mistakes of the first answers only; an answer that was right the first time has none
     errorTypes: errorTypeSummary(windowFacts.filter((f) => !f.firstCorrect).flatMap((f) => classifyAnswer(f.textEn, f.firstAnswer))),
     voiceBalance: voiceBalance(input.voices ?? []),
+    ...(input.projectRoot !== undefined ? { keyboard: dictationKeyboardAnalytics(db, input.projectRoot) } : {}),
   };
 }
 

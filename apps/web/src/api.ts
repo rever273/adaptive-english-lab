@@ -58,7 +58,11 @@ export {
   completeClozeSession,
   recordClozeActivity,
   requestClozeAnalysis,
-  fetchClozeAnalysis
+  fetchClozeAnalysis,
+  fetchClozeAudit,
+  setClozeAudit,
+  fetchClozeAuditItems,
+  setClozeAuditOverride
 } from "./api/practice";
 
 export type {
@@ -69,7 +73,9 @@ export type {
   ClozeAnswerResult,
   ClozeSlotView,
   ClozeStageView,
-  ClozeAnalysisView
+  ClozeAnalysisView,
+  ClozeAuditOverview,
+  ClozeAuditRow
 } from "./api/practice";
 
 export {
@@ -78,6 +84,7 @@ export {
   setVocabularySpeech,
   vocabularySpeech,
   vocabularyTextSpeech,
+  vocabularyCachedSpeech,
   fetchMatchWords,
   saveMatchResults,
   vocabularyWordSpeech,
@@ -98,6 +105,22 @@ export {
   fetchVocabCoverage,
   fetchWordLessons,
   fetchWordLessonStudio,
+  fetchContextLoopStudio,
+  generateContextLoop,
+  createContextLoopAgentBatch,
+  cancelContextLoopAgentBatch,
+  fetchContextLoopSentences,
+  setContextLoopSentenceStatus,
+  editContextLoopSentence,
+  fetchContextLoopStatus,
+  startContextLoop,
+  fetchContextLoopSession,
+  answerContextLoop,
+  completeContextLoop,
+  recordContextLoopActivity,
+  answerContextLoopCheck,
+  contextLoopFirstLetter,
+  contextLoopSttStart,
   generateWordLessons,
   retryWordLessons,
   startWordLessonRun,
@@ -122,7 +145,12 @@ export type {
   VocabCoverageWord,
   WordLessonListResponse,
   WordLessonRunState,
-  WordLessonStudioStatus
+  WordLessonStudioStatus,
+  ContextLoopStudioStatus,
+  ContextLoopSentenceView,
+  ContextLoopStatus,
+  ContextLoopState,
+  ContextLoopAids
 } from "./api/vocabulary";
 
 export {
@@ -222,6 +250,7 @@ export type {
   JourneyMode,
   JourneyData,
   ConversationAnalyticsData,
+  ConversationInsights,
   ClozeWindow,
   ClozeAnalyticsData,
   GrammarTrendsData
@@ -296,3 +325,20 @@ export type {
   ConversationHome,
   LessonTargetView
 } from "./api/conversation";
+
+export {
+  fetchVocabTypingOverview,
+  startVocabScreening,
+  startVocabLearning,
+  fetchVocabSession,
+  sendVocabEvent,
+  sendVocabReview,
+  flagVocabSentence,
+  completeVocabSession,
+  recordVocabActivity,
+  fetchVocabTypingAnalytics,
+  fetchVocabWords,
+  restoreVocabWord
+} from "./api/vocabTyping";
+
+export type { VtAnalytics, VtOverview, VtSessionState, VtWordRow, VtWordFilter } from "./api/vocabTyping";

@@ -161,3 +161,100 @@ button.gc-option.gc-wrong {
     border-radius: 50%;
     margin-right: 0.25rem;
 }
+
+/* ---- reading aids, hints and feedback motion (cloze-select-v2) ---- */
+.gc-theme {
+    margin: 0.25rem 0 0.5rem;
+}
+.gc-name {
+    color: var(--muted);
+    font-style: italic;
+}
+.gc-cue {
+    background: var(--info-bg);
+    border-bottom: 2px dotted var(--accent);
+    border-radius: 3px;
+    padding: 0 0.15rem;
+}
+.gc-hint {
+    margin: 0.4rem 0;
+}
+.gc-reason {
+    margin: 0.4rem 0 0;
+}
+.gc-streak {
+    display: inline-flex;
+    align-items: center;
+    gap: 0.3rem;
+    padding: 0.1rem 0.55rem;
+    border-radius: 999px;
+    background: var(--ok-bg);
+    color: var(--ok-fg);
+    font-weight: 600;
+    font-size: 0.9rem;
+}
+button.gc-auto {
+    position: relative;
+    overflow: hidden;
+}
+button.gc-auto::after {
+    content: '';
+    position: absolute;
+    left: 0;
+    bottom: 0;
+    height: 3px;
+    width: 100%;
+    background: currentColor;
+    opacity: 0.5;
+    transform-origin: left;
+    animation: gc-auto-fill var(--gc-auto-ms, 1200ms) linear forwards;
+}
+@keyframes gc-auto-fill {
+    from { transform: scaleX(0); }
+    to { transform: scaleX(1); }
+}
+@media (prefers-reduced-motion: no-preference) {
+    .gc-enter {
+        animation: gc-enter 220ms ease-out;
+    }
+    .gc-gap-ok {
+        animation: gc-pop 360ms ease-out;
+    }
+    .gc-gap-bad,
+    button.gc-option.gc-wrong {
+        animation: gc-shake 320ms ease-in-out;
+    }
+    button.gc-option.gc-right {
+        animation: gc-glow 600ms ease-out;
+    }
+    .gc-streak {
+        animation: gc-pop 300ms ease-out;
+    }
+    .gc-cue {
+        transition: background-color 200ms;
+    }
+}
+@keyframes gc-enter {
+    from { opacity: 0; transform: translateY(6px); }
+    to { opacity: 1; transform: none; }
+}
+@keyframes gc-pop {
+    0% { transform: scale(0.85); }
+    60% { transform: scale(1.12); }
+    100% { transform: scale(1); }
+}
+@keyframes gc-shake {
+    0%, 100% { transform: translateX(0); }
+    25% { transform: translateX(-5px); }
+    75% { transform: translateX(5px); }
+}
+@keyframes gc-glow {
+    from { box-shadow: 0 0 0 0 var(--ok); }
+    to { box-shadow: 0 0 0 8px transparent; }
+}
+.gc-audit-list li {
+    align-items: center;
+}
+.gc-audit-list li > div {
+    min-width: 0;
+}

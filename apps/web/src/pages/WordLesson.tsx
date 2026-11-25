@@ -6,6 +6,7 @@ import { Kbd, isPressable, isTextField, useKeys } from "../components/hotkeys";
 import { AI_CHECK_WAIT_S } from "../practiceFlow";
 import { useVoice } from "../voice";
 import { useWordLessonActivity } from "../wordLessonActivity";
+import { diffSentences, isTypo, type DiffWord } from "../sentenceDiff";
 import { PauseButton, PauseOverlay, useAutoPause, usePauseKeys } from "../components/Pause";
 import { DailyGoalCheck } from "../components/DailyGoalNotice";
 
@@ -273,7 +274,7 @@ export function WordLesson({ lessonId, onExit, onFinished }: { lessonId: string;
           })}
         </ol>
         <div className="actions">
-          <button className="btn btn-primary" onClick={onFinished ?? onExit} autoFocus data-testid="wl-finish">{onFinished ? "Continue" : "Back to Vocabulary"} <i className="pi pi-arrow-right" aria-hidden="true" /></button>
+          <button className="btn btn-primary" onClick={onFinished ?? onExit} data-testid="wl-finish">{onFinished ? "Continue" : "Back to Vocabulary"} <i className="pi pi-arrow-right" aria-hidden="true" /></button>
           {onFinished && <button className="btn" onClick={onExit}>Stay in Vocabulary</button>}
         </div>
       </section>
@@ -367,9 +368,9 @@ export function WordLesson({ lessonId, onExit, onFinished }: { lessonId: string;
       )}
       {stage === 5 && task?.stage === 5 && (
         <div data-testid="wl-stage5">
-          <p className="instruction">Write one sentence of your own with <strong className="wl-target">{run.lemma}</strong>. Use any construction you like.</p>
+          <p className="instruction">Write one sentence of your own with <strong className="wl-target">{run.lemma}</strong>. </p>
           <p className="prompt" data-testid="wl-prompt">{task.situationEn}</p>
-          <p lang="ru" className="ru small">{task.situationRu}</p>
+          <details className="small"><summary>Translation</summary><p lang="ru" className="ru">{task.situationRu}</p></details>
           <p className="small">You may use (not all of them): {task.suggestedWords.filter(usable).map((w) => <span key={w} className="chip">{w}</span>)}</p>
         </div>
       )}
@@ -377,8 +378,8 @@ export function WordLesson({ lessonId, onExit, onFinished }: { lessonId: string;
       {stage >= 2 && item && (
         <>
           {item.revealed.word && <p className="notice notice-info small" role="status" data-testid="wl-hint-word">The word: <strong>{item.revealed.word}</strong></p>}
-          {item.revealed.start && <p className="notice notice-info small" role="status" data-testid="wl-hint-start">Start like this: <strong>{item.revealed.start}</strong> …</p>}
-          {item.revealed.partial && !item.revealed.full && <p className="notice notice-info small" role="status" data-testid="wl-hint-partial">Part of the answer: <strong>{item.revealed.partial}</strong> …</p>}
+          {item.revealed.start && <p className="notice notice-info small" role="status" data-testid="wl-hint-start"><strong>{item.revealed.start}</strong> …</p>}
+          {item.revealed.partial && !item.revealed.full && <p className="notice notice-info small" role="status" data-testid="wl-hint-partial"><strong>{item.revealed.partial}</strong> …</p>}
           {item.revealed.full && stage !== 2 && <p className="notice notice-info small" role="status" data-testid="wl-hint-full">Full answer: <strong>{item.revealed.full}</strong></p>}
           {item.revealed.translationRu && <p lang="ru" className="vocab-translation" role="status" data-testid="wl-translation">{item.revealed.translationRu}</p>}
         </>
@@ -455,26 +456,32 @@ function Feedback({ attempt, stage, busy, done, final, reference, onTryAgain, on
   const ok = v === "correct";
   const shownText = f.correctedEn ?? reference ?? null;
   const title = ok ? "Correct" : v === "disputed" ? "You disagreed with this check" : v === "unresolved" ? "Could not be checked now" : stage === 2 ? "Not this word" : "Not quite";
+  const diff = v === "incorrect" && stage !== 2 && shownText ? diffSentences(attempt.answerText, shownText) : null;
+  const diffTypos = diff ? diff.answer.filter((w) => w.mark === "typo").length : 0;
+  const diffWrong = diff ? diff.answer.filter((w) => w.mark === "wrong").length + diff.corrected.filter((w) => w.mark === "wrong").length : 0;
+  // only slips of the pen (e.g. "ir" for "it"): not a language mistake, so shown in orange instead of red
+  const typoOnly = v === "incorrect" && ((diff !== null && diffTypos > 0 && diffWrong === 0) || (f.issues.length > 0 && f.issues.every((i) => isTypo(i.fragment, i.fixEn))));
+  const words = (list: DiffWord[]) => list.map((w, k) => <span key={k}><span className={`wl-w wl-w-${w.mark}`}>{w.text}</span>{w.gap}</span>);
   return (
-    <div className={`feedback feedback-${ok ? "ok" : v === "unresolved" || v === "disputed" ? "info" : "again"}`} data-testid="wl-feedback" data-verdict={v} aria-live="polite">
+    <div className={`feedback feedback-${ok ? "ok" : v === "unresolved" || v === "disputed" ? "info" : typoOnly ? "tip" : "again"}`} data-testid="wl-feedback" data-verdict={v} data-typo={typoOnly ? "1" : undefined} aria-live="polite">
       <p className="feedback-title">
-        <i className={`pi ${ok ? "pi-check-circle" : v === "incorrect" ? "pi-times-circle" : "pi-info-circle"}`} aria-hidden="true" /> {title}
+        <i className={`pi ${ok ? "pi-check-circle" : v === "incorrect" && !typoOnly ? "pi-times-circle" : "pi-info-circle"}`} aria-hidden="true" /> {typoOnly ? "Almost: just a typo" : title}
       </p>
-      <p className={`wl-yours wl-yours-${ok ? "ok" : v === "incorrect" ? "bad" : "plain"}`} data-testid="wl-yours">
-        <span className="wl-yours-label">Your answer</span> {attempt.answerText}
+      <p className={`wl-yours wl-yours-${ok ? "ok" : typoOnly ? "typo" : v === "incorrect" ? "bad" : "plain"}`} data-testid="wl-yours">
+        <span className="wl-yours-label">Your answer</span> {diff ? words(diff.answer) : attempt.answerText}
       </p>
       {!ok && f.issues.length > 0 && (
         <ul className="wl-issues">
           {f.issues.map((i, k) => (
             <li key={k}>
-              {i.fragment && <code>{i.fragment}</code>} <span lang="ru">{i.problemRu}</span>
+              {i.fragment && <code>{i.fragment}</code>} {isTypo(i.fragment, i.fixEn) && <span className="wl-typo-tag">typo</span>} <span lang="ru">{i.problemRu}</span>
               {i.fixEn && <> → <strong>{i.fixEn}</strong></>}
             </li>
           ))}
         </ul>
       )}
       {f.commentRu && <p lang="ru" className="ru">{f.commentRu}</p>}
-      {!ok && stage !== 2 && shownText && <p data-testid="wl-corrected">{v === "unresolved" ? "A model answer" : "A correct version"}: <strong>{shownText}</strong></p>}
+      {!ok && stage !== 2 && shownText && <p data-testid="wl-corrected">{v === "unresolved" ? "A model answer" : "A correct version"}: <strong>{diff ? words(diff.corrected) : shownText}</strong></p>}
       {v === "unresolved" && <p className="muted small">Your answer is saved. The check may still arrive later.</p>}
       <div className="actions">
         {ok || done ? (

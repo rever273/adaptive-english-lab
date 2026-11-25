@@ -1,9 +1,20 @@
 /* ---- Typing Practice (TASK_027) ---- */
 .typing-cards {
     display: grid;
-    grid-template-columns: repeat(auto-fit, minmax(min(100%, 20rem), 1fr));
+    /* the four practice cards sit in one row on a wide screen (D180) and wrap on a narrow one */
+    grid-template-columns: repeat(4, minmax(0, 1fr));
     gap: 1rem;
     align-items: end;
+}
+@media (max-width: 1100px) {
+    .typing-cards {
+        grid-template-columns: repeat(2, minmax(0, 1fr));
+    }
+}
+@media (max-width: 640px) {
+    .typing-cards {
+        grid-template-columns: minmax(0, 1fr);
+    }
 }
 /* a single card (Daily Practice → Words) keeps a normal card width instead of stretching across the page */
 .typing-cards-single {
@@ -1562,7 +1573,9 @@ button.letter-hint-tile:hover {
     animation: drills-pulse 0.9s ease-in-out infinite;
 }
 @keyframes drills-pulse {
-    50% { opacity: 0.45; }
+    50% {
+        opacity: 0.45;
+    }
 }
 /* few lives left: a warning over the game field */
 .drills-low-lives {
@@ -1622,13 +1635,12 @@ button.letter-hint-tile:hover {
     cursor: pointer;
 }
 
-
 /* the whole option box is clickable, padding included: the label's invisible layer covers it; the speaker button stays above it */
 .option {
     position: relative;
 }
 .option > label::after {
-    content: "";
+    content: '';
     position: absolute;
     inset: 0;
 }
@@ -1953,6 +1965,63 @@ button.letter-hint-tile:hover {
         gap: 0.3rem;
     }
 }
+/* per-key progress heatmap: sessions left to right, keys top to bottom */
+.keys-progress-scroll {
+    overflow-x: auto;
+}
+.keys-progress-grid {
+    display: flex;
+    flex-direction: column;
+    gap: 2px;
+    min-width: 18rem;
+}
+.keys-progress-row {
+    display: flex;
+    gap: 2px;
+    align-items: stretch;
+}
+.keys-progress-letter {
+    flex: 0 0 1.4rem;
+    font-size: 0.8rem;
+    line-height: 1;
+    align-self: center;
+    text-transform: uppercase;
+    opacity: 0.8;
+}
+.keys-progress-cell {
+    flex: 1 1 0;
+    min-width: 0.55rem;
+    height: 0.95rem;
+    border-radius: 2px;
+}
+.keys-progress-cell.empty {
+    background: rgba(128, 138, 156, 0.18);
+}
+.keys-progress-switch {
+    margin: 0.3rem 0 0.6rem;
+}
+/* Key Builder: the last report over the lesson */
+.keys-report-backdrop {
+    position: fixed;
+    inset: 0;
+    z-index: 50;
+    display: flex;
+    align-items: flex-start;
+    justify-content: center;
+    overflow-y: auto;
+    padding: 2rem 1rem;
+    background: rgba(0, 0, 0, 0.6);
+}
+.keys-report-backdrop > .card {
+    max-width: 70rem;
+    width: 100%;
+}
+.keys-show-stats {
+    display: inline-flex;
+    align-items: center;
+    gap: 0.35rem;
+    font-size: 0.85rem;
+}
 /* Key Builder result: what the next letter waits for */
 .keys-next {
     margin: 0.4rem 0 0.8rem;
@@ -1963,6 +2032,10 @@ button.letter-hint-tile:hover {
 .keys-next-table td.bad {
     color: var(--err);
     font-weight: 600;
+}
+/* a key above the accuracy limit: not a blocker on its own, it only raises the all-keys total */
+.keys-next-table td.warn {
+    color: var(--warn-fg, var(--warn));
 }
 .keys-row-blocked td:first-child {
     box-shadow: inset 3px 0 0 var(--err);
@@ -1987,10 +2060,10 @@ button.letter-hint-tile:hover {
     --w: 0%;
     --hue: 0;
     display: block;
-    height: 0.7rem;
+    height: calc(0.7rem + 2px);
     border-radius: 0.4rem;
     border: 1px solid var(--border);
-    background: var(--surface-2);
+    background: #f5f8ff;
     overflow: hidden;
 }
 .keys-bar > i {
@@ -1998,11 +2071,6 @@ button.letter-hint-tile:hover {
     height: 100%;
     width: var(--w);
     background: hsl(var(--hue) 65% 45%);
-}
-.keys-bar.mini {
-    height: 0.35rem;
-    margin-top: 0.25rem;
-    min-width: 4rem;
 }
 .keys-need,
 .keys-waiting {
@@ -2041,4 +2109,381 @@ button.letter-hint-tile:hover {
 .keyboard-charts {
     display: grid;
     gap: 0.75rem;
+}
+/* Key Builder: the "All" row of the next-key table is what the accuracy is judged by */
+.keys-total-row td {
+    border-top: 2px solid var(--border);
+    background: color-mix(in srgb, var(--surface-2) 60%, transparent);
+}
+
+/* Key Builder report */
+.keys-chip-cell {
+    display: inline-flex;
+    flex-direction: column;
+    align-items: center;
+    gap: 0.1rem;
+}
+.keys-chip-num {
+    font-size: 0.7rem;
+    color: var(--muted);
+}
+.keys-chip-solo {
+    display: inline-flex;
+}
+.keys-result-card {
+    position: relative;
+}
+.keys-report-x {
+    position: absolute;
+    top: 0.6rem;
+    right: 0.6rem;
+    width: 2rem;
+    height: 2rem;
+    border: 1px solid var(--border);
+    border-radius: 0.4rem;
+    background: var(--surface);
+    color: var(--text);
+    cursor: pointer;
+}
+.keys-report-x:hover {
+    background: var(--surface-2);
+}
+.keys-next-table td:first-child,
+.keys-next-table th:first-child {
+    text-align: center;
+}
+.keys-row-click {
+    cursor: pointer;
+}
+.keys-row-click:hover td {
+    background: color-mix(in srgb, var(--surface-2) 70%, transparent);
+}
+.keys-press-row > td {
+    padding: 0.4rem 0.6rem;
+}
+.keys-curve {
+    margin: 0.6rem 0;
+}
+
+/* meters: speed (target and goal ticks) and wrong presses (limit tick) */
+.kmeter {
+    position: relative;
+    display: block;
+    height: calc(0.35rem + 2px);
+    margin-top: 0.3rem;
+    min-width: 5rem;
+    border-radius: 0.3rem;
+    border: 1px solid var(--border);
+    background: #f5f8ff;
+}
+.kmeter-fills {
+    position: absolute;
+    inset: 0;
+    overflow: hidden;
+    border-radius: inherit;
+}
+.kmeter-fills > i {
+    position: absolute;
+    top: 0;
+    bottom: 0;
+}
+.kmeter-mark {
+    position: absolute;
+    top: -3px;
+    bottom: -3px;
+    width: 2px;
+    margin-left: -1px;
+    border-radius: 1px;
+    box-shadow: 0 0 0 1px rgba(0, 0, 0, 0.45);
+}
+.kmeter-mark.target,
+.kmeter-mark.limit,
+.kmeter-key.target,
+.kmeter-key.limit {
+    background: #f3c94d;
+}
+.kmeter-mark.goal,
+.kmeter-key.goal {
+    background: #6ab7ff;
+}
+.kmeter-key {
+    display: inline-block;
+    width: 2px;
+    height: 0.8em;
+    vertical-align: -0.1em;
+    box-shadow: 0 0 0 1px rgba(0, 0, 0, 0.45);
+}
+.keys-table-tools {
+    display: flex;
+    align-items: flex-start;
+    justify-content: space-between;
+    gap: 1rem;
+    margin: 0.4rem 0;
+}
+.keys-meter-legend {
+    margin: 0;
+}
+.keys-unit-switch {
+    flex: none;
+}
+
+/* ---- Vocabulary Typing (TASK_038) ---- */
+.vt-card {
+    display: flex;
+    flex-direction: column;
+    gap: 0.6rem;
+    align-items: center;
+    text-align: center;
+    padding-block: 1.4rem;
+}
+.vt-progress {
+    margin: 0;
+}
+.vt-text {
+    margin: 0.4rem 0;
+    font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+    font-size: 1.5rem;
+    line-height: 1.7;
+    letter-spacing: 0.02em;
+    max-width: 46rem;
+    text-align: left;
+    overflow-wrap: anywhere;
+}
+.vt-text-large {
+    font-size: 2.6rem;
+    text-align: center;
+}
+.vt-ch.vt-done {
+    color: var(--ok-fg);
+}
+.vt-ch.vt-todo {
+    color: var(--muted);
+}
+.vt-ch.vt-cur {
+    color: var(--text);
+    border-bottom: 3px solid var(--accent);
+}
+.vt-ch.vt-cur.vt-bad {
+    color: var(--err-fg);
+    border-bottom-color: var(--err);
+    background: var(--err-bg);
+}
+.vt-ch.vt-target {
+    font-weight: 700;
+    background: var(--info-bg);
+    border-radius: 3px;
+}
+.vt-ch.vt-target.vt-todo {
+    color: var(--info-fg);
+}
+@media (prefers-reduced-motion: no-preference) {
+    .vt-text.vt-wrong {
+        animation: vt-shake 160ms ease-in-out;
+    }
+}
+@keyframes vt-shake {
+    25% { transform: translateX(-3px); }
+    75% { transform: translateX(3px); }
+}
+.vt-meta,
+.vt-translation {
+    margin: 0;
+}
+.vt-ipa {
+    font-family: "Segoe UI", system-ui, sans-serif;
+}
+.vt-translation {
+    font-size: 1.35rem;
+    font-weight: 600;
+}
+.vt-sentence-ru {
+    margin: 0;
+    font-size: 1.1rem;
+}
+.vt-actions {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 0.5rem;
+    justify-content: center;
+    margin-top: 0.4rem;
+}
+.vt-gapped {
+    margin: 0.4rem 0;
+    font-size: 1.5rem;
+    line-height: 1.6;
+    max-width: 46rem;
+    text-align: left;
+}
+.vt-gap {
+    display: inline-block;
+    min-width: 5rem;
+    border-bottom: 3px solid var(--accent);
+    text-align: center;
+    font-weight: 700;
+}
+.vt-answer {
+    font: inherit;
+    font-size: 1.3rem;
+    min-width: 12rem;
+    padding: 0.35rem 0.6rem;
+    text-align: center;
+    border-radius: 6px;
+    border: 1px solid var(--border);
+    background: var(--surface);
+    color: var(--text);
+}
+.vt-verdict-ok {
+    color: var(--ok-fg);
+    font-weight: 700;
+}
+.vt-verdict-bad {
+    color: var(--err-fg);
+    font-weight: 700;
+}
+.vt-seen {
+    font-size: 0.8rem;
+}
+.vt-tab {
+    display: inline-flex;
+    gap: 0.4rem;
+    align-items: center;
+}
+.vt-estimate-big {
+    font-size: 2rem;
+    font-weight: 700;
+    margin: 0.2rem 0;
+}
+.vt-bands {
+    width: 100%;
+    border-collapse: collapse;
+}
+.vt-bands th,
+.vt-bands td {
+    padding: 0.25rem 0.5rem;
+    text-align: right;
+    border-bottom: 1px solid var(--border);
+}
+.vt-bands th:first-child,
+.vt-bands td:first-child {
+    text-align: left;
+}
+.vt-bar {
+    display: inline-block;
+    height: 0.7rem;
+    background: var(--accent);
+    border-radius: 3px;
+    vertical-align: middle;
+}
+.vt-grid {
+    display: grid;
+    grid-template-columns: repeat(auto-fit, minmax(14rem, 1fr));
+    gap: 1rem;
+}
+.vt-words-tools {
+    display: flex;
+    gap: 0.5rem;
+    flex-wrap: wrap;
+    align-items: center;
+    margin: 0.5rem 0;
+}
+
+.vt-toast {
+    margin: 0.2rem 0;
+    padding: 0.35rem 0.7rem;
+    border-radius: 6px;
+    background: var(--info-bg);
+    color: var(--info-fg);
+}
+/* Vocabulary Typing draws its text with the Key Builder classes (keys-text / keys-char); a sentence wraps, a single word is large */
+.vt-keys {
+    justify-content: center;
+    max-width: 46rem;
+    margin: 0.4rem 0;
+}
+.vt-keys .keys-word {
+    white-space: pre-wrap;
+    overflow-wrap: anywhere;
+    text-align: left;
+}
+.vt-keys-large .keys-word {
+    font-size: 2.6rem;
+    line-height: 3.2rem;
+}
+.keys-char.vt-target {
+    font-weight: 700;
+    background: var(--info-bg);
+    border-radius: 3px;
+}
+.keys-char.vt-target.cursor {
+    background: color-mix(in srgb, var(--accent) 25%, var(--info-bg));
+}
+@media (max-width: 640px) {
+    .vt-keys-large .keys-word {
+        font-size: 1.8rem;
+        line-height: 2.4rem;
+    }
+}
+/* Vocabulary Typing, screening: the batch is one row of words, like a Key Builder line; the current word shows its meaning under it */
+.vt-line {
+    width: 100%;
+    max-width: 56rem;
+    justify-content: flex-start;
+    text-align: left;
+    column-gap: 1.1rem;
+    row-gap: 0.2rem;
+}
+.vt-line .keys-token {
+    padding-bottom: 3rem;
+}
+.vt-line .keys-word {
+    font-size: 1.9rem;
+    line-height: 2.4rem;
+}
+.vt-line .vt-w-next .keys-word {
+    color: var(--muted);
+}
+.vt-line .vt-w-current .keys-word {
+    color: var(--text);
+    font-weight: 600;
+}
+.vt-line .vt-w-known .keys-word,
+.vt-line .vt-w-unknown .keys-word,
+.vt-line .vt-w-archived .keys-word {
+    opacity: 0.45;
+}
+.vt-line .vt-w-known .keys-letters {
+    border-bottom: 3px solid var(--ok-fg, var(--ok));
+}
+.vt-line .vt-w-unknown .keys-letters {
+    border-bottom: 3px solid var(--warn-fg, var(--accent));
+}
+.vt-line .vt-w-archived .keys-letters {
+    text-decoration: line-through;
+}
+.vt-line .vt-tr {
+    position: absolute;
+    top: 100%;
+    left: 0;
+    display: flex;
+    flex-direction: column;
+    white-space: nowrap;
+    pointer-events: none;
+    font-family: inherit;
+    font-weight: 400;
+}
+.vt-line .vt-tr-ipa {
+    font-size: 0.8rem;
+    line-height: 1.1rem;
+    color: var(--muted);
+}
+.vt-line .vt-tr-ru {
+    font-size: 1.1rem;
+    line-height: 1.5rem;
+    color: var(--text);
+}
+@media (max-width: 640px) {
+    .vt-line .keys-word {
+        font-size: 1.4rem;
+        line-height: 1.9rem;
+    }
 }

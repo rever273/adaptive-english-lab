@@ -59,7 +59,7 @@ describe("Key Builder", () => {
     let lesson = startKeysLesson(d, deps, projectRoot);
     const fast = 60000 / lesson.targetCpm / 1.5; // well above the target
     let result = completeKeysLesson(d, deps, projectRoot, lesson.lessonId, typed(lesson, fast));
-    expect(result.targetCpm).toBe(25 * 5); // first stage, no history: the usual 25 WPM, fixed for the stage
+    expect(result.targetCpm).toBe(40 * 5); // keybr-style fixed target speed: 40 WPM by default
     // keys not in the first text have no data yet, so a seventh opens only when all six were typed
     for (let i = 0; i < 6 && result.newKeys.length === 0; i++) {
       lesson = startKeysLesson(d, deps, projectRoot);
@@ -112,7 +112,7 @@ describe("Key Builder", () => {
     expect(keysOverview(d, projectRoot).nextLesson).toBe(3);
   });
 
-  it("the target follows the learner's real speed up to the goal; opened keys stay open; analytics forecast the goal", async () => {
+  it("the target is the fixed setting whatever the learner's speed; opened keys stay open; analytics forecast the goal", async () => {
     const d = await setup();
     let opened = 6;
     // lessons at 400 ms per key = 150 CPM; then much faster lessons raise the target, which must not close opened keys
@@ -124,7 +124,7 @@ describe("Key Builder", () => {
       expect(open).toBeGreaterThanOrEqual(opened);
       opened = open;
       if (i === 5) expect(r.currentCpm).toBe(150);
-      expect(r.targetCpm).toBeLessThanOrEqual(r.goalCpm);
+      expect(r.targetCpm).toBe(200); // never follows the lesson speed
     }
     const a = typingAnalytics(d, { mode: "keys", days: null, timezone: "Australia/Brisbane", now: new Date(clock), projectRoot });
     expect(a.summary.completed).toBe(12);
@@ -139,11 +139,12 @@ describe("Key Builder", () => {
     expect(kp.every((p) => p.wpm > 0 && p.accuracy !== null && p.accuracyLimit === 95)).toBe(true);
     expect(a.keyboard!.forecast).not.toBeNull(); // 10+ lessons with a rising trend
     const kb = a.summary.keyBuilder!;
-    // each stage keeps the target its first lesson was made with
-    const firstOfStage = d.prepare("SELECT target_cpm AS t FROM typing_key_lessons WHERE status = 'completed' AND json_array_length(json_extract(keys_json, '$.open')) = ? ORDER BY ended_at LIMIT 1").get(kb.openKeys) as { t: number } | undefined;
-    if (firstOfStage && kb.openKeys < 26) expect(kb.targetCpm).toBe(Math.min(kb.goalCpm, firstOfStage.t));
+    expect(kb.targetCpm).toBe(200);
     const e = a.keyboard!.keys.find((k) => k.letter === "e")!;
     expect(e.cpm).toBeGreaterThan(0);
     expect(e.curve.length).toBe(12);
+    const grid = a.keyboard!.grid;
+    expect(grid.length).toBe(12); // one column per lesson, oldest first
+    expect(grid.every((s) => s.keys.some((k) => k.letter === "e" && k.hits > 0))).toBe(true);
   });
 });

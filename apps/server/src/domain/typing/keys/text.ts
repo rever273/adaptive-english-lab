@@ -17,7 +17,7 @@ export interface KeyToken {
 export const COMMON_SHARE = 0.7;
 export const COMMON_TOP = 3000;
 /** pseudo-words take this share of the text while only a few real words fit, down to MIN_PSEUDO_SHARE once many do */
-export const MAX_PSEUDO_SHARE = 0.75;
+export const MAX_PSEUDO_SHARE = 0.5;
 export const MIN_PSEUDO_SHARE = 0.2;
 /** real words that fit the open letters at which the pseudo share reaches its minimum */
 export const RICH_POOL = 1500;

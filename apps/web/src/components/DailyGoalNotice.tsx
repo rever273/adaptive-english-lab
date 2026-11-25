@@ -1,9 +1,10 @@
 import { useEffect, useRef, useState } from "react";
 import * as api from "../api";
+import { playPracticeSound } from "../practiceSounds";
 
 const EVENT = "englishlab:daily-goal-check";
 const labels: Record<api.JourneyMode, string> = {
-  grammar: "Grammar", vocabulary: "Vocabulary", wordLesson: "One Word", grammarCloze: "Grammar Cloze", words: "Typing Words", books: "Typing Books", dictation: "Audio Dictation", conversation: "Conversation",
+  grammar: "Grammar", vocabulary: "Vocabulary", wordLesson: "One Word", contextLoop: "Context Loop", vocabTyping: "Typing Vocabulary", grammarCloze: "Grammar Cloze", words: "Typing Words", books: "Typing Books", dictation: "Audio Dictation", conversation: "Conversation",
 };
 const duration = (ms: number) => {
   const seconds = Math.floor(ms / 1000);
@@ -38,6 +39,16 @@ export function DailyGoalNotice() {
   const message = notices[0];
   const dismiss = () => setNotices(current => current.slice(1));
   const shown = useRef(new Set<string>());
+  // a unique chime when the notice appears; typing modes follow the typing sound setting, the others the practice one
+  const announced = useRef<string | null>(null);
+  useEffect(() => {
+    if (!message || announced.current === message.key) return;
+    announced.current = message.key;
+    void api.fetchSettings().then((s) => {
+      const typing = message.mode === "words" || message.mode === "books" || message.mode === "dictation";
+      playPracticeSound("goal", (typing ? s.values.typingSoundsEnabled : s.values.practiceSoundsEnabled) ?? true);
+    }).catch(() => playPracticeSound("goal", true));
+  }, [message]);
   useEffect(() => {
     if (!message) return;
     const timer = window.setTimeout(() => setNotices(current => current.slice(1)), 9000);

@@ -497,12 +497,22 @@
 .tile-slots {
     display: flex;
     flex-wrap: wrap;
-    gap: 0.2rem 1rem;
+    gap: 0.8rem 2.6rem;
     margin: 0.6rem 0;
 }
 .tile-word {
     display: inline-flex;
     gap: 0.25rem;
+    position: relative;
+}
+/* words in a phrase are told apart by a wide gap and a divider in it */
+.tile-word + .tile-word::before {
+    content: "";
+    position: absolute;
+    left: -1.3rem;
+    top: 20%;
+    height: 60%;
+    border-left: 2px solid #6daaff66;
 }
 .tile-slot {
     display: inline-flex;

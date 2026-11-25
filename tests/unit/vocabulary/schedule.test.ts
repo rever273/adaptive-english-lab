@@ -236,3 +236,13 @@ describe("vocabulary-selection-v2 picking", () => {
     expect(run("seed-1")).not.toEqual(run("seed-2"));
   });
 });
+
+it("Focus prioritises independent recall after recognition and stays on a small set with enough stock", () => {
+  const lemmas = ["a", "b", "c", "d", "e"];
+  const events = new Map(lemmas.map(lemma => [lemma, [{ ...ev("success", 3), family: "recognition" as const }]]));
+  const candidates = lemmas.flatMap(lemma => [fresh(lemma, lemma + "1"), fresh(lemma, lemma + "2", "guided_recall")]);
+  const picks = pickVocabulary(input({ n: 6, focus: true, fresh: candidates, events }));
+  expect(picks).toHaveLength(6);
+  expect(new Set(lemmasOf(picks)).size).toBe(3);
+  expect(picks.slice(0, 3).map(p => p.candidate.family)).toEqual(Array(3).fill("guided_recall"));
+});

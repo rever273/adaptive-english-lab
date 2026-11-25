@@ -41,7 +41,7 @@ describe("keybr data", () => {
     expect(realWordPool(data.words, filter).every((w) => w.length <= 6)).toBe(true); // short words while few keys are open
   });
   it("pseudo share falls as the real-word pool grows", () => {
-    expect(pseudoShare(0)).toBe(0.75);
+    expect(pseudoShare(0)).toBe(0.5);
     expect(pseudoShare(1500)).toBe(0.2);
     expect(pseudoShare(5000)).toBe(0.2);
   });
@@ -75,8 +75,8 @@ describe("guided keys (keybr rules)", () => {
     expect(start.filter((k) => k.included).map((k) => k.letter)).toEqual(letters.slice(0, 6));
     expect(start.find((k) => k.focused)?.letter).toBe("e"); // all at 0: the first of them
 
-    const fast = letters.slice(0, 6).flatMap((l) => rows(l, [target * 0.9]));
-    const slowN = [...fast.filter((r) => r.letter !== "n"), ...rows("n", [target * 1.5])];
+    const fast = letters.slice(0, 6).flatMap((l) => rows(l, [target * 0.9, target * 0.9, target * 0.9]));
+    const slowN = [...fast.filter((r) => r.letter !== "n"), ...rows("n", [target * 1.5, target * 1.5, target * 1.5])];
     const k1 = lessonKeys(letters, slowN, { targetCpm: DEFAULT_TARGET_CPM });
     expect(k1.filter((k) => k.included)).toHaveLength(6);
     expect(k1.find((k) => k.focused)?.letter).toBe("n");
@@ -84,6 +84,26 @@ describe("guided keys (keybr rules)", () => {
     const k2 = lessonKeys(letters, fast, { targetCpm: DEFAULT_TARGET_CPM });
     expect(k2.filter((k) => k.included).map((k) => k.letter)).toEqual(letters.slice(0, 7));
     expect(k2.find((k) => k.focused)?.letter).toBe("s"); // the new key has no data yet
+
+    // a fast key with fewer than three lessons is not reached yet: the seventh key stays closed
+    const young = [...fast.filter((r) => r.letter !== "n"), ...rows("n", [target * 0.5, target * 0.5])];
+    const k3 = lessonKeys(letters, young, { targetCpm: DEFAULT_TARGET_CPM });
+    expect(k3.filter((k) => k.included)).toHaveLength(6);
+    expect(k3.find((k) => k.letter === "n")!.readiness).toBeLessThan(1);
+  });
+  it("chooses focus using mostly speed and also smoothed errors without changing the opening gate", () => {
+    const order = ["r", "t", "a", "o", "i", "n", "s"];
+    const make = (letter: string, cpm: number, misses: number) => Array.from({ length: 10 }, (_, i) => ({
+      lessonIndex: i, at: i, letter, hits: 100 - misses, misses, meanMs: 60000 / cpm,
+    }));
+    const other = order.slice(2, 6).flatMap((l) => make(l, 250, 0));
+    const input = [...other, ...make("r", 218, 15), ...make("t", 214, 2)];
+    const keys = lessonKeys(order, input, { targetCpm: 225 });
+    expect(keys.find((k) => k.focused)?.letter).toBe("r");
+    expect(keys.filter((k) => k.included)).toHaveLength(6);
+    // A much slower key still takes priority over the error difference.
+    const slower = lessonKeys(order, [...other, ...make("r", 218, 15), ...make("t", 160, 2)], { targetCpm: 225 });
+    expect(slower.find((k) => k.focused)?.letter).toBe("t");
   });
 });
 
@@ -115,14 +135,16 @@ describe("speed forecast", () => {
     const keys = lessonKeys(["e", "t", "a", "o", "i", "n", "s", "h"], [], { targetCpm: 300, alreadyOpen: new Set(["s"]) });
     expect(keys.filter((k) => k.included).map((k) => k.letter)).toEqual(["e", "t", "a", "o", "i", "n", "s"]);
   });
-  it("a fast key with too many wrong presses is not reached and stays in focus", () => {
+  it("accuracy is judged over all open keys together: one sloppy key does not hold the next letter back", () => {
     const letters = ["e", "t", "a", "o", "i", "n", "s"];
     const fastMs = target * 0.8;
-    const rows = letters.slice(0, 6).flatMap((l) => Array.from({ length: 3 }, (_, i) => ({ lessonIndex: i, at: i, letter: l, hits: 20, misses: l === "t" ? 3 : 0, meanMs: fastMs })));
-    const keys = lessonKeys(letters, rows, { targetCpm: DEFAULT_TARGET_CPM });
-    expect(keys.filter((k) => k.included)).toHaveLength(6); // t is fast but 13% wrong: s stays closed
-    expect(keys.find((k) => k.focused)?.letter).toBe("t");
-    expect(lessonKeys(letters, rows, { targetCpm: DEFAULT_TARGET_CPM, minAccuracy: 0.8 }).filter((k) => k.included)).toHaveLength(7);
+    const make = (misses: (l: string) => number) => letters.slice(0, 6).flatMap((l) => Array.from({ length: 3 }, (_, i) => ({ lessonIndex: i, at: i, letter: l, hits: 20, misses: misses(l), meanMs: fastMs })));
+    const oneBad = lessonKeys(letters, make((l) => (l === "t" ? 3 : 0)), { targetCpm: DEFAULT_TARGET_CPM });
+    expect(oneBad.filter((k) => k.included)).toHaveLength(7); // t alone is 13% wrong, all keys together about 2%
+    const allBad = lessonKeys(letters, make((l) => (l === "t" ? 6 : 2)), { targetCpm: DEFAULT_TARGET_CPM });
+    expect(allBad.filter((k) => k.included)).toHaveLength(6); // about 9% wrong overall: s stays closed
+    expect(allBad.find((k) => k.focused)?.letter).toBe("t"); // the key with the most wrong presses is practised
+    expect(lessonKeys(letters, make((l) => (l === "t" ? 6 : 2)), { targetCpm: DEFAULT_TARGET_CPM, minAccuracy: 0.8 }).filter((k) => k.included)).toHaveLength(7);
   });
 });
 
@@ -141,6 +163,19 @@ describe("accuracy outlook", () => {
     expect(st.errorRate!).toBeGreaterThan(0.05);
     expect(st.errorBound!).toBeLessThan(0.05);
     expect(accuracyScore(st.errorBound, 0.95)).toBeGreaterThanOrEqual(1);
+  });
+  it("weighs a miss by how many keys were open: clean easy lessons do not hide misses made with more keys", () => {
+    const easy = (i: number, misses: number): KeyLessonRow => ({ lessonIndex: i, at: i, openKeys: 6, letter: "n", hits: 20 - misses, misses, meanMs: 300 });
+    const hard = (i: number, misses: number): KeyLessonRow => ({ lessonIndex: i, at: i, openKeys: 24, letter: "n", hits: 20 - misses, misses, meanMs: 300 });
+    // 5 clean lessons with 6 keys, then 5 lessons with 24 keys at 10% wrong: plain smoothing gives ~6.3%
+    const rows = [...[0, 1, 2, 3, 4].map((i) => easy(i, 0)), ...[5, 6, 7, 8, 9].map((i) => hard(i, 2))];
+    const plain = keyStats("n", rows.map(({ openKeys: _o, ...r }) => r));
+    const weighted = keyStats("n", rows);
+    expect(plain.errorRate!).toBeLessThan(0.065);
+    expect(weighted.errorRate!).toBeGreaterThan(0.08);
+    // with every lesson at the same number of keys the weights cancel
+    const same = keyStats("n", rows.map((r) => ({ ...r, openKeys: 10 })));
+    expect(same.errorRate).toBeCloseTo(plain.errorRate!, 10);
   });
   it("is 0 when the key is already within the limit", () => {
     const o = accuracyOutlook("a", Array.from({ length: 5 }, (_, i) => row(i, 99, 1)), 0.95);

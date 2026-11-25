@@ -68,10 +68,20 @@ function useServerLink(): { down: boolean; replaced: boolean } {
       wasDown = true;
       setDown(true);
     };
-    es.onopen = () => {
-      if (wasDown) window.location.reload();
+    // After sleep the stream reconnects before the network stack has settled; a reload then can get an empty answer and leave a blank page
+    // with no script to recover it. So reload only once the page itself is served in full, and keep trying until it is.
+    let reloadTimer: number | undefined;
+    const reloadWhenServed = async () => {
+      try {
+        const r = await fetch("/", { cache: "no-store" });
+        if (r.ok && (await r.text()).includes('id="root"')) { window.location.reload(); return; }
+      } catch { /* not yet */ }
+      reloadTimer = window.setTimeout(() => void reloadWhenServed(), 2000);
     };
-    return () => es.close();
+    es.onopen = () => {
+      if (wasDown && reloadTimer === undefined) reloadTimer = window.setTimeout(() => void reloadWhenServed(), 1000);
+    };
+    return () => { es.close(); window.clearTimeout(reloadTimer); };
   }, []);
   return { down, replaced };
 }
@@ -94,7 +104,7 @@ export function App() {
   const launchDaily = (mode: api.JourneyMode) => {
     setDailyMode(mode); try { sessionStorage.setItem("el_daily_mode", mode); } catch { /* storage unavailable */ }
     if (mode === "grammar" || mode === "grammarCloze") { go("practice", "grammar", mode === "grammar" ? "grammar" : "cloze"); return; }
-    go(mode === "conversation" ? "conversation" : mode === "vocabulary" || mode === "wordLesson" ? "vocabulary" : "typing");
+    go(mode === "conversation" ? "conversation" : mode === "vocabulary" || mode === "wordLesson" || mode === "contextLoop" ? "vocabulary" : "typing");
   };
   const leaveDaily = () => { setDailyMode(null); try { sessionStorage.removeItem("el_daily_mode"); } catch { /* storage unavailable */ } go("daily"); };
   const dailyDone = async () => {
@@ -175,9 +185,9 @@ export function App() {
             </>
           )
         ) : page === "vocabulary" ? (
-          <Vocabulary dailyStart={dailyMode === "vocabulary"} wordLessonFocus={dailyMode === "wordLesson"} onDailyDone={dailyMode === "vocabulary" || dailyMode === "wordLesson" ? () => void dailyDone() : undefined} onNavigate={(p) => go(p, "vocabulary")} />
+          <Vocabulary dailyStart={dailyMode === "vocabulary"} wordLessonFocus={dailyMode === "wordLesson"} contextLoopStart={dailyMode === "contextLoop"} onDailyDone={dailyMode === "vocabulary" || dailyMode === "wordLesson" || dailyMode === "contextLoop" ? () => void dailyDone() : undefined} onNavigate={(p) => go(p, "vocabulary")} />
         ) : page === "typing" ? (
-          <Typing key={dailyMode ?? "typing"} dailyStart={dailyMode === "words" || dailyMode === "books" || dailyMode === "dictation" ? dailyMode : undefined} onDailyDone={dailyMode === "words" || dailyMode === "books" || dailyMode === "dictation" ? () => void dailyDone() : undefined} onNavigate={(p) => go(p)} />
+          <Typing key={dailyMode ?? "typing"} dailyStart={dailyMode === "words" || dailyMode === "books" || dailyMode === "dictation" || dailyMode === "vocabTyping" ? dailyMode : undefined} onDailyDone={dailyMode === "words" || dailyMode === "books" || dailyMode === "dictation" || dailyMode === "vocabTyping" ? () => void dailyDone() : undefined} onNavigate={(p) => go(p)} />
         ) : page === "conversation" ? (
           <Conversation onDailyDone={dailyMode === "conversation" ? () => void dailyDone() : undefined} />
         ) : page === "tutor" ? (

@@ -105,6 +105,7 @@ export const RevealResponseSchema = z
     readingGroupId: z.string().nullable(),
     prompt: PromptSchema,
     hintsAvailable: z.number().int().min(0),
+    lastHint: z.string().optional(),
     /** true when this slot was already revealed (resume): nothing new was exposed */
     alreadyRevealed: z.boolean(),
     state: SlotStateSchema,

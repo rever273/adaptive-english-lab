@@ -39,13 +39,57 @@ function KeyHeatmap({ keys, goalCpm, selected, onSelect }: { keys: Key[]; goalCp
   );
 }
 
-export function KeyboardSection({ data, mode }: { data: TypingKeyboardAnalytics; mode: string }) {
-  // Books is not about single letters, so there is no per-letter learning curve there
-  const showCurve = mode !== "books";
+/** a share of wrong presses at or above this is fully red in the progress heatmap */
+const RED_ERROR_SHARE = 0.15;
+
+/**
+ * keybr's progress view: sessions left to right (oldest first), keys top to bottom in the order they open; each cell is how that key went
+ * in that session, green (no wrong presses, or at the goal speed) through red.
+ */
+function ProgressHeatmap({ grid, letters, goalCpm }: { grid: TypingKeyboardAnalytics["grid"]; letters: string[]; goalCpm: number }) {
+  const [metric, setMetric] = useState<"errors" | "speed">("errors");
+  const cells = useMemo(() => grid.map((s) => new Map(s.keys.map((k) => [k.letter, k]))), [grid]);
+  const used = letters.filter((l) => cells.some((c) => c.has(l)));
+  if (grid.length === 0 || used.length === 0) return null;
+  return (
+    <div className="keys-progress">
+      <h4 className="chart-title">Progress by session</h4>
+      <div className="actions keys-progress-switch" role="group" aria-label="What the colours show">
+        <button type="button" className={`btn${metric === "errors" ? " btn-primary" : ""}`} aria-pressed={metric === "errors"} onClick={() => setMetric("errors")}>Wrong presses</button>
+        <button type="button" className={`btn${metric === "speed" ? " btn-primary" : ""}`} aria-pressed={metric === "speed"} onClick={() => setMetric("speed")}>Speed</button>
+      </div>
+      <div className="keys-progress-scroll">
+        <div className="keys-progress-grid" role="img" aria-label={`Heatmap of ${used.length} keys over ${grid.length} sessions`}>
+          {used.map((l) => (
+            <div key={l} className="keys-progress-row">
+              <span className="keys-progress-letter">{l}</span>
+              {cells.map((c, i) => {
+                const k = c.get(l);
+                if (!k) return <span key={i} className="keys-progress-cell empty" />;
+                const total = k.hits + k.misses;
+                const h = metric === "errors"
+                  ? total === 0 ? null : Math.round((1 - Math.min(1, k.misses / total / RED_ERROR_SHARE)) * 120)
+                  : k.cpm === null ? null : Math.round(Math.min(1, Math.max(0, (k.cpm / goalCpm - 0.5) / 0.5)) * 120);
+                const tip = `${l.toUpperCase()} · ${fmtDay(grid[i]!.at)}: ${k.misses} wrong of ${total} presses (${total ? Math.round((k.misses / total) * 1000) / 10 : 0}%)${k.cpm === null ? "" : `, ${k.cpm} CPM`}`;
+                return <span key={i} className={`keys-progress-cell${h === null ? " empty" : ""}`} style={h === null ? undefined : { background: `hsl(${h} 60% 42%)` }} title={tip} />;
+              })}
+            </div>
+          ))}
+        </div>
+      </div>
+      <p className="muted small">
+        {metric === "errors" ? `Green: no wrong presses of the key in that session; red: ${Math.round(RED_ERROR_SHARE * 100)}% or more of its presses were wrong.` : `Red: half the goal speed or slower; green: the goal of ${Math.round(goalCpm / 5)} WPM (${goalCpm} CPM) reached.`} Grey: the key
+        was not timed or not pressed. Last {grid.length} sessions.
+      </p>
+    </div>
+  );
+}
+
+export function KeyboardSection({ data }: { data: TypingKeyboardAnalytics; mode?: string }) {
   const known = useMemo(() => data.keys.filter((k) => k.cpm !== null), [data.keys]);
   const slowest = useMemo(() => [...known].sort((a, b) => (a.confidence ?? 0) - (b.confidence ?? 0))[0]?.letter ?? null, [known]);
   const [picked, setPicked] = useState<string | null>(null);
-  const selected = showCurve ? (picked ?? slowest) : null;
+  const selected = picked ?? slowest;
   const key = data.keys.find((k) => k.letter === selected) ?? null;
   const goal = data.goalCpm;
   const top = Math.max(goal, ...known.map((k) => k.bestCpm ?? 0)) * 1.1;
@@ -61,12 +105,27 @@ export function KeyboardSection({ data, mode }: { data: TypingKeyboardAnalytics;
         <p className="muted small">Per-key speed is collected as you type; a few sessions are needed first.</p>
       ) : (
         <>
-          <KeyHeatmap keys={data.keys} goalCpm={goal} selected={selected} onSelect={showCurve ? setPicked : null} />
+          <KeyHeatmap keys={data.keys} goalCpm={goal} selected={selected} onSelect={setPicked} />
+          <div className="keys-curve">
+            <h4 className="chart-title">Learning curve: key {selected?.toUpperCase() ?? "—"}</h4>
+            {!key || key.curve.length === 0 ? (
+              <p className="muted small">No data for this key yet.</p>
+            ) : (
+              <Chart
+                ariaLabel={`Speed of key ${key.letter} per session`}
+                bars={{ color: "#9aa4b8", format: (v) => `${Math.round(v)} CPM`, max: Math.max(goal, ...key.curve.map((p) => p.cpm)) * 1.1 }}
+                line={{ color: "#6ab7ff", format: (v) => `${Math.round(v)} CPM`, max: Math.max(goal, ...key.curve.map((p) => p.cpm)) * 1.1 }}
+                points={key.curve.map((p, i) => ({ key: `${p.at}-${i}`, label: fmtDay(p.at), bar: p.cpm, line: p.smoothed, tip: [fmtDay(p.at), `This session: ${p.cpm} CPM`, `Smoothed: ${p.smoothed} CPM`, `Goal: ${goal} CPM`] }))}
+                legend={`Grey: the key's speed in each session · blue: smoothed (what opens keys and sets the focus). Goal ${goal} CPM. Last 60 sessions.`}
+              />
+            )}
+          </div>
           <p className="muted small">
             Each key fills up as it nears your goal of {goalWpm} WPM ({goal} CPM) with enough accuracy: red is half way, green is reached. A key's
             speed is its time per press smoothed over sessions (keybr.com method; the first 10 sessions are a plain mean); a key with too many
-            wrong presses is held back even when it is fast.{showCurve ? " Click a key to see its learning curve below." : ""}
+            wrong presses is held back even when it is fast. Click a key to see its learning curve above.
           </p>
+          <ProgressHeatmap grid={data.grid} letters={data.keys.map((k) => k.letter)} goalCpm={goal} />
           <div className="keyboard-charts">
             <div>
               <h4 className="chart-title">Key speed against the goal</h4>
@@ -105,22 +164,6 @@ export function KeyboardSection({ data, mode }: { data: TypingKeyboardAnalytics;
                 legend={`Wrong presses when this key was the one to type, as a share of all its presses · yellow: the most a key may have (${errorLimit}%, set in Settings; a key counts as reached when it is surely not above it).`}
               />
             </div>
-            {showCurve && (
-            <div>
-              <h4 className="chart-title">Learning curve: key {selected?.toUpperCase() ?? "—"}</h4>
-              {!key || key.curve.length === 0 ? (
-                <p className="muted small">No data for this key yet.</p>
-              ) : (
-                <Chart
-                  ariaLabel={`Speed of key ${key.letter} per session`}
-                  bars={{ color: "#9aa4b8", format: (v) => `${Math.round(v)} CPM`, max: Math.max(goal, ...key.curve.map((p) => p.cpm)) * 1.1 }}
-                  line={{ color: "#6ab7ff", format: (v) => `${Math.round(v)} CPM`, max: Math.max(goal, ...key.curve.map((p) => p.cpm)) * 1.1 }}
-                  points={key.curve.map((p, i) => ({ key: `${p.at}-${i}`, label: fmtDay(p.at), bar: p.cpm, line: p.smoothed, tip: [fmtDay(p.at), `This session: ${p.cpm} CPM`, `Smoothed: ${p.smoothed} CPM`, `Goal: ${goal} CPM`] }))}
-                  legend={`Grey: the key's speed in each session · blue: smoothed (what opens keys and sets the focus). Goal ${goal} CPM. Last 60 sessions.`}
-                />
-              )}
-            </div>
-            )}
           </div>
         </>
       )}

@@ -18,7 +18,7 @@ const publicJob = (db: Db, id: string) => {
   const dictation = j.kind === "generation" && (typeof (j.payload as { dictationLessonId?: unknown }).dictationLessonId === "string" || (j.payload as { dictationPool?: unknown }).dictationPool === 1);
   return {
     id: j.id,
-    kind: dictation ? "dictation" : j.kind === "generation" && typeof (j.payload as { expressionId?: unknown }).expressionId === "string" ? "expression" : j.kind === "generation" && typeof (j.payload as { wordLessonId?: unknown }).wordLessonId === "string" ? "word_lesson" : j.kind === "tutor" && typeof (j.payload as { grammarClozeAnalysisId?: unknown }).grammarClozeAnalysisId === "string" ? "grammar_cloze_analysis" : j.kind === "free_text_analysis" && typeof (j.payload as { wordLessonAttemptId?: unknown }).wordLessonAttemptId === "string" ? "word_lesson_check" : j.kind,
+    kind: dictation ? "dictation" : j.kind === "generation" && typeof (j.payload as { expressionId?: unknown }).expressionId === "string" ? "expression" : j.kind === "generation" && typeof (j.payload as { wordLessonId?: unknown }).wordLessonId === "string" ? "word_lesson" : j.kind === "generation" && typeof (j.payload as { contextLoopBatchId?: unknown }).contextLoopBatchId === "string" ? "context_loop" : j.kind === "tutor" && typeof (j.payload as { grammarClozeAnalysisId?: unknown }).grammarClozeAnalysisId === "string" ? "grammar_cloze_analysis" : j.kind === "tutor" && (j.payload as { grammarClozeAudit?: unknown }).grammarClozeAudit === 1 ? "grammar_cloze_audit" : j.kind === "free_text_analysis" && typeof (j.payload as { wordLessonAttemptId?: unknown }).wordLessonAttemptId === "string" ? "word_lesson_check" : j.kind,
     state: j.state,
     priority: j.priority,
     createdAt: j.createdAt,

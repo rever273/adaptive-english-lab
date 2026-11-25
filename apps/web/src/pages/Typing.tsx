@@ -15,25 +15,36 @@ import { BooksGame } from "./TypingBooks";
 import { DictationGame, DictationResultView } from "./TypingDictation";
 import { TypingRecall } from "./TypingRecall";
 import { DrillsGame } from "./TypingDrills";
-import { KeysGame, KeysResultView } from "./TypingKeys";
+import { KeysGame, KeysResultView, readShowStats, saveShowStats, type KeysReport, type KeyPresses } from "./TypingKeys";
 import { LAYOUT_HINT, Toast, useToast } from "./typingShared";
 import { comboMultiplier, createWordsEngine, exportKeyStats, revealTranslation, type WordsEngineState, type WordsEvent } from "../game/wordsEngine";
 import { wordAccuracy } from "../typingWordAccuracy";
+import type { VtOverview, VtSessionState } from "@english-lab/contracts";
+import { VocabScreening, VocabTypingCard } from "./TypingVocabulary";
+import { VocabLearning } from "./TypingVocabLearning";
 
-type Screen = { kind: "overview" } | { kind: "words"; sessionId: string; level: number; plan: TypingWordsStartResponse; paused: boolean } | { kind: "drills"; plan: TypingDrillsStartResponse } | { kind: "keys"; plan: TypingKeysStartResponse } | { kind: "keysResult"; result: TypingKeysResult; tokens: TypingKeyToken[] } | { kind: "books"; sessionId: string; data: TypingBookStartResponse; paused: boolean } | { kind: "result"; result: TypingResult; struggled?: string[]; bonus?: { points: number }; bookSamples?: BookSpeedSample[] } | { kind: "recall"; result: TypingResult; struggled?: string[]; words: TypingRecallWord[] } | { kind: "dictation"; state: DictationState } | { kind: "dictationResult"; result: DictationResult };
+type Screen = { kind: "overview" } | { kind: "words"; sessionId: string; level: number; plan: TypingWordsStartResponse; paused: boolean } | { kind: "drills"; plan: TypingDrillsStartResponse } | { kind: "keys"; plan: TypingKeysStartResponse } | { kind: "keysResult"; result: TypingKeysResult; tokens: TypingKeyToken[]; presses: KeyPresses } | { kind: "books"; sessionId: string; data: TypingBookStartResponse; paused: boolean } | { kind: "result"; result: TypingResult; struggled?: string[]; bonus?: { points: number }; bookSamples?: BookSpeedSample[] } | { kind: "recall"; result: TypingResult; struggled?: string[]; words: TypingRecallWord[] } | { kind: "dictation"; state: DictationState } | { kind: "dictationResult"; result: DictationResult } | { kind: "vocab"; stage: "screening" | "learning"; sessionId: string; tabId: string; state: VtSessionState };
 
 const clamp = (n: number, lo: number, hi: number) => Math.min(hi, Math.max(lo, n));
 const fallMs = (len: number, msPerChar: number) => Math.round(clamp(3 * len * msPerChar + 2500, 5000, 22000));
 /** a new meteor arrives after the time to type the previous word plus 60% (reading and aiming) and 0.6 s */
 const spawnGapMs = (len: number, msPerChar: number) => Math.round(1.6 * len * msPerChar + 600);
 
-export function Typing({ onNavigate, dailyStart, onDailyDone }: { onNavigate?: (page: "analytics") => void; dailyStart?: "words" | "books" | "dictation"; onDailyDone?: () => void }) {
+export function Typing({ onNavigate, dailyStart, onDailyDone }: { onNavigate?: (page: "analytics") => void; dailyStart?: "words" | "books" | "dictation" | "vocabTyping"; onDailyDone?: () => void }) {
   const [overview, setOverview] = useState<TypingOverview | null>(null);
+  const [vocab, setVocab] = useState<VtOverview | null>(null);
+  const [vocabError, setVocabError] = useState<string | null>(null);
   const [screen, setScreen] = useState<Screen>({ kind: "overview" });
   const [error, setError] = useState<string | null>(null);
+  // Key Builder: the report after each lesson can be switched off; the last one stays available
+  const [showKeysStats, setShowKeysStats] = useState(readShowStats);
+  const showKeysStatsRef = useRef(showKeysStats);
+  const [lastKeysReport, setLastKeysReport] = useState<KeysReport | null>(null);
+  const changeShowKeysStats = useCallback((on: boolean) => { showKeysStatsRef.current = on; saveShowStats(on); setShowKeysStats(on); }, []);
 
   const load = useCallback(() => {
     api.fetchTypingOverview().then(setOverview).catch((e) => setError(e instanceof Error ? e.message : String(e)));
+    api.fetchVocabTypingOverview().then((v) => { setVocab(v); setVocabError(null); }).catch((e) => setVocabError(e instanceof Error ? e.message : String(e)));
   }, []);
   useEffect(load, [load]);
   const [dictNote, setDictNote] = useState<string | null>(null);
@@ -56,6 +67,13 @@ export function Typing({ onNavigate, dailyStart, onDailyDone }: { onNavigate?: (
     dailyStarted.current = true;
     if (overview.books.available && !overview.books.finished) void startBook(setScreen, setError);
   }, [dailyStart, overview, load]);
+
+  // Daily Practice: Learning when something is waiting for it (a check is due or a word is being learned), else Screening
+  useEffect(() => {
+    if (dailyStart !== "vocabTyping" || !overview || !vocab || dailyStarted.current) return;
+    dailyStarted.current = true;
+    void startVocab(vocab.learning.playable > 0 || vocab.learning.dueNow > 0 ? "learning" : "screening", setScreen, setVocabError);
+  }, [dailyStart, overview, vocab]);
 
   // A requested dictation may need to be created or finish generating before it can start.
   useEffect(() => {
@@ -141,7 +159,7 @@ export function Typing({ onNavigate, dailyStart, onDailyDone }: { onNavigate?: (
 
   if (screen.kind === "keysResult") {
     const toOverview = () => { load(); setScreen({ kind: "overview" }); };
-    return <><DailyGoalCheck mode="words" /><KeysResultView result={screen.result} tokens={screen.tokens} onNext={() => void startKeys(setScreen, setError).then((ok) => { if (!ok) toOverview(); })} onDone={toOverview} /></>;
+    return <><DailyGoalCheck mode="words" /><KeysResultView result={screen.result} tokens={screen.tokens} presses={screen.presses} onNext={() => void startKeys(setScreen, setError).then((ok) => { if (!ok) toOverview(); })} onDone={toOverview} showStats={showKeysStats} onShowStats={changeShowKeysStats} /></>;
   }
 
   if (screen.kind === "result") {
@@ -196,7 +214,8 @@ export function Typing({ onNavigate, dailyStart, onDailyDone }: { onNavigate?: (
               disabled={!overview.dictation.available && !overview.dictation.lesson}
               disabledNote={dictNote ?? dictationNote(overview.dictation)}
               onStart={() => void beginDictation()}
-            /></>}
+            />
+            <VocabTypingCard overview={vocab} error={vocabError} onScreening={() => void startVocab("screening", setScreen, setVocabError)} onLearning={() => void startVocab("learning", setScreen, setVocabError)} /></>}
           </div>
           {/* {onNavigate && (
             <p className="actions page-actions">
@@ -205,7 +224,13 @@ export function Typing({ onNavigate, dailyStart, onDailyDone }: { onNavigate?: (
           )} */}
         </>
       )}
-      {screen.kind === "keys" && <KeysGame plan={screen.plan} onResult={(result, tokens) => setScreen({ kind: "keysResult", result, tokens })} onExit={() => { load(); setScreen({ kind: "overview" }); }} />}
+      {screen.kind === "vocab" && screen.stage === "screening" && <VocabScreening key={screen.sessionId} sessionId={screen.sessionId} tabId={screen.tabId} initial={screen.state} onNext={() => void startVocab("screening", setScreen, setVocabError)} onDone={() => { load(); setScreen({ kind: "overview" }); }} {...(onDailyDone ? { onDailyDone } : {})} />}
+      {screen.kind === "vocab" && screen.stage === "learning" && <VocabLearning key={screen.sessionId || "empty"} sessionId={screen.sessionId} tabId={screen.tabId} initial={screen.state} onNext={() => void startVocab("learning", setScreen, setVocabError).then((ok) => { if (!ok) { load(); setScreen({ kind: "overview" }); } })} onDone={() => { load(); setScreen({ kind: "overview" }); }} {...(onDailyDone ? { onDailyDone } : {})} />}
+      {screen.kind === "keys" && <KeysGame key={screen.plan.lessonId} plan={screen.plan} showStats={showKeysStats} onShowStats={changeShowKeysStats} lastReport={lastKeysReport} onExit={() => { load(); setScreen({ kind: "overview" }); }} onResult={(result, tokens, presses) => {
+        setLastKeysReport({ result, tokens, presses });
+        if (showKeysStatsRef.current) { setScreen({ kind: "keysResult", result, tokens, presses }); return; }
+        void startKeys(setScreen, setError).then((ok) => { if (!ok) { load(); setScreen({ kind: "overview" }); } });
+      }} />}
       {screen.kind === "drills" && <DrillsGame plan={screen.plan} onResult={(result) => setScreen({ kind: "result", result })} onExit={() => { load(); setScreen({ kind: "overview" }); }} />}
       {screen.kind === "words" && <WordsGame screen={screen} setScreen={setScreen} onExit={() => setScreen({ kind: "overview" })} />}
       {screen.kind === "books" && <BooksGame sessionId={screen.sessionId} data={screen.data} onResult={(result, struggled, bookSamples) => setScreen({ kind: "result", result, struggled, bookSamples })} onExit={() => setScreen({ kind: "overview" })} />}
@@ -260,6 +285,19 @@ function ModeCard({ image, icon, title, desc, action, level, subtitle, disabled,
   );
 }
 
+async function startVocab(stage: "screening" | "learning", setScreen: (s: Screen) => void, setError: (e: string | null) => void): Promise<boolean> {
+  const tabId = crypto.randomUUID();
+  try {
+    const r = await (stage === "screening" ? api.startVocabScreening(tabId) : api.startVocabLearning(tabId));
+    setScreen({ kind: "vocab", stage, sessionId: r.sessionId, tabId, state: r.state });
+    setError(null);
+    return true;
+  } catch (e) {
+    setError(e instanceof Error ? e.message : String(e));
+    return false;
+  }
+}
+
 async function startWords(setScreen: (s: Screen) => void, setError: (e: string | null) => void): Promise<boolean> {
   try {
     const plan = await api.startTypingWords();
@@ -282,15 +320,22 @@ async function startDrills(setScreen: (s: Screen) => void, setError: (e: string 
   }
 }
 
-async function startKeys(setScreen: (s: Screen) => void, setError: (e: string | null) => void): Promise<boolean> {
-  try {
-    const plan = await api.startTypingKeys();
-    setScreen({ kind: "keys", plan });
-    return true;
-  } catch (e) {
-    setError(e instanceof Error ? e.message : String(e));
-    return false;
-  }
+/** a start already on its way: Enter pressed again meanwhile joins it instead of starting (and interrupting) another lesson */
+let keysStarting: Promise<boolean> | null = null;
+function startKeys(setScreen: (s: Screen) => void, setError: (e: string | null) => void): Promise<boolean> {
+  keysStarting ??= (async () => {
+    try {
+      const plan = await api.startTypingKeys();
+      setScreen({ kind: "keys", plan });
+      return true;
+    } catch (e) {
+      setError(e instanceof Error ? e.message : String(e));
+      return false;
+    } finally {
+      keysStarting = null;
+    }
+  })();
+  return keysStarting;
 }
 
 async function startBook(setScreen: (s: Screen) => void, setError: (e: string | null) => void): Promise<boolean> {
@@ -612,7 +657,8 @@ function WordsResult({ result, struggled, bonus, bookSamples, onContinue, onDone
   ];
   const columns = Math.ceil(stats.length / 2); // exactly two rows
   const bookFinished = result.mode === "books" && result.book?.finished === true;
-  useEnterContinue(bookFinished ? onDailyDone ?? null : onContinue);
+  // Enter continues THIS training (next level / reading on); a finished book has nothing to continue
+  useEnterContinue(bookFinished ? null : onContinue);
   const drills = result.variant === "drills";
   // Drills repeat a few words many times: the list groups the showings of each word
   const drillWords = drills && result.words ? [...result.words.reduce((m, w) => {

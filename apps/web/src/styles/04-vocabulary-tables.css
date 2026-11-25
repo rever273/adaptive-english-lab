@@ -1000,3 +1000,623 @@ td.row-actions .btn + .btn {
     opacity: 0.8;
 }
 
+
+/* TASK_037: the three practice modes of the Vocabulary page */
+.vocab-modes {
+    display: grid;
+    grid-template-columns: repeat(3, minmax(0, 1fr));
+    gap: 0.8rem;
+    margin: 0.75rem 0 1rem;
+}
+@media (max-width: 960px) {
+    .vocab-modes {
+        grid-template-columns: minmax(0, 1fr);
+    }
+}
+.vocab-mode {
+    display: flex;
+    flex-direction: column;
+    gap: 0.45rem;
+    margin: 0;
+    padding: 0.9rem 1rem;
+    border-radius: 0.75rem;
+    border: 1px solid var(--border);
+}
+.vocab-mode h3 {
+    margin: 0;
+}
+.vocab-mode p {
+    margin: 0;
+}
+.vocab-mode .vocab-mode-go {
+    margin-top: auto;
+    align-self: flex-start;
+}
+.cl-block {
+    border-color: color-mix(in srgb, #4f8fe6 45%, var(--border));
+    background: linear-gradient(120deg, color-mix(in srgb, #4f8fe6 13%, var(--surface)), var(--surface) 70%);
+}
+.cl-block h3 .pi {
+    color: #4f8fe6;
+}
+.vocab-dialog-backdrop {
+    position: fixed;
+    inset: 0;
+    z-index: 50;
+    display: flex;
+    align-items: flex-start;
+    justify-content: center;
+    overflow-y: auto;
+    padding: 2rem 1rem;
+    background: rgba(0, 0, 0, 0.55);
+}
+.vocab-dialog {
+    width: 100%;
+    max-width: 60rem;
+}
+.vocab-dialog-head {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+}
+
+/* Context Loop card */
+.cl-top {
+    display: flex;
+    flex-wrap: wrap;
+    align-items: center;
+    gap: 0.5rem 1rem;
+}
+.cl-top h2 {
+    margin: 0;
+    margin-right: auto;
+}
+.cl-body {
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    gap: 0.6rem;
+    margin: 1.2rem 0 1rem;
+    text-align: center;
+}
+.cl-sentence {
+    font-size: 1.6rem;
+    line-height: 1.4;
+    margin: 0;
+    max-width: 44rem;
+}
+.cl-sentence mark {
+    background: color-mix(in srgb, #4f8fe6 28%, transparent);
+    color: inherit;
+    border-radius: 0.25rem;
+    padding: 0 0.15rem;
+    font-weight: 600;
+}
+.cl-meaning {
+    text-align: center;
+    font-size: 1.15rem;
+    margin-bottom: 0.6rem;
+}
+.cl-card .actions {
+    justify-content: center;
+}
+.cl-card > .muted.small {
+    text-align: center;
+}
+.cls-list {
+    margin: 0.3rem 0 0.6rem;
+    padding-left: 1.2rem;
+}
+.cls-sentence mark {
+    background: color-mix(in srgb, #4f8fe6 22%, transparent);
+    color: inherit;
+}
+.cls-rejected,
+.cls-stale {
+    opacity: 0.6;
+}
+.cl-check {
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    gap: 0.5rem;
+    margin: 1rem 0;
+    text-align: center;
+}
+.cl-check-form {
+    max-width: 24rem;
+    width: 100%;
+}
+.cl-check-result {
+    text-align: center;
+    margin: 1rem 0;
+}
+.cl-check-result.cl-correct > strong {
+    color: #2ea65a;
+}
+.cl-check-result.cl-incorrect > strong {
+    color: #d9534f;
+}
+
+/* Context Loop: picture, badges, audio pills, meaning block, summary tiles */
+.cl-card {
+    --cl: #4f8fe6;
+}
+.cl-image .word-image-button {
+    width: auto;
+    height: 11rem;
+    max-width: min(18rem, 100%);
+    border-radius: 0.9rem;
+    box-shadow: 0 6px 22px rgba(0, 0, 0, 0.35);
+}
+.cl-image .word-image-button img {
+    width: auto;
+    max-width: 100%;
+    height: 100%;
+    border-radius: inherit;
+}
+.cl-badge {
+    display: inline-flex;
+    align-items: center;
+    gap: 0.35rem;
+    align-self: center;
+    padding: 0.25rem 0.75rem;
+    border-radius: 999px;
+    font-size: 0.82rem;
+    font-weight: 600;
+    border: 1px solid var(--border);
+    background: var(--surface-2);
+}
+.cl-badge-repeat {
+    color: #e0a43a;
+    border-color: color-mix(in srgb, #e0a43a 45%, transparent);
+    background: color-mix(in srgb, #e0a43a 12%, transparent);
+}
+.cl-badge-new {
+    color: var(--cl);
+    border-color: color-mix(in srgb, var(--cl) 45%, transparent);
+    background: color-mix(in srgb, var(--cl) 12%, transparent);
+}
+.cl-audio {
+    display: flex;
+    flex-wrap: wrap;
+    justify-content: center;
+    gap: 0.5rem;
+}
+.cl-pill {
+    position: relative;
+    display: inline-flex;
+    align-items: center;
+    gap: 0.4rem;
+    padding: 0.4rem 0.9rem;
+    border-radius: 999px;
+    border: 1px solid var(--border);
+    background: var(--surface-2);
+    color: var(--text);
+    font: inherit;
+    font-size: 0.88rem;
+    cursor: pointer;
+}
+.cl-pill:hover:not(:disabled) {
+    border-color: var(--cl);
+}
+.cl-pill:disabled {
+    opacity: 0.55;
+    cursor: default;
+}
+.cl-ask {
+    text-align: center;
+}
+.cl-meaning-box {
+    max-width: 40rem;
+    margin: 0 auto 1rem;
+    padding: 1rem 1.2rem;
+    border-radius: 0.9rem;
+    border: 1px solid var(--border);
+    border-left: 4px solid var(--cl);
+    background: var(--surface-2);
+    text-align: left;
+}
+.cl-meaning-box.cl-yes {
+    border-left-color: #2ea65a;
+}
+.cl-meaning-box.cl-no {
+    border-left-color: #e0a43a;
+}
+.cl-meaning-head {
+    display: flex;
+    align-items: baseline;
+    gap: 0.6rem;
+}
+.cl-meaning-word {
+    font-weight: 700;
+    font-size: 1.1rem;
+}
+.cl-meaning-outcome {
+    margin-left: auto;
+    color: var(--muted);
+}
+.cl-yes .cl-meaning-outcome {
+    color: #2ea65a;
+}
+.cl-no .cl-meaning-outcome {
+    color: #e0a43a;
+}
+.cl-meaning-ru {
+    font-size: 1.3rem;
+    font-weight: 600;
+    margin-top: 0.3rem;
+}
+.cl-meaning-def {
+    color: var(--muted);
+    margin-top: 0.25rem;
+}
+.cl-meaning-tr {
+    margin-top: 0.7rem;
+}
+.cl-stats {
+    display: grid;
+    grid-template-columns: repeat(auto-fit, minmax(9rem, 1fr));
+    gap: 0.6rem;
+    list-style: none;
+    padding: 0;
+    margin: 1rem 0;
+}
+.cl-stats li {
+    display: flex;
+    flex-direction: column;
+    gap: 0.2rem;
+    padding: 0.8rem 0.9rem;
+    border-radius: 0.8rem;
+    border: 1px solid var(--border);
+    background: var(--surface-2);
+}
+.cl-stats strong {
+    font-size: 1.6rem;
+    line-height: 1;
+}
+.cl-stats span {
+    color: var(--muted);
+    font-size: 0.85rem;
+}
+.cl-needs {
+    display: flex;
+    flex-wrap: wrap;
+    align-items: center;
+    gap: 0.4rem;
+}
+.cl-summary .actions {
+    justify-content: flex-start;
+}
+
+/* Context Loop: check result in place */
+.cl-check.cl-res {
+    border-radius: 0.9rem;
+    padding: 1rem;
+    transition: background-color 0.2s;
+}
+.cl-res-ok {
+    background: color-mix(in srgb, #0ca30c 12%, transparent);
+    box-shadow: inset 0 0 0 1px color-mix(in srgb, #0ca30c 40%, transparent);
+}
+.cl-res-bad {
+    background: color-mix(in srgb, #d03b3b 12%, transparent);
+    box-shadow: inset 0 0 0 1px color-mix(in srgb, #d03b3b 40%, transparent);
+}
+.cl-res-skip {
+    background: color-mix(in srgb, var(--cl) 10%, transparent);
+}
+.cl-res-head {
+    margin: 0;
+    font-weight: 700;
+    font-size: 1.1rem;
+}
+.cl-res-ok .cl-res-head {
+    color: #3fcf5f;
+}
+.cl-res-bad .cl-res-head {
+    color: #ef6b6b;
+}
+.cl-sentence mark.cl-fill-ok {
+    background: color-mix(in srgb, #0ca30c 35%, transparent);
+}
+.cl-sentence mark.cl-fill-bad {
+    background: color-mix(in srgb, #d03b3b 35%, transparent);
+}
+.cl-wrong {
+    text-decoration: line-through;
+    color: #ef6b6b;
+}
+
+/* Context Loop summary: quality ring and per-word bars */
+.cl-sum-top {
+    display: flex;
+    flex-wrap: wrap;
+    align-items: center;
+    gap: 1rem;
+}
+.cl-sum-top .cl-stats {
+    flex: 1 1 24rem;
+}
+.cl-quality {
+    display: flex;
+    align-items: center;
+    gap: 0.8rem;
+    margin: 0;
+}
+.cl-quality svg {
+    width: 7.5rem;
+    height: 7.5rem;
+}
+.cl-quality figcaption {
+    display: flex;
+    flex-direction: column;
+}
+.cl-q-track {
+    fill: none;
+    stroke: var(--surface-2);
+    stroke-width: 10;
+}
+.cl-q-arc {
+    fill: none;
+    stroke: var(--cl);
+    stroke-width: 10;
+    stroke-linecap: round;
+}
+.cl-q-good .cl-q-arc {
+    stroke: #0ca30c;
+}
+.cl-q-mid .cl-q-arc {
+    stroke: #fab219;
+}
+.cl-q-low .cl-q-arc {
+    stroke: #d03b3b;
+}
+.cl-q-value {
+    fill: var(--text);
+    font-size: 1.35rem;
+    font-weight: 700;
+}
+.cl-words {
+    margin: 0.5rem 0 1rem;
+}
+.cl-words-head {
+    display: flex;
+    justify-content: space-between;
+    align-items: baseline;
+    margin-bottom: 0.4rem;
+}
+.cl-legend {
+    display: inline-flex;
+    align-items: center;
+    gap: 0.35rem;
+    color: var(--muted);
+    font-size: 0.82rem;
+}
+.cl-sw {
+    display: inline-block;
+    width: 0.7rem;
+    height: 0.7rem;
+    border-radius: 3px;
+    margin-left: 0.4rem;
+}
+.cl-sw-ok,
+.cl-w-ok {
+    background: #0ca30c;
+}
+.cl-sw-bad,
+.cl-w-bad {
+    background: #d03b3b;
+}
+.cl-words ul {
+    list-style: none;
+    margin: 0;
+    padding: 0;
+    display: grid;
+    gap: 0.35rem;
+}
+.cl-words li {
+    display: grid;
+    grid-template-columns: minmax(6rem, 10rem) 1fr 3.2rem;
+    align-items: center;
+    gap: 0.6rem;
+}
+.cl-w-name {
+    font-weight: 600;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+}
+.cl-w-name .pi {
+    color: #3fcf5f;
+    font-size: 0.8rem;
+}
+.cl-w-bar {
+    display: flex;
+    gap: 2px;
+    height: 0.8rem;
+    background: var(--surface-2);
+    border-radius: 4px;
+    overflow: hidden;
+}
+.cl-w-bar > span {
+    height: 100%;
+    border-radius: 4px;
+}
+.cl-w-num {
+    color: var(--muted);
+    text-align: right;
+}
+
+/* segmented switch (Word progress) */
+.seg {
+    display: inline-flex;
+    flex-wrap: wrap;
+    gap: 2px;
+    padding: 3px;
+    border-radius: 999px;
+    background: var(--surface-2);
+    border: 1px solid var(--border);
+}
+.seg-btn {
+    border: 0;
+    border-radius: 999px;
+    padding: 0.35rem 0.9rem;
+    background: transparent;
+    color: var(--muted);
+    font: inherit;
+    font-size: 0.88rem;
+    cursor: pointer;
+}
+.seg-btn.active {
+    background: var(--accent);
+    color: #0f1218;
+    font-weight: 600;
+}
+.seg-btn:disabled {
+    opacity: 0.45;
+    cursor: default;
+}
+
+/* multi-line chart */
+.lc-legend {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 0.35rem 1rem;
+    font-size: 0.82rem;
+    color: var(--muted);
+    margin-bottom: 0.3rem;
+}
+.lc-legend span {
+    display: inline-flex;
+    align-items: center;
+    gap: 0.35rem;
+}
+.lc-key {
+    display: inline-block;
+    width: 0.9rem;
+    height: 0.2rem;
+    border-radius: 2px;
+    border-top: 2px solid;
+    vertical-align: middle;
+}
+.lc-key-dash {
+    border-top-style: dashed;
+    height: 0;
+}
+.lc-ref {
+    stroke: var(--muted);
+    stroke-width: 1;
+    stroke-dasharray: 3 4;
+    opacity: 0.7;
+}
+.lc-cross {
+    stroke: var(--muted);
+    stroke-width: 1;
+    opacity: 0.5;
+}
+.lc-end {
+    fill: var(--text);
+}
+
+/* Vocabulary analytics: modes side by side, time per word */
+.mode-cmp {
+    display: grid;
+    grid-template-columns: repeat(auto-fit, minmax(14rem, 1fr));
+    gap: 0.7rem;
+    margin: 0.5rem 0;
+}
+.mode-cmp-card {
+    display: flex;
+    flex-direction: column;
+    gap: 0.4rem;
+    padding: 0.8rem 0.9rem;
+    border-radius: 0.8rem;
+    border: 1px solid var(--border);
+    background: var(--surface-2);
+}
+.mode-cmp-head .pi {
+    color: var(--accent);
+}
+.mode-cmp-row,
+.time-top li {
+    display: grid;
+    grid-template-columns: 4rem 1fr 3.6rem;
+    align-items: center;
+    gap: 0.5rem;
+    font-size: 0.85rem;
+}
+.mode-cmp-row .num,
+.time-top .num {
+    text-align: right;
+}
+.mode-bar {
+    height: 0.55rem;
+    border-radius: 4px;
+    background: var(--surface);
+    overflow: hidden;
+}
+.mode-bar > span {
+    display: block;
+    height: 100%;
+    border-radius: 4px;
+    background: #3987e5;
+}
+.mode-bar-ok > span {
+    background: #0ca30c;
+}
+.mode-bar-time > span {
+    background: #c98500;
+}
+.time-top {
+    list-style: none;
+    margin: 0.4rem 0 1rem;
+    padding: 0;
+    display: grid;
+    gap: 0.35rem;
+    max-width: 40rem;
+}
+.time-top li {
+    grid-template-columns: minmax(6rem, 10rem) 1fr 4.2rem;
+}
+.time-top-word {
+    font-weight: 600;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+}
+
+/* Conversation analytics: answer quality per conversation */
+.cv-quality ul {
+    list-style: none;
+    margin: 0.4rem 0 0;
+    padding: 0;
+    display: grid;
+    gap: 0.35rem;
+}
+.cv-quality li {
+    display: grid;
+    grid-template-columns: minmax(7rem, 14rem) 1fr 3rem;
+    align-items: center;
+    gap: 0.5rem;
+    font-size: 0.85rem;
+}
+.cv-q-name {
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+}
+.cv-q-bar {
+    display: flex;
+    gap: 2px;
+    height: 0.8rem;
+    border-radius: 4px;
+    overflow: hidden;
+    background: var(--surface-2);
+}
+.cv-q-bar > span {
+    height: 100%;
+}
+.cv-quality .num {
+    text-align: right;
+}

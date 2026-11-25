@@ -16,6 +16,8 @@ export interface ChartPoint {
   line?: number | null;
   /** a second, dashed reference line on the same axis as the line (a target, a limit) */
   line2?: number | null;
+  /** a third, thin solid line on the line axis (a running average) */
+  line3?: number | null;
   /** drawn faded (few answers, failed attempt …) */
   muted?: boolean;
   highlight?: boolean;
@@ -37,7 +39,7 @@ export interface ChartSeries {
 
 /** the chart is drawn at the width it is shown at, so the text is the same size in every chart whatever its width */
 const DEFAULT_W = 640;
-const H = 230;
+const DEFAULT_H = 230;
 const PAD_T = 14;
 const PAD_B = 26;
 
@@ -79,7 +81,7 @@ function axisOf(values: Array<number | null | undefined>, s: ChartSeries): Axis 
   return niceTicks(Math.max(1, ...present));
 }
 
-export function Chart({ points, bars, bars2, line, line2, ariaLabel, legend, secondary, connectGaps }: { connectGaps?: boolean; points: ChartPoint[]; bars?: ChartSeries; bars2?: ChartSeries; line?: ChartSeries; line2?: ChartSeries; ariaLabel: string; legend?: string; secondary?: { factor: number; color: string; format: (v: number) => string } }) {
+export function Chart({ points, bars, bars2, line, line2, ariaLabel, legend, secondary, connectGaps, height = DEFAULT_H, line3 }: { line3?: Pick<ChartSeries, "color">; height?: number; connectGaps?: boolean; points: ChartPoint[]; bars?: ChartSeries; bars2?: ChartSeries; line?: ChartSeries; line2?: ChartSeries; ariaLabel: string; legend?: string; secondary?: { factor: number; color: string; format: (v: number) => string } }) {
   const id = useId().replace(/:/g, "");
   const [hover, setHover] = useState<number | null>(null);
   const box = useRef<HTMLDivElement>(null);
@@ -93,6 +95,7 @@ export function Chart({ points, bars, bars2, line, line2, ariaLabel, legend, sec
     ro.observe(el);
     return () => ro.disconnect();
   }, []);
+  const H = height;
   const n = points.length;
   if (n === 0) return null;
 
@@ -105,7 +108,7 @@ export function Chart({ points, bars, bars2, line, line2, ariaLabel, legend, sec
   const x = (i: number) => padL + slot * (i + 0.5);
 
   const barAxis = bars ? axisOf(points.flatMap((p) => [p.bar, ...(bars2 ? [p.bar2] : []), ...(!line && line2 ? [p.line2] : [])]), bars) : null;
-  const lineAxis = line ? axisOf(points.flatMap((p) => [p.line, ...(line2 ? [p.line2] : [])]), line) : null;
+  const lineAxis = line ? axisOf(points.flatMap((p) => [p.line, ...(line2 ? [p.line2] : []), ...(line3 ? [p.line3] : [])]), line) : null;
   const leftAxis = (barAxis ?? lineAxis)!;
   const leftSeries = (bars ?? line)!;
   const yOf = (v: number, axis: Axis) => PAD_T + plotH - ((v - axis.min) / (axis.top - axis.min)) * plotH;
@@ -134,6 +137,8 @@ export function Chart({ points, bars, bars2, line, line2, ariaLabel, legend, sec
       ref.push({ x: W - padR, y: ref[ref.length - 1]!.y });
     }
   }
+  const avg: Array<{ x: number; y: number }> = [];
+  if (line3 && lineAxis) points.forEach((p, i) => { if (typeof p.line3 === "number") avg.push({ x: x(i), y: yOf(p.line3, lineAxis) }); });
   const path = (run: Array<{ x: number; y: number }>) => run.map((p, i) => `${i === 0 ? "M" : "L"}${p.x.toFixed(1)},${p.y.toFixed(1)}`).join(" ");
   const base = PAD_T + plotH;
 
@@ -188,6 +193,7 @@ export function Chart({ points, bars, bars2, line, line2, ariaLabel, legend, sec
               {run.length > 1 && <path d={path(run)} fill="none" stroke={line.color} strokeWidth={2.2} strokeLinejoin="round" strokeLinecap="round" />}
             </g>
           ))}
+          {line3 && avg.length > 1 && <path d={path(avg)} fill="none" stroke={line3.color} strokeWidth={2.6} strokeLinejoin="round" strokeLinecap="round" />}
           {line && lineAxis && points.map((p, i) => {
             if (typeof p.line !== "number") return null;
             const cy = yOf(p.line, lineAxis);

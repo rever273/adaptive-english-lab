@@ -147,6 +147,8 @@ export function FeedbackPanel({ feedback, sessionId = null, skill = null, busy, 
           {feedback.correct.options && <p>Correct: <strong>{feedback.correct.options.join(" / ")}</strong></p>}
           {feedback.correct.segments && <p>The mistake: <strong>{feedback.correct.segments.join(" / ")}</strong></p>}
           {feedback.correct.fixes && feedback.correct.fixes.length > 0 ? <p>Right answer: <strong>{feedback.correct.fixes.join(" / ")}</strong></p> : feedback.correct.corrections && feedback.correct.corrections.length > 0 && <p>Right answer: <strong>{feedback.correct.corrections.join(" / ")}</strong></p>}
+          {feedback.correct.fixes?.length && feedback.correct.corrections?.length && feedback.correct.corrections[0] !== feedback.correct.fixes[0]
+            ? <p>Corrected sentence: {feedback.correct.corrections[0]}</p> : null}
           {feedback.correct.answers && (
             <p>
               Approved examples: <strong>{feedback.correct.answers.join(" · ")}</strong>

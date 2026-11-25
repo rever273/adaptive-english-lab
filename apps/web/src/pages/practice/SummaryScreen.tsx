@@ -58,11 +58,12 @@ function BlockReview({ sessionId }: { sessionId: string }) {
   );
 }
 
-export function SummaryScreen({ summary: first, onDone, onNavigate, onDailyDone }: { summary: SessionSummary; onDone: () => void; onNavigate?: (page: "vocabulary" | "analytics") => void; onDailyDone?: () => void }) {
+export function SummaryScreen({ summary: first, onDone, onNavigate, onDailyDone, onNext }: { summary: SessionSummary; onDone: () => void; onNavigate?: (page: "vocabulary" | "analytics") => void; onDailyDone?: () => void; onNext?: () => void }) {
   // T3c: the numbers were fixed at the moment the session ended; while local AI checks of its answers are still running they are re-read, so the counter counts down
   const [summary, setSummary] = useState(first);
   // Enter on the final statistics continues the daily practice, else closes the summary
-  useEnterContinue(onDailyDone ?? onDone);
+  // Enter continues THIS training (the next session), never the daily practice or the start screen
+  useEnterContinue(onNext ?? null);
   useEffect(() => setSummary(first), [first]);
   const waitingForAi = summary.aiWaiting ?? 0;
   useEffect(() => {
@@ -77,6 +78,7 @@ export function SummaryScreen({ summary: first, onDone, onNavigate, onDailyDone 
     <section aria-labelledby="sum-h" data-testid="summary">
       <h2 id="sum-h">{vocab ? "Vocabulary session " : "Session "}{summary.status === "completed" ? "complete" : "ended early"}</h2>
       <div className="actions">
+        {onNext && <button type="button" className="btn btn-primary has-kbd" onClick={onNext} data-testid="next-session"><kbd>Enter</kbd> Next session <i className="pi pi-arrow-right" /></button>}
         {onDailyDone && <button type="button" className="btn btn-primary" onClick={onDailyDone}>Continue Daily Practice <i className="pi pi-arrow-right" /></button>}
         <button className="btn btn-primary" onClick={onDone} data-testid="done">
           <i className={`pi ${vocab ? "pi-bookmark" : "pi-home"}`} aria-hidden="true" /> {vocab ? "Back to Vocabulary" : "Back to start"}

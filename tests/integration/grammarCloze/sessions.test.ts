@@ -43,16 +43,17 @@ const answer = (sessionId: string, position: number, right: boolean) => {
 };
 
 describe("sessions", () => {
-  it("opens L01 with 15 sentences in seven rule groups and reopens the same session after a reload", () => {
+  it("opens L01 with 15 sentences around one theme and reopens the same session after a reload", () => {
     const first = startSession(db, deps, "tab-1");
     expect(first.resumed).toBe(false);
     const v = sessionView(db, first.sessionId);
     expect(v.levelNo).toBe(1);
     expect(v.slots).toHaveLength(15);
     expect(v.slots.every((s) => s.state === "pending" && s.correct === undefined)).toBe(true); // the key is not sent
-    const byRule: Record<string, number> = {};
-    for (const s of v.slots) byRule[s.ruleName] = (byRule[s.ruleName] ?? 0) + 1;
-    expect(Object.values(byRule).sort()).toEqual([2, 2, 2, 2, 2, 2, 3]);
+    expect(v.plan?.focusName).toBeTruthy();
+    // several rules, never three of one rule in a row
+    expect(new Set(v.slots.map((s) => s.ruleName)).size).toBeGreaterThanOrEqual(5);
+    for (let i = 2; i < v.slots.length; i++) expect(v.slots[i]!.ruleName === v.slots[i - 1]!.ruleName && v.slots[i]!.ruleName === v.slots[i - 2]!.ruleName).toBe(false);
     const again = startSession(db, deps, "tab-2");
     expect(again).toEqual({ sessionId: first.sessionId, resumed: true });
     expect(sessionView(db, first.sessionId).slots.map((s) => s.options)).toEqual(v.slots.map((s) => s.options)); // same order of options

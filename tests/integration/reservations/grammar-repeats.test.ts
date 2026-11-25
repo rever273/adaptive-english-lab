@@ -103,7 +103,7 @@ describe("a missed grammar exercise comes back once as a labelled repeat (D68)",
     }
     // the decision record carries the repeat information and the new algorithm id
     const decision = one<{ algorithm_id: string; choices_json: string }>("SELECT algorithm_id, choices_json FROM scheduling_decisions WHERE session_id = ?", second.sessionId);
-    expect(decision.algorithm_id).toBe("grammar-selection-v4");
+    expect(decision.algorithm_id).toBe("grammar-selection-v5");
     expect((JSON.parse(decision.choices_json).slots as Array<{ repeat: unknown }>).filter((x) => x.repeat).length).toBe(repeatSlots.length);
 
     // strict no-repeat for everything that is not a labelled repeat
@@ -195,6 +195,26 @@ describe("a missed grammar exercise comes back once as a labelled repeat (D68)",
 });
 
 describe("replenishment is planned from the next lesson's deficits (D68)", () => {
+  it("explains an impossible two-family lesson and calculates again after a new policy revision, without rewriting history", () => {
+    env = openSliceCopy();
+    const original = one<{ policy: string; blueprintId: string }>("SELECT policy_json AS policy, blueprint_id AS blueprintId FROM blueprint_revisions WHERE id = ?", env.blueprintRevisionId);
+    const policy = { ...JSON.parse(original.policy), readingBlocks: 0, skillPool: ["tenses.present_simple", "tenses.habitual_used_to", "countability.mass_nouns", "tenses.tense_sequence", "countability.few_little"] };
+    const insert = env.db.prepare("INSERT INTO blueprint_revisions(id, blueprint_id, revision, policy_json, status, created_at) VALUES (?,?,?,?,'published',?)");
+    insert.run(randomUUID(), original.blueprintId, 2, JSON.stringify(policy), env.deps.now().toISOString());
+    const before = one<{ n: number }>("SELECT total_changes() AS n").n;
+    expect(() => calculateCoursePlan(env.db, env.deps.now())).toThrowError(expect.objectContaining({ status: 422, code: "COURSE_LESSON_POLICY_INVALID", message: expect.stringContaining("2 grammar families; at least 3") }));
+    expect(one<{ n: number }>("SELECT total_changes() AS n").n).toBe(before);
+    insert.run(randomUUID(), original.blueprintId, 3, JSON.stringify({ ...policy, skillPool: [...policy.skillPool, "prepositions.time_at_on_in"] }), env.deps.now().toISOString());
+    const revised = one<{ n: number }>("SELECT total_changes() AS n").n;
+    const result = calculateCoursePlan(env.db, env.deps.now());
+    expect(result.sessions).toBe(2);
+    expect(result.deficit).toBeGreaterThan(0);
+    expect(result.recommended).toBe(Math.ceil(result.deficit * 1.2));
+    expect(result.missing.every(item => [...policy.skillPool, "prepositions.time_at_on_in"].includes(item.skill))).toBe(true);
+    expect(one<{ n: number }>("SELECT total_changes() AS n").n).toBe(revised);
+    expect(one<{ policy: string }>("SELECT policy_json AS policy FROM blueprint_revisions WHERE id = ?", env.blueprintRevisionId).policy).toBe(original.policy);
+  });
+
   it("counts remaining sessions in course order and consumes shared stock only once without writing", () => {
     env = openSliceCopy();
     const first = begin(env, "first");

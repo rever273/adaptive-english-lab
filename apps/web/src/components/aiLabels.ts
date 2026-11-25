@@ -5,12 +5,14 @@ export const KIND_LABEL: Record<string, string> = {
   dictation: "Audio Dictation",
   expression: "Write an expression draft",
   word_lesson: "Write a single-word lesson",
+  context_loop: "Write Context Loop sentences",
   word_lesson_check: "Check a lesson answer",
   triage: "Quick screen of a draft",
   benchmark: "Model benchmark",
   vocabulary_enrichment: "Translate a saved word",
   tutor: "Tutor answer",
   grammar_cloze_analysis: "Analyse a Grammar Cloze sentence",
+  grammar_cloze_audit: "Check Grammar Cloze sentences (background)",
 };
 
 export const GPU_WAIT: Record<string, string> = {

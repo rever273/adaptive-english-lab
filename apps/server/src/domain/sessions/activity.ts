@@ -2,6 +2,7 @@ import type { Db } from "../../db/open.js";
 import { ApiError } from "../../errors.js";
 import type { SessionDeps } from "./policy.js";
 import { assertLease } from "./lease.js";
+import { overlapsRecordedActivity } from "../journey/intervals.js";
 
 export interface ActivityInterval { id: string; tabId: string; startMs: number; endMs: number }
 /** Append once; time intervals cannot overlap, including across tabs or categories. */
@@ -19,8 +20,7 @@ export function recordPracticeActivity(db: Db, deps: SessionDeps, sessionId: str
     if (b.startMs < Date.parse(session.createdAt) || b.endMs > now + 2000 || b.endMs <= b.startMs || b.endMs - b.startMs > 15000 || (session.endedAt && b.endMs > Date.parse(session.endedAt) + 2000)) throw new ApiError(400, "ACTIVITY_INVALID", "Invalid activity interval");
     if (session.status === "active") assertLease(db, deps, sessionId, b.tabId);
     else if (!session.endedAt) throw new ApiError(409, "SESSION_NOT_ACTIVE", "Session is not active");
-    const overlap = db.prepare("SELECT 1 FROM practice_activity_intervals WHERE start_ms < ? AND end_ms > ? LIMIT 1").get(b.endMs, b.startMs);
-    if (overlap || db.prepare("SELECT 1 FROM journey_typing_intervals WHERE start_ms < ? AND end_ms > ?").get(b.endMs, b.startMs) || db.prepare("SELECT 1 FROM word_lesson_activity_intervals WHERE start_ms < ? AND end_ms > ?").get(b.endMs, b.startMs) || db.prepare("SELECT 1 FROM conversation_activity_intervals WHERE start_ms < ? AND end_ms > ?").get(b.endMs, b.startMs) || db.prepare("SELECT 1 FROM grammar_cloze_activity_intervals WHERE start_ms < ? AND end_ms > ?").get(b.endMs, b.startMs)) throw new ApiError(409, "ACTIVITY_OVERLAP", "Activity interval overlaps a recorded interval");
+    if (overlapsRecordedActivity(db, b.startMs, b.endMs)) throw new ApiError(409, "ACTIVITY_OVERLAP", "Activity interval overlaps a recorded interval");
     db.prepare("INSERT INTO practice_activity_intervals(id,session_id,tab_id,start_ms,end_ms,timezone,method,recorded_at) VALUES (?,?,?,?,?,?,?,?)").run(b.id, sessionId, b.tabId, b.startMs, b.endMs, session.timezone, "visible-recent-v1", deps.now().toISOString());
     return { recorded: true };
   }).immediate();

@@ -62,8 +62,8 @@ describe("matching game: selection", () => {
 });
 
 describe("matching game: rush mode", () => {
-  it("the repeat count is the setting: 4 by default, another value changes the total and nothing else", () => {
-    expect(ROUNDS).toBe(4);
+  it("the repeat count is the setting: 3 by default, another value changes the total and nothing else", () => {
+    expect(ROUNDS).toBe(3);
     for (const rounds of [1, 3, 7, 10]) {
       const s = createMatch(words(6), "rush", seeded(11), rounds);
       expect(s.total).toBe(6 * rounds);
@@ -178,5 +178,25 @@ describe("matching game: ending and results", () => {
     let s = createMatch(words(3), "once", seeded(9));
     for (const id of ["w0", "w1"]) { s = pickCell(s, "left", cellOf(s, "left", id).key).state; s = pickCell(s, "right", cellOf(s, "right", id).key).state; }
     expect(s.done).toBe(false);
+  });
+  it("puts the returning pair on a different row in each column, so the same two keys do not keep matching", () => {
+    for (let seed = 1; seed <= 200; seed++) {
+      const rng = seeded(seed);
+      let s = createMatch(words(8), "rush", rng);
+      for (let k = 0; k < 20 && !s.done; k++) {
+        // always the first open row of both columns, as a player pressing 1 and Alt+1 would
+        const l = s.left.findIndex((c) => c && !c.matched);
+        const target = s.left[l]!;
+        const r = s.right.findIndex((c) => c && !c.matched && c.wordId === target.wordId);
+        const first = pickCell(s, "left", target.key).state;
+        const res = pickCell(first, "right", s.right[r]!.key);
+        s = res.state;
+        if (s.done || res.event?.kind !== "match") break;
+        s = replacePair(s, res.event.leftKey, res.event.rightKey, rng);
+        const fresh = s.left[l];
+        if (fresh && !fresh.matched) expect(s.right[l]?.wordId).not.toBe(fresh.wordId);
+        expect([...s.left.filter((c) => c && !c.matched).map((c) => c!.wordId)].sort()).toEqual([...s.right.filter((c) => c && !c.matched).map((c) => c!.wordId)].sort());
+      }
+    }
   });
 });

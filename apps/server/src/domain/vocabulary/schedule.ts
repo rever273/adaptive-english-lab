@@ -8,6 +8,8 @@ import { createHash } from "node:crypto";
 export const VOCABULARY_SELECTION_V2 = "vocabulary-selection-v2";
 export const VOCABULARY_SELECTION_V3 = "vocabulary-selection-v3";
 export const VOCABULARY_SELECTION_V4 = "vocabulary-selection-v4";
+export const VOCABULARY_FOCUS_V1 = "vocabulary-focus-v1";
+export const FOCUS_CONFIG = { taskCount: 6, targetWords: 3, newWords: 2 } as const;
 const DAY_MS = 86_400_000;
 
 export type Family = "recognition" | "guided_recall" | "collocation";
@@ -46,6 +48,7 @@ export interface WordEvent {
   slotId: string;
   /** Labelled repeats are practice, not independent evidence for interval growth. */
   independent?: boolean;
+  family?: Family;
 }
 
 export interface WordState {
@@ -176,6 +179,7 @@ export interface PickInput {
   n: number;
   seed: string;
   newWordsPerSession: number;
+  focus?: boolean;
 }
 
 /**
@@ -252,7 +256,11 @@ function pickVocabularyPass(input: PickInput, shortage: boolean): VocabularyPick
     }
     if (freshList.length > 0) {
       const deficit = (f: Family) => FAMILY_WEIGHT[f] * (picked.length + 1) - famCount[f]!;
-      take([...freshList].sort((a, b) => deficit(b.family) - deficit(a.family))[0]!, st, null);
+      const history = input.events.get(lemma) ?? [];
+      const needsRecall = input.focus && !history.some(e => e.family === "guided_recall" && e.outcome === "success" && e.independent !== false)
+        && (history.some(e => e.family === "recognition" && e.outcome === "success" && e.independent !== false) || picked.some(p => p.candidate.lemma === lemma));
+      const recall = needsRecall && !picked.some(p => p.candidate.lemma === lemma && p.candidate.family === "guided_recall") ? freshList.find(c => c.family === "guided_recall") : undefined;
+      take(recall ?? [...freshList].sort((a, b) => deficit(b.family) - deficit(a.family))[0]!, st, null);
       return true;
     }
     // no fresh sentence left: open sentences first, correctly answered ones only when the word is due
@@ -287,7 +295,7 @@ function pickVocabularyPass(input: PickInput, shortage: boolean): VocabularyPick
   // One new word remains possible even with a large due backlog; extra new words fill only shortages.
   // At most `maxWords` different words per session, so that words come back with another sentence (and a missed one can return); when the
   // limited set cannot fill the session (too few sentences), the unlimited passes below take over.
-  const maxWords = Number.isFinite(n) && n < Number.MAX_SAFE_INTEGER ? Math.max(2, Math.min(SELECTION_CONFIG.maxWordsPerSession, Math.ceil(n * 0.8))) : Number.MAX_SAFE_INTEGER;
+  const maxWords = input.focus ? FOCUS_CONFIG.targetWords : Number.isFinite(n) && n < Number.MAX_SAFE_INTEGER ? Math.max(2, Math.min(SELECTION_CONFIG.maxWordsPerSession, Math.ceil(n * 0.8))) : Number.MAX_SAFE_INTEGER;
   if (newCapped.length > 0 && dueWords.length >= n) {
     round(dueWords.slice(0, Math.max(0, Math.min(n, maxWords) - 1)));
     round(newCapped.slice(0, 1));
@@ -296,12 +304,12 @@ function pickVocabularyPass(input: PickInput, shortage: boolean): VocabularyPick
   const limitedPrimary = [...dueWords.slice(0, Math.max(0, maxWords - limitedNew.length)), ...limitedNew];
   fill(limitedPrimary, fillWords.slice(0, Math.max(0, maxWords - limitedPrimary.length)));
   fill([...dueWords, ...newCapped], fillWords);
-  if (picked.length < n && newExtra.length > 0) fill([...dueWords, ...newCapped, ...newExtra], fillWords);
+  if (!input.focus && picked.length < n && newExtra.length > 0) fill([...dueWords, ...newCapped, ...newExtra], fillWords);
   // the 60% repeat share is SOFT: it only prefers fresh sentences for the places beyond it; when no fresh sentence is left,
   // repeats (missed/assisted first, then due reviews) fill the remaining places, up to the whole session
   if (picked.length < n) {
     repeatCap = Number.MAX_SAFE_INTEGER;
-    fill([...dueWords, ...newCapped, ...newExtra], fillWords);
+    fill([...dueWords, ...newCapped, ...(input.focus ? [] : newExtra)], fillWords);
   }
   return picked;
 }

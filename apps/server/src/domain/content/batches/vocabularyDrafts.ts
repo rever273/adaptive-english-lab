@@ -96,8 +96,8 @@ export function assembleVocabulary(raw: unknown, plan: ItemPlan, exerciseId: str
   if (r.options && r.correct_index !== undefined && r.options[r.correct_index]?.text.trim().toLowerCase() !== r.surface_form.trim().toLowerCase()) return bad("surface_form must equal the correct option");
   if (r.cue_ru) {
     const m = r.cue_ru.match(/(?:^|\s)на\s+(?:букву\s+)?([A-Za-zЀ-ӿ])(?![A-Za-zЀ-ӿ])/i);
-    if (!m) return bad("cue_ru must name the first letter, e.g. (прил., на c...)");
-    if (r.accepted_answers!.some(a => a.trim()[0]?.toLowerCase() !== m[1]!.toLowerCase())) return bad("cue_ru first letter must be the Latin first letter of every accepted answer");
+    if (!m && promptVersion !== "vocabulary-generation-v9") return bad("cue_ru must name the first letter, e.g. (прил., на c...)");
+    if (m && (promptVersion === "vocabulary-generation-v9" || r.accepted_answers!.some(a => a.trim()[0]?.toLowerCase() !== m[1]!.toLowerCase()))) return bad("cue_ru first letter must be the Latin first letter of every accepted answer");
   }
   // a listed synonym of the word as a distractor usually also fits the gap (the reviewer would have to reject it)
   const synonym = r.options?.find((o, i) => i !== r.correct_index && synonyms.some(x => x.trim().toLowerCase() === o.text.trim().toLowerCase()));
@@ -122,3 +122,5 @@ export function assembleVocabulary(raw: unknown, plan: ItemPlan, exerciseId: str
   const v = validateExercise(exercise, { taxonomySkillIds: skills });
   return v.ok ? { ok: true, exercise } : { ok: false, issues: v.errors };
 }
+
+export const VOCABULARY_SYSTEM_V9 = VOCABULARY_SYSTEM_V8.replace(/guided_recall also:[^\n]+/, "guided_recall also: cue_ru gives the intended Russian meaning and part of speech without giving the first letter or the answer. accepted_answers contains the target surface form and valid spelling variants.") + "\nUse different short practical contexts, such as rescheduling a shift, borrowing a tool or asking for help. Vary the intent and collocation.";

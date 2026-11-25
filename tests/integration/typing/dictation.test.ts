@@ -1,3 +1,4 @@
+import { dictationKeyboardAnalytics } from "../../../apps/server/src/domain/typing/keyAnalytics.js";
 import { createHash, randomUUID } from "node:crypto";
 import { existsSync, mkdirSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import path from "node:path";
@@ -7,7 +8,7 @@ import { openDatabase, type Db } from "../../../apps/server/src/db/open.js";
 import type { TtsClient } from "../../../apps/server/src/adapters/tts/piper.js";
 import type { ChatClient } from "../../../apps/server/src/domain/ai/clients.js";
 import type { DictationAsr } from "../../../apps/server/src/domain/typing/dictation/asr.js";
-import { buildItems, createLesson, dictationOverview, prepareTracks, revealAnswer, dictationState, exerciseAudio, openTranslation, recordPlay, recordTime, requestHint, retryLesson, startLesson, submitAnswer, type DictationEnv } from "../../../apps/server/src/domain/typing/dictation/lessons.js";
+import { buildItems, createLesson, dictationOverview, realRepeatCandidates, prepareTracks, revealAnswer, dictationState, exerciseAudio, openTranslation, recordPlay, recordTime, requestHint, retryLesson, startLesson, submitAnswer, type DictationEnv } from "../../../apps/server/src/domain/typing/dictation/lessons.js";
 import { buildDictationResult } from "../../../apps/server/src/domain/typing/dictation/result.js";
 import { dictationAnalytics } from "../../../apps/server/src/domain/typing/dictation/analytics.js";
 import { runDictationJob, type DictationJobPayload, type DictationPayload } from "../../../apps/server/src/domain/typing/dictation/runner.js";
@@ -209,6 +210,13 @@ describe("audio dictation", () => {
     expect(wrong.words.filter((w) => w.text !== null).map((w) => w.index)).toEqual([0, 1, words.length - 1]);
     expect(dictationState(d, lesson.id).exercises[0]!.words).toEqual(wrong.words);
     expect(submitAnswer(d, deps, exercise.id, { attemptId, text: answer.join(" "), activeMs: 10 }).words).toEqual(wrong.words);
+    // per-key facts of the wrong attempt: the letters of right words are hits, the wrong words add misses; timing comes from the page
+    const keyRows = d.prepare("SELECT letter, hits, misses, total_ms AS ms, timed FROM typing_dictation_keys WHERE attempt_id = ?").all(attemptId) as Array<{ letter: string; hits: number; misses: number; ms: number; timed: number }>;
+    expect(keyRows.length).toBeGreaterThan(0);
+    expect(keyRows.reduce((a, r) => a + r.misses, 0)).toBeGreaterThan(0);
+    expect(keyRows.every((r) => r.ms === 0 && r.timed === 0)).toBe(true); // this call sent no key times
+    const kb = dictationKeyboardAnalytics(d, null); // no completed lesson yet: an empty grid, but the queries must run
+    expect(kb.grid).toEqual([]);
     const right = submitAnswer(d, deps, exercise.id, { attemptId: randomUUID(), text: exercise.textEn, activeMs: 20 });
     expect(right.correct).toBe(true);
     expect(right.xpAwarded).toBe(Math.round(6 * Math.round((1 - 2 / tokenize(exercise.textEn).length) * 100) / 100));
@@ -263,6 +271,55 @@ describe("audio dictation", () => {
     for (const ex of state.exercises) submitAnswer(d, deps, ex.id, { attemptId: randomUUID(), text: ex.textEn, activeMs: 2 });
     d.prepare("INSERT INTO settings_revisions(id, revision, values_json, created_at) SELECT ?, MAX(revision)+1, json_set(values_json, '$.typingDictationSource', 'tts'), ? FROM settings_revisions").run(randomUUID(), new Date().toISOString());
     expect(createLesson(d, deps, f.env)).toMatchObject({ status: "generating", ready: 0 });
+  });
+
+  it("real recordings: a cleanly typed sentence never returns, one with more than one mistake comes back as a marked repeat until it is typed cleanly", async () => {
+    const { db: d, f } = await setup(6);
+    const audioDir = scratch!.root;
+    const clips = SENTENCES.slice(0, 12).map((text, i) => {
+      const file = `common_voice_en_${i}.mp3`;
+      const audio = Buffer.from(`test-audio-${i}`);
+      writeFileSync(path.join(audioDir, file), audio);
+      return { file, sentenceId: `sentence-${i}`, text, translationRu: ru, sha256: createHash("sha256").update(audio).digest("hex"), audioMs: 3000, status: "validated", validation: { source: "mozilla-common-voice-v24-au", textReview: "agent", translationReview: "agent", asrModels: ["faster-whisper-large-v3", "faster-whisper-medium"], asrTexts: [text, text], humanAudioReview: true } };
+    });
+    const catalogPath = path.join(audioDir, "reviewed.json");
+    writeFileSync(catalogPath, JSON.stringify({ clips }));
+    f.env.realSpeech = { catalogPath, audioDir };
+    const finish = (lessonId: string, plan: (text: string, i: number) => string[]) => {
+      const st = startLesson(d, deps, f.env, lessonId);
+      st.exercises.forEach((e, i) => { for (const t of plan(e.textEn, i)) submitAnswer(d, deps, e.id, { attemptId: randomUUID(), text: t, activeMs: 1 }); });
+      return st;
+    };
+    // lesson 1: the first sentence takes two wrong words, the second one wrong word, the rest are clean
+    const l1 = createLesson(d, deps, f.env);
+    const s1 = finish(l1.id, (text, i) => (i === 0 ? ["totally different words here", text] : i === 1 ? [text.split(" ").slice(0, -1).concat("zzz").join(" "), text] : [text]));
+    expect(dictationOverview(d, f.env).lesson).toBeNull();
+    const bad = realRepeatCandidates(d, 5, -1000);
+    expect(bad.map((x) => x.id)).toEqual([s1.exercises[0]!.id]); // not the clean ones, not the single slip
+    // lesson 2: one marked repeat (6 / 6) and five new recordings; the repeat keeps its provenance and its audio
+    const l2 = createLesson(d, deps, f.env);
+    const rows = d.prepare("SELECT id, ordinal, text_en, source, repeat_of FROM typing_dictation_exercises WHERE lesson_id = ? ORDER BY ordinal").all(l2.id) as Array<{ id: string; ordinal: number; text_en: string; source: string; repeat_of: string | null }>;
+    const repeat = rows.filter((x) => x.repeat_of !== null);
+    expect(repeat).toHaveLength(1);
+    expect(repeat[0]).toMatchObject({ text_en: s1.exercises[0]!.textEn, source: "real", repeat_of: s1.exercises[0]!.id });
+    expect(repeat[0]!.ordinal).toBeGreaterThanOrEqual(2);
+    expect(new Set(rows.map((x) => x.text_en)).size).toBe(6);
+    expect(exerciseAudio(d, f.env, repeat[0]!.id).file).toContain("real-");
+    expect(d.pragma("foreign_key_check")).toEqual([]);
+    // the repeat is typed with mistakes first: still not mastered
+    const s2 = startLesson(d, deps, f.env, l2.id);
+    const rep = s2.exercises.find((e) => e.isRepeat)!;
+    for (const e of s2.exercises) {
+      if (e.id === rep.id) submitAnswer(d, deps, e.id, { attemptId: randomUUID(), text: "wrong wrong wrong", activeMs: 1 });
+      submitAnswer(d, deps, e.id, { attemptId: randomUUID(), text: e.textEn, activeMs: 1 });
+    }
+    expect(realRepeatCandidates(d, 5, -1000).map((x) => x.id)).toEqual([s1.exercises[0]!.id]);
+    expect(realRepeatCandidates(d, 5, 1)).toEqual([]); // but not in the very next level
+    // a later repeat typed cleanly masters the sentence
+    d.prepare("INSERT INTO typing_dictation_exercises SELECT ?, ?, ?, text_en, translation_ru, topic, target_skill_id, word_count, fingerprint || ':again', source, voice_id, voice_name, length_scale, tts_model_sha256, audio_file, audio_ms, asr_model, asr_text, status, job_result_id, created_at, id FROM typing_dictation_exercises WHERE id = ?").run(randomUUID(), l2.id, 99, s1.exercises[0]!.id);
+    const clean = d.prepare("SELECT id FROM typing_dictation_exercises WHERE lesson_id = ? AND ordinal = 99").get(l2.id) as { id: string };
+    d.prepare("INSERT INTO typing_dictation_attempts(id, exercise_id, attempt_no, answer_text, correct, word_errors, hint_level, translation_seen, check_version, created_at) VALUES (?,?,1,?,1,0,0,0,'test',?)").run(randomUUID(), clean.id, "x", new Date().toISOString());
+    expect(realRepeatCandidates(d, 5, -1000)).toEqual([]); // typed cleanly: never again
   });
 
   it("uses source clips after both automatic checks without fabricating translations", async () => {

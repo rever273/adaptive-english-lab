@@ -8,9 +8,11 @@ export const MODE_INFO: Record<api.JourneyMode, { label: string; icon: string; d
     dictation: { label: 'Audio Dictation', icon: 'pi-volume-up', description: 'Listen and type' },
     conversation: { label: 'Conversation', icon: 'pi-comments', description: 'Have a short conversation' },
     wordLesson: { label: 'Vocabulary - One Word', icon: 'pi-star', description: 'One word in five steps' },
+    contextLoop: { label: 'Vocabulary - Context Loop', icon: 'pi-sync', description: 'Words in short sentences' },
     grammarCloze: { label: 'Grammar - Cloze', icon: 'pi-th-large', description: 'Fill one gap at a time' },
+    vocabTyping: { label: 'Typing - Vocabulary', icon: 'pi-language', description: 'Type new words in real sentences' },
 };
-export const MODES: api.JourneyMode[] = ['grammar', 'grammarCloze', 'vocabulary', 'wordLesson', 'words', 'books', 'dictation', 'conversation'];
+export const MODES: api.JourneyMode[] = ['grammar', 'grammarCloze', 'vocabulary', 'wordLesson', 'contextLoop', 'vocabTyping', 'words', 'books', 'dictation', 'conversation'];
 export const formatTime = (ms: number) => {
     const m = Math.floor(ms / 60000);
     return m >= 60 ? `${Math.floor(m / 60)}h ${String(m % 60).padStart(2, '0')}m` : `${m} min`;

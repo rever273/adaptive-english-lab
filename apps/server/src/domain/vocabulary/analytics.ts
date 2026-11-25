@@ -1,6 +1,7 @@
 import type { Db } from "../../db/open.js";
 import { localDateIn } from "../attempts/canonical.js";
 import { activityProgress } from "../sessions/xp.js";
+import { vocabularyProgress } from "./progress.js";
 
 /**
  * Vocabulary Analytics (vocabulary TZ, stage F). Everything is counted by code from stored events; nothing here touches Grammar Mastery.
@@ -160,6 +161,8 @@ export function vocabularyAnalytics(db: Db, p: { days: number | null; now: Date;
     weak,
     words: words.sort((a, b) => b.lastSeen.localeCompare(a.lastSeen)),
     retention: rate(rc, rt),
+    // vocabulary-progress-v1: the saved words over time and per-word strength tracks, from the raw events of all three modes
+    progress: vocabularyProgress(db, { days: p.days, now: p.now }),
     // labelled repeats of sentences shown before: weaker evidence, kept apart from every fresh-sentence metric above
     repeats: {
       count: rf.length,

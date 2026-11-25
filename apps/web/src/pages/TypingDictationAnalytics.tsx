@@ -3,6 +3,7 @@ import { fetchDictationAnalytics, type DictationAnalytics } from "../api";
 import { Chart } from "../components/Chart";
 import { CumulativeCharacters } from "../components/CharacterCharts";
 import { fmtTotalTime } from "../format";
+import { KeyboardSection } from "./TypingKeyboardAnalytics";
 
 const fmtDay = (iso: string) => new Date(iso.slice(0, 10) + "T00:00:00").toLocaleDateString("en-AU", { day: "numeric", month: "short" });
 const pct = (v: number | null) => (v === null ? "—" : `${Math.round(v)}%`);
@@ -98,6 +99,7 @@ export function TypingDictationAnalytics({ days, toolbar }: { days: "7" | "30" |
       </table>
       <p className="muted small">A voice that the speech check often misses is chosen less, one that is always heard back a little more. Older-sounding voices start with a lower weight and are not given topics such as software or video games. Change the starting weights in Settings → Voices.</p>
       </section>
+      {data.keyboard && <KeyboardSection data={data.keyboard} mode="dictation" />}
     </section>
   );
 }

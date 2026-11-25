@@ -555,6 +555,21 @@ select {
     flex-direction: column;
     gap: 0.9rem;
 }
+/* the Typing Practice block spans the whole row and lays its six groups out as 2 columns by 3 rows (D182) */
+.settings-card-wide {
+    grid-column: 1 / -1;
+}
+.typing-settings-grid {
+    display: grid;
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+    gap: 1rem;
+    align-items: start;
+}
+@media (max-width: 900px) {
+    .typing-settings-grid {
+        grid-template-columns: minmax(0, 1fr);
+    }
+}
 .settings-card h3 {
     margin: 0;
     font-size: 1.05rem;
@@ -600,6 +615,13 @@ select {
     flex-direction: row;
     align-items: center;
     gap: 0.5rem;
+}
+.vocabulary-focus-setting {
+    margin-bottom: 0.85rem;
+}
+.vocabulary-focus-setting input {
+    flex: none;
+    margin: 0;
 }
 .settings-card input[type='number'],
 .settings-card select {

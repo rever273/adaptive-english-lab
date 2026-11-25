@@ -19,7 +19,7 @@ import { pickVocabularyTopic } from "./vocabularyTopics.js";
 
 /** Setting of a vocabulary sentence: 20% IT/technology (4 of every 20 steps, spread evenly), the rest a topic from the wide shared pool (general settings plus the Audio Dictation topics), varied per ordinal and per repeat of the same word. */
 export const vocabularyTopic = (ordinal: number, round: number): string => isItOrdinal(ordinal) ? "technology" : pickVocabularyTopic(ordinal, round);
-export const GENERATION_PROMPT = "generation-v10";
+export const GENERATION_PROMPT = "generation-v11";
 /** a skill is "covered" when it has this many released (selectable) exercises; below it the coverage view reports a deficit (D46) */
 export const TARGET_SELECTABLE_PER_SKILL = 12;
 
@@ -261,7 +261,7 @@ export function createBatch(db: Db, deps: BatchDeps, input: z.input<typeof Creat
         const levels = difficultyLevels(loadSettings(db).values);
         if (levels) plans = plans.map((p) => ({ ...p, level: levels[p.ordinal % levels.length]! }));
       }
-      const promptVersionId = ensurePromptVersion(db, request.category === "vocabulary" ? "vocabulary-generation-v8" : GENERATION_PROMPT, request.category === "vocabulary" ? JSON.stringify(vocabularyFormat(2)) : draftFormatsText(GENERATION_PROMPT));
+      const promptVersionId = ensurePromptVersion(db, request.category === "vocabulary" ? "vocabulary-generation-v9" : GENERATION_PROMPT, request.category === "vocabulary" ? JSON.stringify(vocabularyFormat(2)) : draftFormatsText(GENERATION_PROMPT));
       const now = deps.now().toISOString();
       const count = purpose === "trial" ? TRIAL_SIZE : request.count;
       db.prepare("INSERT INTO batches(id, requested_count, mode, purpose, prompt_version_id, spec_json, created_at) VALUES (?,?,?,?,?,?,?)").run(batchId, count, request.mode, purpose, promptVersionId, JSON.stringify({ ...(opts.agentAuthored ? { authoring: "agent" } : {}), category: request.category, skills: request.skills ?? null, types: purpose === "trial" ? [...EXERCISE_TYPES] : (request.types ?? null), perTypeTrial: TRIAL_PER_TYPE }), now);

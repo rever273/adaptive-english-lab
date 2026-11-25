@@ -14,7 +14,7 @@ import { loadSettings } from "../../sessions/policy.js";
 import { lookupBankTranslation } from "../../vocabulary/wordBankLookup.js";
 import { loadKeyData } from "./data.js";
 import { baselineWpm } from "../drills.js";
-import { accuracyOutlook, accuracyScore, DEFAULT_MIN_ACCURACY, goalForecast, learningRate, lessonKeys, MIN_KEYS, timeToSpeed, type KeyLessonRow, type LessonKey } from "./guided.js";
+import { accuracyOutlook, accuracyScore, DEFAULT_MIN_ACCURACY, goalForecast, learningRate, lessonKeys, MIN_KEY_LESSONS, overallAccuracy, timeToSpeed, type KeyLessonRow, type LessonKey } from "./guided.js";
 import { keyLessonText } from "./text.js";
 
 /**
@@ -48,13 +48,12 @@ interface LessonRow {
 /** the learner's goal (settings, WPM); missing means 55 WPM */
 export const DEFAULT_GOAL_WPM = 55;
 /**
- * keybr opens keys against one fixed target speed (35 WPM). Here every stage (a set of open letters) has its own fixed target: when a
- * letter opens, the target becomes the learner's speed at that moment (the median of the last RECENT_LESSONS lessons; before
- * MIN_RECENT of them, the usual speed in Meteor Rain and Books) × STEP_FACTOR, never above the goal, and it stays until the next
- * letter opens. So the slowest keys must catch up with the speed you already had, and the bar does not run away while you improve.
- * Once the whole alphabet is open the target is the goal itself.
+ * keybr opens keys against one fixed target speed that the learner sets ("Target speed", keybr default 35 WPM) and raises by hand when
+ * ready. Here the same: typingKeysTargetWpm (default DEFAULT_TARGET_WPM). Every key is judged on its own speed, so the overall lesson
+ * speed dropping when a new letter opens does not matter. The goal (typingKeysGoalWpm) is only the long-range aim of the forecast.
  */
-export const STEP_FACTOR = 1;
+export const DEFAULT_TARGET_WPM = 40;
+/** the learner's current speed (median of the last RECENT_LESSONS lessons; before MIN_RECENT of them, the usual Meteor Rain and Books speed): shown, not judged */
 export const RECENT_LESSONS = 10;
 export const MIN_RECENT = 3;
 
@@ -75,9 +74,12 @@ const lessonCpm = (charsTyped: number, errors: number, activeMs: number): number
 export function history(db: Db): { lessons: LessonFact[]; rows: KeyLessonRow[] } {
   const raw = db.prepare("SELECT id, ended_at AS endedAt, keys_json AS keys, target_cpm AS target, active_ms AS ms, chars_typed AS c, errors AS e FROM typing_key_lessons WHERE status = 'completed' ORDER BY ended_at, id").all() as Array<{ id: string; endedAt: string; keys: string; target: number; ms: number; c: number; e: number }>;
   const lessons = raw.map((l) => ({ id: l.id, at: Date.parse(l.endedAt), cpm: lessonCpm(l.c, l.e, l.ms), activeMs: l.ms, accuracy: l.c > 0 ? (l.c - l.e) / l.c : 1, open: (JSON.parse(l.keys) as { open: string[] }).open, target: l.target }));
-  const index = new Map(lessons.map((l, i) => [l.id, { i, at: l.at }]));
+  const index = new Map(lessons.map((l, i) => [l.id, { i, at: l.at, openKeys: l.open.length }]));
   const hits = db.prepare("SELECT h.lesson_id AS lessonId, h.letter, h.hits, h.misses, h.mean_ms AS meanMs FROM typing_key_hits h JOIN typing_key_lessons l ON l.id = h.lesson_id WHERE l.status = 'completed'").all() as Array<{ lessonId: string; letter: string; hits: number; misses: number; meanMs: number }>;
-  const rows = hits.map((h) => ({ lessonIndex: index.get(h.lessonId)!.i, at: index.get(h.lessonId)!.at, letter: h.letter, hits: h.hits, misses: h.misses, meanMs: h.meanMs }));
+  const rows = hits.map((h) => {
+    const l = index.get(h.lessonId)!;
+    return { lessonIndex: l.i, at: l.at, openKeys: l.openKeys, letter: h.letter, hits: h.hits, misses: h.misses, meanMs: h.meanMs };
+  });
   return { lessons, rows };
 }
 
@@ -100,8 +102,6 @@ export interface KeysNow {
   rows: KeyLessonRow[];
 }
 
-const stageOf = (open: Iterable<string>): string => [...open].sort().join("");
-
 export function currentKeys(db: Db, projectRoot: string): KeysNow {
   const data = loadKeyData(projectRoot);
   const settings = loadSettings(db).values;
@@ -110,27 +110,10 @@ export function currentKeys(db: Db, projectRoot: string): KeysNow {
   const { lessons, rows } = history(db);
   const recent = lessons.slice(-RECENT_LESSONS).map((l) => l.cpm);
   const current = Math.round(recent.length >= MIN_RECENT ? median(recent) : baselineWpm(db) * 5);
-  const fresh = Math.min(goal, Math.round(current * STEP_FACTOR));
+  const target = Math.round((settings.typingKeysTargetWpm ?? DEFAULT_TARGET_WPM) * 5);
+  // keys opened by earlier lessons stay open, also after the learner raises the target
   const alreadyOpen = new Set(lessons.flatMap((l) => l.open));
-  // the target of the current stage is the one its first lesson was made with; a stage without lessons yet gets a fresh one
-  const stageTarget = (open: Iterable<string>): number => {
-    const first = lessons.find((l) => stageOf(l.open) === stageOf(open));
-    return Math.min(goal, first ? first.target : fresh);
-  };
-  const judge = (target: number, open: ReadonlySet<string>) => lessonKeys(data.lettersByFrequency, rows, { targetCpm: target, alreadyOpen: open, minAccuracy });
-  const openNow = alreadyOpen.size > 0 ? alreadyOpen : new Set(data.lettersByFrequency.slice(0, MIN_KEYS));
-  let target = stageTarget(openNow);
-  let keys = judge(target, alreadyOpen);
-  const opened = new Set(keys.filter((k) => k.included).map((k) => k.letter));
-  if (stageOf(opened) !== stageOf(openNow)) {
-    // a letter has just opened: the new stage gets its own target, and the keys are judged by it from now on
-    target = stageTarget(opened);
-    keys = judge(target, opened);
-  }
-  if (keys.every((k) => k.included) && target < goal) {
-    target = goal;
-    keys = judge(target, new Set(keys.map((k) => k.letter)));
-  }
+  const keys = lessonKeys(data.lettersByFrequency, rows, { targetCpm: target, alreadyOpen, minAccuracy });
   return { keys, target, goal, current, minAccuracy, lessons, rows };
 }
 
@@ -307,17 +290,17 @@ function nextKeyOutlook(now: KeysNow, lesson: TypingKeysCompleteRequest["keys"])
   const keys = now.keys
     .filter((k) => k.included)
     .map((k) => {
-      const speedReached = (k.bestConfidence ?? 0) >= 1;
+      const speedReached = k.readiness >= 1;
       const accuracyReached = k.stats.errorBound == null || k.stats.errorBound <= limit;
       const acc = accuracyOutlook(k.letter, now.rows, now.minAccuracy);
       const speedLessons = speedReached ? 0 : (learningRate(k.stats.samples, now.target)?.remainingLessons ?? null);
-      const accLessons = accuracyReached ? 0 : acc.usualLessons;
       const l = thisLesson.get(k.letter);
       const speedProgress = Math.min(1, k.bestConfidence ?? 0);
       const accuracyProgress = Math.max(0, Math.min(1, accuracyScore(k.stats.errorBound, now.minAccuracy)));
       return {
         letter: k.letter,
         lessons: k.stats.samples.length,
+        lessonsNeeded: Math.max(0, MIN_KEY_LESSONS - k.stats.samples.length),
         speedProgress: Math.round(speedProgress * 100) / 100,
         accuracyProgress: Math.round(accuracyProgress * 100) / 100,
         cpm: k.stats.timeToType == null ? null : Math.round(timeToSpeed(k.stats.timeToType)),
@@ -327,11 +310,15 @@ function nextKeyOutlook(now: KeysNow, lesson: TypingKeysCompleteRequest["keys"])
         recentErrorRate: acc.recentErrorRate == null ? null : Math.round(acc.recentErrorRate * 1000) / 1000,
         speedReached,
         accuracyReached,
-        lessonsLeft: speedLessons == null || accLessons == null ? null : Math.max(speedLessons, accLessons),
+        lessonsLeft: speedLessons,
         cleanLessonsLeft: accuracyReached ? 0 : acc.cleanLessons,
         lesson: l ? { cpm: l.meanMs > 0 ? Math.round(timeToSpeed(l.meanMs)) : null, hits: l.hits, misses: l.misses } : null,
       };
     });
-  const progress = keys.length > 0 ? keys.reduce((a, k) => a + Math.min(k.speedProgress, k.accuracyProgress), 0) / keys.length : 0;
-  return { letter: now.keys.find((k) => !k.included)?.letter ?? null, targetCpm: now.target, minAccuracy: now.minAccuracy, progress: Math.round(progress * 100) / 100, keys };
+  const overall = overallAccuracy(now.keys.filter((k) => k.included).map((k) => k.stats), now.minAccuracy);
+  const accuracyProgress = overall.errorBound == null ? 1 : Math.max(0, Math.min(1, accuracyScore(overall.errorBound, now.minAccuracy)));
+  const speedMean = keys.length > 0 ? keys.reduce((a, k) => a + k.speedProgress, 0) / keys.length : 0;
+  const progress = Math.min(speedMean, accuracyProgress);
+  const accuracy = { errorRate: overall.errorRate == null ? null : Math.round(overall.errorRate * 1000) / 1000, errorBound: overall.errorBound == null ? null : Math.round(overall.errorBound * 1000) / 1000, reached: overall.reached, progress: Math.round(accuracyProgress * 100) / 100 };
+  return { letter: now.keys.find((k) => !k.included)?.letter ?? null, targetCpm: now.target, minAccuracy: now.minAccuracy, progress: Math.round(progress * 100) / 100, accuracy, keys };
 }

@@ -126,3 +126,137 @@ export function orderOptions(items: ReadonlyArray<{ solution: string; distractor
     return out;
   });
 }
+
+// ------------------------------------------------------------------------------------------------ cloze-select-v2: themed sessions
+
+export const SELECT_VERSION_V2 = "cloze-select-v2";
+
+/** grammar families: forms that are easy to confuse go together, so a session contrasts them instead of drilling one form */
+export const FAMILIES: Record<string, { name: string; topics: string[] }> = {
+  present: { name: "Present & future", topics: ["present_simple", "present_continuous", "future_simple"] },
+  past: { name: "Past & perfect", topics: ["past_simple", "past_continuous", "present_perfect", "past_perfect"] },
+  passive: { name: "Passive voice", topics: ["passive"] },
+  modals: { name: "Modal verbs", topics: ["modals"] },
+  conditionals: { name: "Conditionals", topics: ["conditionals"] },
+  verbs: { name: "Verb patterns", topics: ["non_finites"] },
+  determiners: { name: "Articles & quantifiers", topics: ["articles", "quantifiers"] },
+  pronouns: { name: "Pronouns & possessives", topics: ["personal_pronouns", "possessives"] },
+  clauses: { name: "Relatives & questions", topics: ["relatives", "wh_questions"] },
+  comparisons: { name: "Comparisons", topics: ["comparisons"] },
+  prepositions: { name: "Prepositions", topics: ["prepositions"] },
+};
+const TOPIC_FAMILY = new Map(Object.entries(FAMILIES).flatMap(([f, v]) => v.topics.map((t) => [t, f] as const)));
+export const familyOf = (topic: string): string => TOPIC_FAMILY.get(topic) ?? "other";
+export const familyName = (f: string): string => FAMILIES[f]?.name ?? "Mixed grammar";
+
+export interface ThemedCandidate extends Candidate {
+  family: string;
+  /** the background check found this sentence unambiguous: preferred over unchecked ones */
+  checked: boolean;
+}
+export interface SessionPlan {
+  focus: string;
+  review: string[];
+}
+
+/**
+ * One session of `size` sentences in three parts (shares are design settings, not measured optima):
+ *  - focus (~40%): one family, its rules interleaved (least planned rules first), so similar forms are contrasted;
+ *  - review (~33%): NEW sentences of rules answered wrongly in recent sessions, then of the families focused in the last two sessions;
+ *  - mix (the rest): one sentence each from other families, so the session never turns into a drill.
+ * The focus family rotates: one not focused recently comes first. Checked sentences are taken before unchecked ones within a rule.
+ * Then the order is shuffled with no more than two sentences of one rule in a row. Pure and deterministic for a seed.
+ */
+export function planThemedSession(o: {
+  available: readonly ThemedCandidate[];
+  history: ReadonlyMap<string, number>;
+  /** focus families of earlier sessions, most recent first */
+  recentFocus: readonly string[];
+  /** wrong answers per rule in recent sessions */
+  mistakes: ReadonlyMap<string, number>;
+  size: number;
+  seed: number;
+}): { items: ThemedCandidate[]; plan: SessionPlan } {
+  const rand = rng(o.seed);
+  const n = Math.min(o.size, o.available.length);
+  // family -> rule -> candidates (checked first, random otherwise)
+  const byFamily = new Map<string, Map<string, ThemedCandidate[]>>();
+  for (const c of [...o.available].sort((a, b) => (a.itemId < b.itemId ? -1 : 1))) {
+    const rules = byFamily.get(c.family) ?? byFamily.set(c.family, new Map()).get(c.family)!;
+    (rules.get(c.ruleKey) ?? rules.set(c.ruleKey, []).get(c.ruleKey)!).push(c);
+  }
+  for (const rules of byFamily.values()) for (const [k, list] of rules) rules.set(k, shuffle(list, rand).sort((a, b) => Number(b.checked) - Number(a.checked)));
+  const sizeOf = (f: string): number => [...(byFamily.get(f)?.values() ?? [])].reduce((a, l) => a + l.length, 0);
+  const picked: ThemedCandidate[] = [];
+  const rulesOf = (f: string): string[] => {
+    const rules = byFamily.get(f);
+    if (!rules) return [];
+    const keyed = [...rules.keys()].sort().map((k) => ({ k, h: o.history.get(k) ?? 0, r: rand() }));
+    return keyed.sort((a, b) => a.h - b.h || a.r - b.r).map((x) => x.k);
+  };
+  const takeOne = (f: string, rule: string): boolean => {
+    const list = byFamily.get(f)?.get(rule);
+    if (!list || list.length === 0 || picked.length >= n) return false;
+    picked.push(list.shift()!);
+    return true;
+  };
+  /** round-robin over the family's rules, one sentence per rule per round */
+  const takeFromFamily = (f: string, want: number): number => {
+    let got = 0;
+    const rules = rulesOf(f);
+    for (let progress = true; got < want && progress; ) {
+      progress = false;
+      for (const r of rules) {
+        if (got >= want) break;
+        if (takeOne(f, r)) (got++, (progress = true));
+      }
+    }
+    return got;
+  };
+
+  const focusWant = Math.round(n * 0.4);
+  const reviewWant = Math.round(n * 0.33);
+  // focus: never focused first, then the one focused longest ago; the family must fill its share
+  const families = [...byFamily.keys()].sort().map((f) => ({ f, last: o.recentFocus.indexOf(f), r: rand() }));
+  const eligible = families.filter((x) => x.f !== "other" && sizeOf(x.f) >= Math.min(focusWant, 4));
+  const pool = eligible.length > 0 ? eligible : families;
+  pool.sort((a, b) => (a.last === -1 ? Infinity : a.last) - (b.last === -1 ? Infinity : b.last) || a.r - b.r);
+  const focus = pool.length > 0 ? pool[pool.length - 1]!.f : "other";
+  // (sorted ascending by "how recent", so the least recent is last)
+  takeFromFamily(focus, focusWant);
+
+  // review: rules with recent mistakes (outside the focus), up to two new sentences each; then the last two focus families
+  const review: string[] = [];
+  let reviewGot = 0;
+  const ruleFamily = new Map<string, string>();
+  for (const [f, rules] of byFamily) for (const r of rules.keys()) ruleFamily.set(r, f);
+  const missed = [...o.mistakes.entries()].filter(([r, m]) => m > 0 && ruleFamily.has(r) && ruleFamily.get(r) !== focus).sort((a, b) => b[1] - a[1] || (a[0] < b[0] ? -1 : 1));
+  for (const [r] of missed) {
+    if (reviewGot >= reviewWant) break;
+    const f = ruleFamily.get(r)!;
+    let got = 0;
+    while (got < 2 && reviewGot < reviewWant && takeOne(f, r)) (got++, reviewGot++);
+    if (got > 0) review.push(r);
+  }
+  for (const f of o.recentFocus.slice(0, 2)) {
+    if (reviewGot >= reviewWant || f === focus) continue;
+    const before = picked.length;
+    reviewGot += takeFromFamily(f, Math.min(reviewWant - reviewGot, 3));
+    for (const c of picked.slice(before)) if (!review.includes(c.ruleKey)) review.push(c.ruleKey);
+  }
+
+  // mix: one sentence per other family (least planned families first), round after round
+  const famHistory = (f: string): number => [...(byFamily.get(f)?.keys() ?? [])].reduce((a, r) => a + (o.history.get(r) ?? 0), 0);
+  const others = [...byFamily.keys()].filter((f) => f !== focus).sort().map((f) => ({ f, h: famHistory(f), r: rand() })).sort((a, b) => a.h - b.h || a.r - b.r).map((x) => x.f);
+  for (let progress = true; picked.length < n && progress; ) {
+    progress = false;
+    for (const f of others) {
+      if (picked.length >= n) break;
+      const rule = rulesOf(f).find((r) => (byFamily.get(f)!.get(r)?.length ?? 0) > 0);
+      if (rule && takeOne(f, rule)) progress = true;
+    }
+  }
+  // the focus family itself when nothing else is left
+  if (picked.length < n) takeFromFamily(focus, n - picked.length);
+  return { items: spreadRules(shuffle(picked, rand)) as ThemedCandidate[], plan: { focus, review } };
+}

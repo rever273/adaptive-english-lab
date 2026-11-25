@@ -273,6 +273,17 @@ export const TypingKeyboardAnalyticsSchema = z
     ),
     /** straight line through the speed of the last 50 sessions, to the goal */
     forecast: z.object({ cpmPerLesson: z.number(), lessonsToGoal: z.number().int().nullable(), hoursToGoal: z.number().nullable() }).strict().nullable(),
+    /** keybr's progress heatmap: the last sessions (oldest first), and for each the keys that were pressed in it */
+    grid: z
+      .array(
+        z
+          .object({
+            at: z.string(),
+            keys: z.array(z.object({ letter: z.string(), hits: z.number().int(), misses: z.number().int(), cpm: z.number().nullable() }).strict()),
+          })
+          .strict(),
+      )
+      .default([]),
   })
   .strict();
 export type TypingKeyboardAnalytics = z.infer<typeof TypingKeyboardAnalyticsSchema>;
@@ -406,7 +417,7 @@ export const TypingRecallSaveRequestSchema = z
 export type TypingRecallSaveRequest = z.infer<typeof TypingRecallSaveRequestSchema>;
 
 /** Key Builder (keybr.com guided lessons): letters open one by one as the open ones reach the target speed */
-export const TYPING_KEYS_RULES_VERSION = "keys-guided-v2";
+export const TYPING_KEYS_RULES_VERSION = "keys-guided-v4";
 export const TYPING_KEYS_XP_VERSION = "typing-keys-xp-v1";
 
 export const TypingKeyStateSchema = z
@@ -479,12 +490,16 @@ export const TypingKeysResultSchema = z
         minAccuracy: z.number(),
         /** 0..1: how close every open key is to the target (mean of each key's weaker part, speed or accuracy); 1 opens the next letter */
         progress: z.number(),
+        /** all open keys together: this is what is judged for accuracy (a single key is not) */
+        accuracy: z.object({ errorRate: z.number().nullable(), errorBound: z.number().nullable(), reached: z.boolean(), progress: z.number() }).strict(),
         keys: z.array(
           z
             .object({
               letter: z.string(),
               /** lessons this key has facts from */
               lessons: z.number().int(),
+              /** lessons with the key still needed before it can count as reached (at least 3 in all); 0 = enough */
+              lessonsNeeded: z.number().int(),
               /** 0..1: best speed against the target */
               speedProgress: z.number(),
               /** 0..1: how far the key is from the accuracy limit (1 = within it) */

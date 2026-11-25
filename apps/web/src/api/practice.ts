@@ -1,5 +1,5 @@
 import { AttemptResponseSchema, CreateSessionResponseSchema, CurrentSessionResponseSchema, DashboardSchema, FeedbackResponseSchema, LeaseResponseSchema, RevealResponseSchema, SessionEventResponseSchema, SessionSnapshotSchema, SessionSummarySchema } from "@english-lab/contracts";
-import type { ClozeAnalysisView, ClozeAnswerResult, ClozeOverview, ClozeSessionView, ClozeSummary } from "@english-lab/contracts";
+import type { ClozeAnalysisView, ClozeAnswerResult, ClozeAuditOverview, ClozeAuditRow, ClozeOverview, ClozeSessionView, ClozeSummary } from "@english-lab/contracts";
 import { send } from "./transport";
 import { typed } from "./response";
 
@@ -47,7 +47,7 @@ export const fetchClozeSession = (id: string) => send("GET", `/api/v1/grammar-cl
 
 export const markClozeShown = (id: string, position: number) => send("POST", `/api/v1/grammar-cloze/sessions/${encodeURIComponent(id)}/shown`, typed<{ ok: boolean }>(), { position });
 
-export const answerCloze = (id: string, body: { id: string; position: number; chosen: string; responseMs?: number }) => send("POST", `/api/v1/grammar-cloze/sessions/${encodeURIComponent(id)}/answers`, typed<ClozeAnswerResult>(), body);
+export const answerCloze = (id: string, body: { id: string; position: number; chosen: string; responseMs?: number; hintLevel?: number }) => send("POST", `/api/v1/grammar-cloze/sessions/${encodeURIComponent(id)}/answers`, typed<ClozeAnswerResult>(), body);
 
 export const excludeClozeItem = (itemId: string, body: { sessionId?: string; reason?: string }) => send("POST", `/api/v1/grammar-cloze/items/${encodeURIComponent(itemId)}/exclude`, typed<{ excluded: boolean }>(), body);
 
@@ -59,4 +59,12 @@ export const requestClozeAnalysis = (itemId: string, body: { sessionId: string; 
 
 export const fetchClozeAnalysis = (id: string) => send("GET", `/api/v1/grammar-cloze/analyses/${encodeURIComponent(id)}`, typed<ClozeAnalysisView>());
 
-export type { ClozeOverview, ClozeSessionView, ClozeSummary, ClozeAnswerResult, ClozeSlotView, ClozeStageView, ClozeAnalysisView } from "@english-lab/contracts";
+export const fetchClozeAudit = () => send("GET", "/api/v1/grammar-cloze/audit", typed<ClozeAuditOverview>());
+
+export const setClozeAudit = (enabled: boolean) => send("POST", "/api/v1/grammar-cloze/audit", typed<ClozeAuditOverview>(), { enabled });
+
+export const fetchClozeAuditItems = (offset: number) => send("GET", `/api/v1/grammar-cloze/audit/items?offset=${offset}`, typed<{ items: ClozeAuditRow[] }>());
+
+export const setClozeAuditOverride = (itemId: string, action: "restore" | "hide") => send("POST", `/api/v1/grammar-cloze/items/${encodeURIComponent(itemId)}/audit-override`, typed<{ hidden: boolean }>(), { action });
+
+export type { ClozeOverview, ClozeSessionView, ClozeSummary, ClozeAnswerResult, ClozeSlotView, ClozeStageView, ClozeAnalysisView, ClozeAuditOverview, ClozeAuditRow } from "@english-lab/contracts";

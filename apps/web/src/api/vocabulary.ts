@@ -1,5 +1,5 @@
 import { CreateSessionResponseSchema, ErrorEnvelopeSchema, SessionBootstrapSchema } from "@english-lab/contracts";
-import type { WordLessonEventKind, WordLessonListResponse, WordLessonRunState, WordLessonStudioStatus } from "@english-lab/contracts";
+import type { ContextLoopAids, ContextLoopSentenceView, ContextLoopState, ContextLoopStatus, ContextLoopStudioStatus, WordLessonEventKind, WordLessonListResponse, WordLessonRunState, WordLessonStudioStatus } from "@english-lab/contracts";
 import { ApiRequestError, csrfState, send } from "./transport";
 import { typed, anyOf } from "./response";
 
@@ -30,12 +30,15 @@ async function speechRequest(path: string, signal?: AbortSignal): Promise<Blob |
 export const vocabularySpeech = (sessionId: string, slotId: string, signal: AbortSignal) => speechRequest(`/api/v1/vocabulary-speech/${encodeURIComponent(sessionId)}/${encodeURIComponent(slotId)}`, signal);
 /** the word panel's pronounce button: any English word or short phrase, saved or not (ElevenLabs only when the file is not stored yet) */
 
-export async function vocabularyTextSpeech(text: string): Promise<Blob | null> {
+/** the clip only when it is already stored (no new ElevenLabs request); null otherwise */
+export const vocabularyCachedSpeech = (text: string): Promise<Blob | null> => vocabularySpeechRequest("/api/v1/vocabulary-speech/cached", text);
+export const vocabularyTextSpeech = (text: string): Promise<Blob | null> => vocabularySpeechRequest("/api/v1/vocabulary-speech/text", text);
+async function vocabularySpeechRequest(url: string, text: string): Promise<Blob | null> {
   if (!csrfState.token) {
     const boot = await fetch("/api/v1/session");
     csrfState.token = SessionBootstrapSchema.parse(await boot.json()).csrfToken;
   }
-  const res = await fetch("/api/v1/vocabulary-speech/text", { method: "POST", headers: { "X-CSRF-Token": csrfState.token, "Content-Type": "application/json" }, body: JSON.stringify({ text }) });
+  const res = await fetch(url, { method: "POST", headers: { "X-CSRF-Token": csrfState.token, "Content-Type": "application/json" }, body: JSON.stringify({ text }) });
   if (!res.ok) {
     if (res.status === 403) csrfState.token = null;
     const error = ErrorEnvelopeSchema.safeParse(await res.json().catch(() => null));
@@ -77,6 +80,8 @@ export interface VocabEntry {
   /** reference facts from the word job (D69), or null until it has run */
   lexicon: { transcription: string; definitionRu: string; synonyms: string[]; irregularForms: string[]; frequency: number | null } | null;
   /** vocabulary-practice tasks on this word that you have answered (first tries) */
+  /** word-strength-v1 (0-10) from the three vocabulary modes; null when the server did not send it */
+  strength?: { value: number; version: string; parts: Record<"practice" | "oneWord" | "contextLoop" | "checks", { success: number; miss: number }> } | null;
   practised: number;
   bank: { occurrences: number; revisions: number };
   displayed: { occurrences: number; slots: number };
@@ -120,7 +125,7 @@ export const retryExpression = (id: string) => send("POST", `/api/v1/vocabulary/
 
 export const removeExpression = (id: string) => send("POST", `/api/v1/vocabulary/expressions/${encodeURIComponent(id)}/remove`, typed<{ removed: true }>(), {});
 
-export interface VocabPracticeStatus { wordQueue?: { due: number; newWords: number; recent: number }; taskCount: number; available: number; freshAvailable?: number; repeatsAvailable?: number; repeatStock?: number; wordsWithContexts: number; words: number; learned: number; approvedForWords: number; draftsNotReleased: number; shortage: { available: number; requested: number; message: string } | null; activeSessionId: string | null }
+export interface VocabPracticeStatus { focus?: boolean; wordQueue?: { due: number; newWords: number; recent: number }; taskCount: number; available: number; freshAvailable?: number; repeatsAvailable?: number; repeatStock?: number; wordsWithContexts: number; words: number; learned: number; approvedForWords: number; draftsNotReleased: number; shortage: { available: number; requested: number; message: string } | null; activeSessionId: string | null }
 
 export const fetchVocabPractice = () => send("GET", "/api/v1/vocabulary/practice", typed<VocabPracticeStatus>());
 
@@ -161,3 +166,24 @@ export const recordWordLessonActivity = (runId: string, body: { id: string; tabI
 export const wordLessonSttStart = (runId: string, tabId: string) => send("POST", lessonRun(runId, "stt/start"), typed<{ streamId: string; maxSeconds: number; ready: { device: string } }>(), { tabId });
 
 export type { WordLessonListResponse, WordLessonRunState, WordLessonStudioStatus } from "@english-lab/contracts";
+
+// ---- Context Loop (TASK_037)
+const loop = (p: string) => `/api/v1/context-loop/${p}`;
+export const fetchContextLoopStudio = () => send("GET", loop("studio"), typed<ContextLoopStudioStatus>());
+export const generateContextLoop = (words: number, perWord: number) => send("POST", loop("generate"), typed<{ batchId: string; created: number; status: ContextLoopStudioStatus }>(), { words, perWord });
+export const createContextLoopAgentBatch = (words: number, perWord: number) => send("POST", loop("agent-batches"), typed<{ batchId: string; created: number; prompt: string; status: ContextLoopStudioStatus }>(), { words, perWord });
+export const cancelContextLoopAgentBatch = (id: string) => send("POST", loop(`agent-batches/${encodeURIComponent(id)}/cancel`), typed<ContextLoopStudioStatus>(), {});
+export const fetchContextLoopSentences = (q: { entryId?: string; status?: string } = {}) => send("GET", loop(`sentences?${new URLSearchParams(Object.entries(q).filter(([, v]) => v) as Array<[string, string]>).toString()}`), typed<{ sentences: ContextLoopSentenceView[] }>());
+export const setContextLoopSentenceStatus = (id: string, status: "validated" | "rejected") => send("POST", loop(`sentences/${encodeURIComponent(id)}/status`), typed<ContextLoopSentenceView>(), { status });
+export const editContextLoopSentence = (id: string, text: string) => send("POST", loop(`sentences/${encodeURIComponent(id)}/edit`), typed<ContextLoopSentenceView>(), { text });
+export type { ContextLoopStudioStatus, ContextLoopSentenceView } from "@english-lab/contracts";
+export const fetchContextLoopStatus = () => send("GET", loop("status"), typed<ContextLoopStatus>());
+export const startContextLoop = (tabId: string) => send("POST", loop("sessions"), typed<{ sessionId: string; resumed: boolean; state: ContextLoopState }>(), { tabId });
+export const fetchContextLoopSession = (id: string) => send("GET", loop(`sessions/${encodeURIComponent(id)}`), typed<ContextLoopState>());
+export const answerContextLoop = (id: string, body: { id: string; tabId: string; cardIndex: number; outcome: "recalled" | "not_recalled"; aids: ContextLoopAids }) => send("POST", loop(`sessions/${encodeURIComponent(id)}/answers`), typed<ContextLoopState>(), body);
+export const completeContextLoop = (id: string) => send("POST", loop(`sessions/${encodeURIComponent(id)}/complete`), typed<ContextLoopState>(), {});
+export const recordContextLoopActivity = (id: string, body: { id: string; tabId: string; startMs: number; endMs: number }) => send("POST", loop(`sessions/${encodeURIComponent(id)}/activity`), typed<{ recorded: boolean }>(), body);
+export type { ContextLoopAids, ContextLoopStatus, ContextLoopState } from "@english-lab/contracts";
+export const answerContextLoopCheck = (id: string, body: { id: string; tabId: string; cardIndex: number; text: string | null; firstLetter: boolean; input?: "text" | "voice"; streamId?: string; draftId?: string }) => send("POST", loop(`sessions/${encodeURIComponent(id)}/checks`), typed<ContextLoopState>(), body);
+export const contextLoopFirstLetter = (id: string, tabId: string, cardIndex: number) => send("POST", loop(`sessions/${encodeURIComponent(id)}/first-letter`), typed<{ letter: string }>(), { tabId, cardIndex });
+export const contextLoopSttStart = (id: string, tabId: string) => send("POST", loop(`sessions/${encodeURIComponent(id)}/stt/start`), typed<{ streamId: string; maxSeconds: number; ready: { device: string } }>(), { tabId });

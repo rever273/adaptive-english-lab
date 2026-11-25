@@ -3,6 +3,7 @@ import { z } from "zod";
 import type { Db } from "../db/open.js";
 import { ApiError } from "../errors.js";
 import { readDailyTotals, readJourney, readPracticeActivity } from "../domain/journey/readModel.js";
+import { overlapsRecordedActivity } from "../domain/journey/intervals.js";
 export { allocateDays, learningDate } from "../domain/journey/calendar.js";
 
 const Body = z.object({ id: z.string().uuid(), sessionId: z.string().min(1).max(64), mode: z.enum(["words", "books", "dictation"]), startMs: z.number().int().nonnegative(), endMs: z.number().int().nonnegative() }).strict();
@@ -21,7 +22,7 @@ export function registerJourneyRoutes(app: FastifyInstance, db: Db): void {
       const session = row as {startedAt: string|null;endedAt: string|null}|undefined;
       if (!session?.startedAt) throw new ApiError(404,"SESSION_NOT_FOUND","Unknown typing session");
       if (b.endMs <= b.startMs || b.endMs-b.startMs > 15000 || b.startMs < Date.parse(session.startedAt) || b.endMs > Date.now()+2000 || (session.endedAt && b.endMs > Date.parse(session.endedAt)+2000)) throw new ApiError(400,"ACTIVITY_INVALID","Invalid interval");
-      if (db.prepare("SELECT 1 FROM journey_typing_intervals WHERE start_ms < ? AND end_ms > ?").get(b.endMs,b.startMs) || db.prepare("SELECT 1 FROM practice_activity_intervals WHERE start_ms < ? AND end_ms > ?").get(b.endMs,b.startMs) || db.prepare("SELECT 1 FROM word_lesson_activity_intervals WHERE start_ms < ? AND end_ms > ?").get(b.endMs,b.startMs) || db.prepare("SELECT 1 FROM conversation_activity_intervals WHERE start_ms < ? AND end_ms > ?").get(b.endMs,b.startMs) || db.prepare("SELECT 1 FROM grammar_cloze_activity_intervals WHERE start_ms < ? AND end_ms > ?").get(b.endMs,b.startMs)) throw new ApiError(409,"ACTIVITY_OVERLAP","Interval overlaps existing activity");
+      if (overlapsRecordedActivity(db, b.startMs, b.endMs)) throw new ApiError(409,"ACTIVITY_OVERLAP","Interval overlaps existing activity");
       db.prepare("INSERT INTO journey_typing_intervals VALUES (?,?,?,?,?,?)").run(b.id,b.sessionId,b.mode,b.startMs,b.endMs,new Date().toISOString());
       return { recorded: true };
     }).immediate();

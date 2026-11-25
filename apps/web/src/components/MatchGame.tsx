@@ -15,7 +15,7 @@ const SPEECH_DELAY_MS = 350; // let the short chime finish first
 
 export const MATCH_TITLE: Record<MatchMode, { icon: string; title: string; hint: string }> = {
     once: { icon: 'pi-link', title: 'Match the pairs', hint: 'Pick a word, then its translation, or start from the translation. Tap a selected button again to unselect it.' },
-    rush: { icon: 'pi-bolt', title: 'Pair rush', hint: 'Keep matching: every word comes back until you have matched it 5 times. You cannot lose; just keep going.' },
+    rush: { icon: 'pi-bolt', title: 'Pair rush', hint: 'Keep matching: every word comes back until you have matched it several times. You cannot lose; just keep going.' },
 };
 
 /**
@@ -144,7 +144,7 @@ export function MatchGame({ words, mode, rounds, soundsEnabled, speechEnabled, o
             <div className="progress-bar" role="progressbar" aria-valuemin={0} aria-valuemax={state.total} aria-valuenow={state.done ? state.total : state.matches} aria-label="Matching progress">
                 <div style={{ width: `${((state.done ? state.total : state.matches) / state.total) * 100}%` }} />
             </div>
-            <p className="muted small">{look.hint}</p>
+            <p className="muted small">{mode === 'rush' ? look.hint.replace('several', String(rounds)) : look.hint}</p>
             <p className="muted small">Keys: a number picks the word in that row on the left, the next number picks its translation on the right. Alt + number starts from the right column.</p>
             <div className="match-cols">
                 {column('left', visible(state.left, state.mode))}

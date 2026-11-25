@@ -1,6 +1,7 @@
 import type { Db } from "../../db/open.js";
 import { ApiError } from "../../errors.js";
 import type { Deps } from "./repository.js";
+import { overlapsRecordedActivity } from "../journey/intervals.js";
 
 export interface ClozeInterval {
   id: string;
@@ -26,8 +27,7 @@ export function recordClozeActivity(db: Db, deps: Deps, sessionId: string, b: Cl
       const now = deps.now().getTime();
       if (b.endMs <= b.startMs || b.endMs - b.startMs > 15000 || b.startMs < Date.parse(s.startedAt) || b.endMs > now + 2000 || (s.completedAt && b.endMs > Date.parse(s.completedAt) + 2000)) throw new ApiError(400, "ACTIVITY_INVALID", "Invalid activity interval");
       if (s.status === "active" && s.tabId !== b.tabId) throw new ApiError(409, "LEASE_REQUIRED", "This tab is not the one practising this session");
-      const overlap = (table: string) => db.prepare(`SELECT 1 FROM ${table} WHERE start_ms < ? AND end_ms > ? LIMIT 1`).get(b.endMs, b.startMs);
-      if (overlap("grammar_cloze_activity_intervals") || overlap("practice_activity_intervals") || overlap("journey_typing_intervals") || overlap("word_lesson_activity_intervals") || overlap("conversation_activity_intervals")) throw new ApiError(409, "ACTIVITY_OVERLAP", "Activity overlaps time already recorded");
+      if (overlapsRecordedActivity(db, b.startMs, b.endMs)) throw new ApiError(409, "ACTIVITY_OVERLAP", "Activity overlaps time already recorded");
       db.prepare("INSERT INTO grammar_cloze_activity_intervals(id, session_id, tab_id, start_ms, end_ms, recorded_at) VALUES (?,?,?,?,?,?)").run(b.id, sessionId, b.tabId, b.startMs, b.endMs, deps.now().toISOString());
       return { recorded: true };
     })

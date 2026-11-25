@@ -2,7 +2,7 @@ import type { Db } from "../../db/open.js";
 import { loadSettings } from "../sessions/policy.js";
 import { allocateDays, learningDate, DAILY_TIMEZONE } from "./calendar.js";
 
-const modes = ["grammar", "vocabulary", "wordLesson", "grammarCloze", "words", "books", "dictation", "conversation"] as const;
+const modes = ["grammar", "vocabulary", "wordLesson", "contextLoop", "vocabTyping", "grammarCloze", "words", "books", "dictation", "conversation"] as const;
 type Mode = typeof modes[number];
 const zero = () => Object.fromEntries(modes.map(m => [m, 0])) as Record<Mode, number>;
 
@@ -34,6 +34,8 @@ export function readDailyTotals(db: Db) {
       "SELECT start_ms AS startMs,end_ms AS endMs FROM word_lesson_activity_intervals",
       "SELECT start_ms AS startMs,end_ms AS endMs FROM grammar_cloze_activity_intervals",
       "SELECT start_ms AS startMs,end_ms AS endMs FROM conversation_activity_intervals",
+      "SELECT start_ms AS startMs,end_ms AS endMs FROM context_loop_activity_intervals",
+      "SELECT start_ms AS startMs,end_ms AS endMs FROM vocab_typing_activity_intervals",
     ]) for (const row of db.prepare(sql).all() as Array<{startMs:number;endMs:number}>) for (const part of allocateDays(row.startMs, row.endMs, DAILY_TIMEZONE)) days.set(part.date, (days.get(part.date) ?? 0) + part.ms);
     return { days: [...days].map(([date, ms]) => ({ date, ms })).sort((a, b) => a.date.localeCompare(b.date)) };
 }
@@ -50,6 +52,8 @@ export function readJourney(db: Db) {
       ...(db.prepare("SELECT start_ms AS startMs,end_ms AS endMs,'wordLesson' AS mode FROM word_lesson_activity_intervals WHERE end_ms >= ?").all(cutoff) as Array<{startMs:number;endMs:number;mode:Mode}>),
       ...(db.prepare("SELECT start_ms AS startMs,end_ms AS endMs,'grammarCloze' AS mode FROM grammar_cloze_activity_intervals WHERE end_ms >= ?").all(cutoff) as Array<{startMs:number;endMs:number;mode:Mode}>),
       ...(db.prepare("SELECT start_ms AS startMs,end_ms AS endMs,'conversation' AS mode FROM conversation_activity_intervals WHERE end_ms >= ?").all(cutoff) as Array<{startMs:number;endMs:number;mode:Mode}>),
+      ...(db.prepare("SELECT start_ms AS startMs,end_ms AS endMs,'contextLoop' AS mode FROM context_loop_activity_intervals WHERE end_ms >= ?").all(cutoff) as Array<{startMs:number;endMs:number;mode:Mode}>),
+      ...(db.prepare("SELECT start_ms AS startMs,end_ms AS endMs,'vocabTyping' AS mode FROM vocab_typing_activity_intervals WHERE end_ms >= ?").all(cutoff) as Array<{startMs:number;endMs:number;mode:Mode}>),
     ];
     for (const row of [...grammar,...typing]) for (const part of allocateDays(row.startMs,row.endMs,tz)) { (byDay[part.date] ??= zero())[row.mode] += part.ms;  }
     for (const r of db.prepare(`SELECT CASE WHEN v.session_id IS NULL THEN 'grammar' ELSE 'vocabulary' END AS mode, SUM(i.end_ms-i.start_ms) AS ms FROM practice_activity_intervals i LEFT JOIN vocabulary_sessions v ON v.session_id=i.session_id GROUP BY mode`).all() as Array<{mode:'grammar'|'vocabulary';ms:number}>) totals[r.mode] = r.ms;
@@ -58,10 +62,12 @@ export function readJourney(db: Db) {
     totals.words += (db.prepare("SELECT COALESCE(SUM(CASE WHEN s.status<>'completed' THEN MAX(s.active_ms,COALESCE((SELECT SUM(i.end_ms-i.start_ms) FROM journey_typing_intervals i WHERE i.session_id=s.id AND i.mode='words'),0)) ELSE s.active_ms END),0) AS ms FROM typing_key_lessons s").get() as {ms:number}).ms;
     totals.wordLesson = (db.prepare("SELECT COALESCE(SUM(end_ms-start_ms),0) AS ms FROM word_lesson_activity_intervals").get() as {ms:number}).ms;
     totals.grammarCloze = (db.prepare("SELECT COALESCE(SUM(end_ms-start_ms),0) AS ms FROM grammar_cloze_activity_intervals").get() as {ms:number}).ms;
+    totals.contextLoop = (db.prepare("SELECT COALESCE(SUM(end_ms-start_ms),0) AS ms FROM context_loop_activity_intervals").get() as {ms:number}).ms;
+    totals.vocabTyping = (db.prepare("SELECT COALESCE(SUM(end_ms-start_ms),0) AS ms FROM vocab_typing_activity_intervals").get() as {ms:number}).ms;
     totals.conversation = (db.prepare("SELECT (SELECT COALESCE(SUM(active_ms),0) FROM conversation_activity_baseline) + (SELECT COALESCE(SUM(end_ms-start_ms),0) FROM conversation_activity_intervals) AS ms").get() as {ms:number}).ms;
     totals.dictation = (db.prepare("SELECT COALESCE(SUM(CASE WHEN s.status <> 'completed' THEN MAX(s.active_ms,COALESCE((SELECT SUM(i.end_ms-i.start_ms) FROM journey_typing_intervals i WHERE i.session_id=s.id AND i.mode='dictation'),0)) ELSE s.active_ms END),0) AS ms FROM typing_dictation_lessons s").get() as {ms:number}).ms;
     const settings = loadSettings(db).values;
     const days = Array.from({length:7},(_,i) => { const d = new Date(today + "T00:00:00Z"); d.setUTCDate(d.getUTCDate()-i); return d.toISOString().slice(0,10); });
-    return { version: "journey-v3", timezone:tz, today, totals, todayMs: byDay[today] ?? zero(), activeDays: days.filter(d => Object.values(byDay[d] ?? zero()).some(v => v > 0)).length, journeyHours: settings.journeyHours ?? { b2:250,c1:300,c2:400 }, dailyMinutes: { grammar:15,vocabulary:10,words:5,books:10,dictation:10,wordLesson:5,grammarCloze:10,conversation:2.5, ...(settings.dailyMinutes ?? {}) }, dailyOrder: [...(settings.dailyOrder ?? []), ...modes.filter(m => !(settings.dailyOrder ?? []).includes(m))], bookMinutes: settings.typingBookMinutes ?? 5 };
+    return { version: "journey-v3", timezone:tz, today, totals, todayMs: byDay[today] ?? zero(), activeDays: days.filter(d => Object.values(byDay[d] ?? zero()).some(v => v > 0)).length, journeyHours: settings.journeyHours ?? { b2:250,c1:300,c2:400 }, dailyMinutes: { grammar:15,vocabulary:10,words:5,books:10,dictation:10,wordLesson:5,contextLoop:5,vocabTyping:5,grammarCloze:10,conversation:2.5, ...(settings.dailyMinutes ?? {}) }, dailyOrder: [...(settings.dailyOrder ?? []), ...modes.filter(m => !(settings.dailyOrder ?? []).includes(m))], bookMinutes: settings.typingBookMinutes ?? 5 };
 }
 

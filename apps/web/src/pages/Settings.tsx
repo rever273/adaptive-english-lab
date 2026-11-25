@@ -1,13 +1,13 @@
 import { JourneySettings } from "./Journey";
 import { NumberInput } from "../components/NumberInput";
 import { useEffect, useState } from "react";
-import type { AiModelStatus } from "@english-lab/contracts";
+import { vocabularyFocusEnabled, type AiModelStatus } from "@english-lab/contracts";
 import * as api from "../api";
 import { modelErrorText } from "../components/AiModelNotice";
 import { VoicesSettings } from "../components/VoicesSettings";
 
-type Values = { preloadModelOnStart?: boolean; practiceSoundsEnabled?: boolean; typingSoundsEnabled?: boolean; taskCount: number; weakRatio: number; voiceTarget: 0 | 1 | 2; voiceShare?: number; vocabularyTaskCount?: number; vocabularyNewWordsPerSession?: number; vocabularyMatchRounds?: number; reviewNoticeThreshold?: number; difficultyMin?: api.Level; difficultyMax?: api.Level; typingWordsPerLevel?: number; typingDrillWordsPerLevel?: number; typingDrillSpeech?: boolean; typingKeysGoalWpm?: number; typingKeysMinAccuracy?: number; typingVocabularyShare?: number; typingSpeedMultiplier?: number; typingBookMinutes?: number; typingBooksShowMistakes?: boolean; typingDictationExercisesPerLesson?: number; typingDictationSource?: "real" | "tts"; typingRecallWords?: number; clozeTaskCount?: number };
-type Draft = { taskCount: number; weakRatio: number; voiceShare: number; practiceSoundsEnabled: boolean; typingSoundsEnabled: boolean; vocabularyTaskCount: number; vocabularyNewWordsPerSession: number; vocabularyMatchRounds: number; reviewNoticeThreshold: number; difficultyMin: api.Level; difficultyMax: api.Level; typingWordsPerLevel: number; typingDrillWordsPerLevel: number; typingDrillSpeech: boolean; typingKeysGoalWpm: number; typingKeysMinAccuracy: number; typingVocabularyShare: number; typingSpeedMultiplier: number; typingBookMinutes: number; typingBooksShowMistakes: boolean; typingDictationExercisesPerLesson: number; typingDictationSource: "real" | "tts"; typingRecallWords: number; clozeTaskCount: number };
+type Values = { preloadModelOnStart?: boolean; practiceSoundsEnabled?: boolean; typingSoundsEnabled?: boolean; taskCount: number; weakRatio: number; voiceTarget: 0 | 1 | 2; voiceShare?: number; vocabularyFocus?: boolean; vocabularyTaskCount?: number; vocabularyNewWordsPerSession?: number; vocabularyMatchRounds?: number; reviewNoticeThreshold?: number; difficultyMin?: api.Level; difficultyMax?: api.Level; typingWordsPerLevel?: number; typingDrillWordsPerLevel?: number; typingDrillSpeech?: boolean; typingKeysTargetWpm?: number; typingKeysGoalWpm?: number; typingKeysMinAccuracy?: number; typingVocabularyShare?: number; typingSpeedMultiplier?: number; typingBookMinutes?: number; typingBooksShowMistakes?: boolean; typingDictationExercisesPerLesson?: number; typingDictationSource?: "real" | "tts"; typingRecallWords?: number; clozeTaskCount?: number; clozeAutoAdvance?: boolean; clozeHighlightNames?: boolean; contextLoopCards?: number; contextLoopChecks?: number; vtScreeningBatch?: number; vtProbeShare?: number; vtNewPerSession?: number; vtLearningCards?: number; vtChecksPerSession?: number; vtFirstCheckDays?: number; vtRetention?: number; vtSpeakWord?: boolean; vtSpeakSentence?: boolean; vtMinLength?: number; vtSkipTopRanks?: number };
+type Draft = { taskCount: number; weakRatio: number; voiceShare: number; practiceSoundsEnabled: boolean; typingSoundsEnabled: boolean; vocabularyFocus: boolean; vocabularyTaskCount: number; vocabularyNewWordsPerSession: number; vocabularyMatchRounds: number; reviewNoticeThreshold: number; difficultyMin: api.Level; difficultyMax: api.Level; typingWordsPerLevel: number; typingDrillWordsPerLevel: number; typingDrillSpeech: boolean; typingKeysTargetWpm: number; typingKeysGoalWpm: number; typingKeysMinAccuracy: number; typingVocabularyShare: number; typingSpeedMultiplier: number; typingBookMinutes: number; typingBooksShowMistakes: boolean; typingDictationExercisesPerLesson: number; typingDictationSource: "real" | "tts"; typingRecallWords: number; clozeTaskCount: number; clozeAutoAdvance: boolean; clozeHighlightNames: boolean; contextLoopCards: number; contextLoopChecks: number; vtScreeningBatch: number; vtProbeShare: number; vtNewPerSession: number; vtLearningCards: number; vtChecksPerSession: number; vtFirstCheckDays: number; vtRetention: number; vtSpeakWord: boolean; vtSpeakSentence: boolean; vtMinLength: number; vtSkipTopRanks: number };
 const LEVELS: api.Level[] = ["A2", "B1", "B2", "C1", "C2"];
 
 /** docs/04 §7: only the settings the allocator reads today. A change is a new settings revision and applies to the next session. */
@@ -65,6 +65,8 @@ export function Settings() {
               <span className="muted small">5–50, default 15. Sentences in one Grammar Cloze session (L01, L02, …); applies to the next session. The classic practice length above is separate.</span>
             </label>
           </div>
+          <label className="check"><input type="checkbox" checked={draft.clozeAutoAdvance} onChange={(e) => setDraft({ ...draft, clozeAutoAdvance: e.target.checked })} data-testid="set-cloze-auto-advance" /> Grammar Cloze: go to the next sentence by itself after a correct answer</label>
+          <label className="check"><input type="checkbox" checked={draft.clozeHighlightNames} onChange={(e) => setDraft({ ...draft, clozeHighlightNames: e.target.checked })} data-testid="set-cloze-names" /> Grammar Cloze: show names of people and places in a different colour</label>
           <label>
             Weak skills share: {Math.round(draft.weakRatio * 100)}%
             <input type="range" min={0} max={100} step={5} value={Math.round(draft.weakRatio * 100)} onChange={(e) => setDraft({ ...draft, weakRatio: Number(e.target.value) / 100 })} data-testid="set-weak-ratio" />
@@ -81,30 +83,51 @@ export function Settings() {
 
         <div className="card settings-card">
           <h3>Vocabulary</h3>
+          <div className="vocabulary-focus-setting">
+            <label className="check">
+              <input type="checkbox" checked={draft.vocabularyFocus} onChange={(e) => {
+                const checked = e.target.checked;
+                setDraft((d) => d && ({ ...d, vocabularyFocus: checked }));
+              }} />
+              <span>Focus practice (6 exercises, about 3 words)</span>
+            </label>
+          </div>
           <div className="settings-fields">
-            <label>
-              Exercises per session
-              <NumberInput min={5} max={10} value={draft.vocabularyTaskCount} onChange={(value) => setDraft((d) => d && ({ ...d, vocabularyTaskCount: value }))} />
-              <span className="muted small">5–10, default 8. Applies to the next vocabulary session.</span>
-            </label>
-            <label>
-              New words per session
-              <NumberInput min={1} max={10} value={draft.vocabularyNewWordsPerSession} onChange={(value) => setDraft((d) => d && ({ ...d, vocabularyNewWordsPerSession: value }))} data-testid="set-vocab-new-words" />
-              <span className="muted small">1–10, default 4. Missed and due words come first; this is a target for words you have never practised, exceeded only if the session cannot otherwise be filled.</span>
-            </label>
+            {!draft.vocabularyFocus && <>
+              <label>
+                Exercises per session
+                <NumberInput min={5} max={10} value={draft.vocabularyTaskCount} onChange={(value) => setDraft((d) => d && ({ ...d, vocabularyTaskCount: value }))} />
+                <span className="muted small">5–10, default 8. Applies to the next vocabulary session.</span>
+              </label>
+              <label>
+                New words per session
+                <NumberInput min={1} max={10} value={draft.vocabularyNewWordsPerSession} onChange={(value) => setDraft((d) => d && ({ ...d, vocabularyNewWordsPerSession: value }))} data-testid="set-vocab-new-words" />
+                <span className="muted small">1–10, default 4. Missed and due words come first; this is a target for words you have never practised, exceeded only if the session cannot otherwise be filled.</span>
+              </label>
+            </>}
             <label>
               Matching game repeats
               <NumberInput min={1} max={10} value={draft.vocabularyMatchRounds} onChange={(value) => setDraft((d) => d && ({ ...d, vocabularyMatchRounds: value }))} data-testid="set-vocab-match-rounds" />
-              <span className="muted small">1–10, default 4. The matching game after a vocabulary practice has two modes; in the second one every word has to be matched this many times. Applies to the next game.</span>
+              <span className="muted small">1–10, default 3. The matching game after a vocabulary practice has two modes; in the second one every word has to be matched this many times. Applies to the next game.</span>
+            </label>
+            <label>
+              Context Loop cards
+              <NumberInput min={10} max={40} value={draft.contextLoopCards} onChange={(value) => setDraft((d) => d && ({ ...d, contextLoopCards: value }))} data-testid="set-context-loop-cards" />
+              <span className="muted small">10–40, default 20. The most cards in one Context Loop session; it ends earlier when every word is done. Applies to the next session.</span>
+            </label>
+            <label>
+              Context Loop quick checks
+              <NumberInput min={0} max={3} value={draft.contextLoopChecks} onChange={(value) => setDraft((d) => d && ({ ...d, contextLoopChecks: value }))} data-testid="set-context-loop-checks" />
+              <span className="muted small">0–3, default 2. Words you recalled on an earlier day may come back once per session as a gap to type or say. 0 turns the checks off.</span>
             </label>
           </div>
         </div>
 
-        <div className="card settings-card">
+        <div className="card settings-card settings-card-wide">
           <h3>Typing Practice</h3>
-          <label className="check"><input type="checkbox" checked={draft.typingSoundsEnabled} onChange={(e) => setDraft({ ...draft, typingSoundsEnabled: e.target.checked })} data-testid="set-typing-sounds" /> Play Typing game sounds</label>
+          <div className="typing-settings-grid">
           <section className="typing-settings-group" aria-labelledby="typing-settings-words">
-          <h4 id="typing-settings-words">Words</h4>
+          <h4 id="typing-settings-words">Words: Meteor Rain</h4>
           <div className="settings-fields">
             <label>
               Words per level
@@ -117,16 +140,14 @@ export function Settings() {
               <span className="muted small">Share of Words targets taken from your saved vocabulary. Default 30%.</span>
             </label>
             <label>
-              Speed multiplier: {Math.round(draft.typingSpeedMultiplier * 1000) / 10}%
-              <input type="range" min={50} max={200} step={2.5} value={Math.round(draft.typingSpeedMultiplier * 1000) / 10} onChange={(e) => setDraft({ ...draft, typingSpeedMultiplier: Math.round(Number(e.target.value) * 10) / 1000 })} data-testid="set-typing-speed" />
-              <span className="muted small">50–200%, default 105%. Makes the game slightly harder than your current comfortable speed.</span>
-            </label>
-            <label>
               Memory check words after a Words level
               <NumberInput min={0} max={3} value={draft.typingRecallWords} onChange={(value) => setDraft((d) => d && ({ ...d, typingRecallWords: value }))} data-testid="set-typing-recall-words" />
               <span className="muted small">0–3, default 2. After a won level, this many of your saved words appear as stars with their translation and a sentence to guess them from. 0 turns the check off.</span>
             </label>
           </div>
+          </section>
+          <section className="typing-settings-group" aria-labelledby="typing-settings-drills">
+          <h4 id="typing-settings-drills">Words: Finger Drills and Key Builder</h4>
           <h5>Finger Drills</h5>
           <div className="settings-fields">
             <label>
@@ -139,14 +160,21 @@ export function Settings() {
           <h5>Key Builder</h5>
           <div className="settings-fields">
             <label>
+              Target speed (WPM)
+              <NumberInput min={15} max={150} value={draft.typingKeysTargetWpm} onChange={(value) => setDraft((d) => d && ({ ...d, typingKeysTargetWpm: value }))} data-testid="set-typing-keys-target" />
+              <span className="small">= {Math.round(draft.typingKeysTargetWpm * 5)} CPM</span>
+              <span className="muted small">15–150, default 40 (keybr's default is 35). The next letter opens when every open key has reached this speed on its own. It does not change by itself: raise it in steps of about 5 when the letters come easily.</span>
+            </label>
+            <label>
               Goal speed (WPM)
               <NumberInput min={20} max={150} value={draft.typingKeysGoalWpm} onChange={(value) => setDraft((d) => d && ({ ...d, typingKeysGoalWpm: value }))} data-testid="set-typing-keys-goal" />
-              <span className="muted small">20–150, default 55. When a letter opens, the target for that stage is fixed at your speed then (never above the goal); the next letter opens when every open key has reached it. With all 26 open the target is the goal.</span>
+              <span className="small">= {Math.round(draft.typingKeysGoalWpm * 5)} CPM</span>
+              <span className="muted small">20–150, default 55. Your long-range aim: the forecast shows how many lessons and hours remain to it. It does not decide when letters open.</span>
             </label>
             <label>
               Key accuracy (%)
               <NumberInput min={80} max={100} value={draft.typingKeysMinAccuracy} onChange={(value) => setDraft((d) => d && ({ ...d, typingKeysMinAccuracy: value }))} data-testid="set-typing-keys-accuracy" />
-              <span className="muted small">80–100, default 95. A key counts as reached only when its recent accuracy is at least this; a fast but careless key stays in focus.</span>
+              <span className="muted small">80–100, default 95. The next letter opens only when all open keys together are at least this accurate; the key with the most mistakes is then practised.</span>
             </label>
           </div>
           </section>
@@ -173,6 +201,70 @@ export function Settings() {
             </label>
           </div>
           </section>
+          <section className="typing-settings-group" aria-labelledby="typing-settings-vocab">
+          <h4 id="typing-settings-vocab">Vocabulary</h4>
+          <div className="settings-fields">
+            <label>
+              Shortest word (letters)
+              <NumberInput min={2} max={5} value={draft.vtMinLength} onChange={(value) => setDraft((d) => d && ({ ...d, vtMinLength: value }))} data-testid="set-vt-min-length" />
+              <span className="muted small">2–5, default 3. Shorter words are left out of Screening and Learning.</span>
+            </label>
+            <label>
+              Skip the most frequent words
+              <NumberInput min={0} max={1000} value={draft.vtSkipTopRanks} onChange={(value) => setDraft((d) => d && ({ ...d, vtSkipTopRanks: value }))} data-testid="set-vt-skip-top" />
+              <span className="muted small">0–1000, default 300. The very commonest words are not practised and count as known in the vocabulary estimate.</span>
+            </label>
+            <label>
+              Screening words per batch
+              <NumberInput min={10} max={40} value={draft.vtScreeningBatch} onChange={(value) => setDraft((d) => d && ({ ...d, vtScreeningBatch: value }))} data-testid="set-vt-batch" />
+              <span className="muted small">10–40, default 20. Words shown in one Screening batch.</span>
+            </label>
+            <label>
+              Probe words: {Math.round(draft.vtProbeShare * 100)}%
+              <input type="range" min={0} max={50} step={5} value={Math.round(draft.vtProbeShare * 100)} onChange={(e) => setDraft({ ...draft, vtProbeShare: Number(e.target.value) / 100 })} data-testid="set-vt-probe" />
+              <span className="muted small">Share of each batch drawn at random from rarer words so the vocabulary estimate is not biased towards frequent words. 0–50%, default 25%. They look like any other card.</span>
+            </label>
+            <label>
+              New words per Learning session
+              <NumberInput min={0} max={10} value={draft.vtNewPerSession} onChange={(value) => setDraft((d) => d && ({ ...d, vtNewPerSession: value }))} data-testid="set-vt-new" />
+              <span className="muted small">0–10, default 5. Checks use up the session first, so fewer new words may be introduced.</span>
+            </label>
+            <label>
+              Cards per Learning session
+              <NumberInput min={10} max={40} value={draft.vtLearningCards} onChange={(value) => setDraft((d) => d && ({ ...d, vtLearningCards: value }))} data-testid="set-vt-cards" />
+              <span className="muted small">10–40, default 20. The most cards in one session; it ends earlier when every word is done.</span>
+            </label>
+            <label>
+              Checks per Learning session
+              <NumberInput min={0} max={15} value={draft.vtChecksPerSession} onChange={(value) => setDraft((d) => d && ({ ...d, vtChecksPerSession: value }))} data-testid="set-vt-checks" />
+              <span className="muted small">0–15, default 5. Missing-word checks of words you marked Learned.</span>
+            </label>
+            <label>
+              First check after (days)
+              <NumberInput min={1} max={7} value={draft.vtFirstCheckDays} onChange={(value) => setDraft((d) => d && ({ ...d, vtFirstCheckDays: value }))} data-testid="set-vt-first-check" />
+              <span className="muted small">1–7, default 1 learning day after you press Learned (also after a failed check).</span>
+            </label>
+            <label>
+              Target retention: {Math.round(draft.vtRetention * 100)}%
+              <input type="range" min={80} max={97} step={1} value={Math.round(draft.vtRetention * 100)} onChange={(e) => setDraft({ ...draft, vtRetention: Number(e.target.value) / 100 })} data-testid="set-vt-retention" />
+              <span className="muted small">How likely you should still recall a word when its next check comes (FSRS). 80–97%, default 90%. Higher means more frequent checks.</span>
+            </label>
+            <label className="check"><input type="checkbox" checked={draft.vtSpeakWord} onChange={(e) => setDraft({ ...draft, vtSpeakWord: e.target.checked })} data-testid="set-vt-speak-word" /> Say the word when a card appears</label>
+            <label className="check"><input type="checkbox" checked={draft.vtSpeakSentence} onChange={(e) => setDraft({ ...draft, vtSpeakSentence: e.target.checked })} data-testid="set-vt-speak-sentence" /> Read the sentence out loud after you type it</label>
+          </div>
+          </section>
+          <section className="typing-settings-group" aria-labelledby="typing-settings-sound">
+          <h4 id="typing-settings-sound">Sound and speed</h4>
+          <div className="settings-fields">
+          <label className="check"><input type="checkbox" checked={draft.typingSoundsEnabled} onChange={(e) => setDraft({ ...draft, typingSoundsEnabled: e.target.checked })} data-testid="set-typing-sounds" /> Play Typing game sounds</label>
+            <label>
+              Speed multiplier: {Math.round(draft.typingSpeedMultiplier * 1000) / 10}%
+              <input type="range" min={50} max={200} step={2.5} value={Math.round(draft.typingSpeedMultiplier * 1000) / 10} onChange={(e) => setDraft({ ...draft, typingSpeedMultiplier: Math.round(Number(e.target.value) * 10) / 1000 })} data-testid="set-typing-speed" />
+              <span className="muted small">50–200%, default 105%. Makes the game slightly harder than your current comfortable speed.</span>
+            </label>
+          </div>
+          </section>
+          </div>
         </div>
       </div>
 
@@ -294,7 +386,7 @@ function VocabularySpeechSettings() {
 }
 
 /** older settings revisions hold a fixed voice count; it is shown as the share of the task count it was */
-const pick = (v: Values): Draft => ({ taskCount: v.taskCount, weakRatio: v.weakRatio, voiceShare: v.voiceShare ?? Math.round((v.voiceTarget / v.taskCount) * 20) / 20, practiceSoundsEnabled: v.practiceSoundsEnabled ?? true, typingSoundsEnabled: v.typingSoundsEnabled ?? true, vocabularyTaskCount: v.vocabularyTaskCount ?? 8, vocabularyNewWordsPerSession: v.vocabularyNewWordsPerSession ?? 4, vocabularyMatchRounds: v.vocabularyMatchRounds ?? 4, reviewNoticeThreshold: v.reviewNoticeThreshold ?? 5, difficultyMin: v.difficultyMin ?? (v.difficultyMax ? "A2" : "B1"), difficultyMax: v.difficultyMax ?? "C1", typingWordsPerLevel: v.typingWordsPerLevel ?? 30, typingDrillWordsPerLevel: v.typingDrillWordsPerLevel ?? 60, typingDrillSpeech: v.typingDrillSpeech ?? false, typingKeysGoalWpm: v.typingKeysGoalWpm ?? 55, typingKeysMinAccuracy: v.typingKeysMinAccuracy ?? 95, typingVocabularyShare: v.typingVocabularyShare ?? 0.3, typingSpeedMultiplier: v.typingSpeedMultiplier ?? 1.05, typingBookMinutes: v.typingBookMinutes ?? 5, typingBooksShowMistakes: v.typingBooksShowMistakes ?? true, typingDictationExercisesPerLesson: v.typingDictationExercisesPerLesson ?? 10, typingDictationSource: v.typingDictationSource ?? "real", typingRecallWords: v.typingRecallWords ?? 2, clozeTaskCount: v.clozeTaskCount ?? 15 });
+const pick = (v: Values): Draft => ({ taskCount: v.taskCount, weakRatio: v.weakRatio, voiceShare: v.voiceShare ?? Math.round((v.voiceTarget / v.taskCount) * 20) / 20, practiceSoundsEnabled: v.practiceSoundsEnabled ?? true, typingSoundsEnabled: v.typingSoundsEnabled ?? true, vocabularyFocus: vocabularyFocusEnabled(v), vocabularyTaskCount: v.vocabularyTaskCount ?? 8, vocabularyNewWordsPerSession: v.vocabularyNewWordsPerSession ?? 4, vocabularyMatchRounds: v.vocabularyMatchRounds ?? 3, reviewNoticeThreshold: v.reviewNoticeThreshold ?? 5, difficultyMin: v.difficultyMin ?? (v.difficultyMax ? "A2" : "B1"), difficultyMax: v.difficultyMax ?? "C1", typingWordsPerLevel: v.typingWordsPerLevel ?? 30, typingDrillWordsPerLevel: v.typingDrillWordsPerLevel ?? 60, typingDrillSpeech: v.typingDrillSpeech ?? false, typingKeysTargetWpm: v.typingKeysTargetWpm ?? 40, typingKeysGoalWpm: v.typingKeysGoalWpm ?? 55, typingKeysMinAccuracy: v.typingKeysMinAccuracy ?? 95, typingVocabularyShare: v.typingVocabularyShare ?? 0.3, typingSpeedMultiplier: v.typingSpeedMultiplier ?? 1.05, typingBookMinutes: v.typingBookMinutes ?? 5, typingBooksShowMistakes: v.typingBooksShowMistakes ?? true, typingDictationExercisesPerLesson: v.typingDictationExercisesPerLesson ?? 10, typingDictationSource: v.typingDictationSource ?? "real", typingRecallWords: v.typingRecallWords ?? 2, clozeTaskCount: v.clozeTaskCount ?? 15, clozeAutoAdvance: v.clozeAutoAdvance ?? true, clozeHighlightNames: v.clozeHighlightNames ?? true, contextLoopCards: v.contextLoopCards ?? 20, contextLoopChecks: v.contextLoopChecks ?? 2, vtScreeningBatch: v.vtScreeningBatch ?? 20, vtProbeShare: v.vtProbeShare ?? 0.25, vtNewPerSession: v.vtNewPerSession ?? 5, vtLearningCards: v.vtLearningCards ?? 20, vtChecksPerSession: v.vtChecksPerSession ?? 5, vtFirstCheckDays: v.vtFirstCheckDays ?? 1, vtRetention: v.vtRetention ?? 0.9, vtSpeakWord: v.vtSpeakWord ?? true, vtSpeakSentence: v.vtSpeakSentence ?? true, vtMinLength: v.vtMinLength ?? 3, vtSkipTopRanks: v.vtSkipTopRanks ?? 300 });
 const voiceCount = (d: Draft): number => Math.round(d.voiceShare * d.taskCount);
 
 const BUSY_TEXT: Record<string, string> = {

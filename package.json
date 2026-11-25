@@ -19,7 +19,7 @@
     "watch:web": "npm run build -w @english-lab/web -- --watch",
     "start": "node scripts/start.mjs",
     "lab": "node scripts/start.mjs --attached",
-    "dev": "npm run stop && npm run build && npm run lab",
+    "dev": "npm run stop -- --force && npm run build && npm run lab",
     "stop": "node scripts/stop.mjs",
     "backup": "node scripts/backup.mjs",
     "restore": "node scripts/restore.mjs",
@@ -33,6 +33,7 @@
     "typing:prepare-book": "node scripts/typing-prepare-book.mjs",
     "typing:build-wordlist": "node scripts/typing-build-wordlist.mjs",
     "content:agent": "node scripts/content-agent.mjs",
+    "content:loop": "node scripts/context-loop-agent.mjs",
     "content:validate": "node scripts/content-validate.mjs",
     "trial:generate": "node scripts/generation-trial.mjs",
     "verify:stt": "node scripts/verify-stt.mjs",
@@ -52,7 +53,11 @@
     "test:e2e": "node scripts/vitest.mjs --config vitest.e2e.config.ts",
     "skills:labels": "node scripts/skill-labels-sync.mjs",
     "cloze:prepare": "node scripts/grammar-cloze-prepare.mjs",
-    "cloze:import": "node scripts/grammar-cloze-import.mjs"
+    "cloze:import": "node scripts/grammar-cloze-import.mjs",
+    "vtyping:prepare": "node scripts/vtyping-prepare.mjs",
+    "vtyping:clean": "node scripts/vtyping-clean.mjs",
+    "vtyping:import-tatoeba": "node scripts/vtyping-import-tatoeba.mjs",
+    "vtyping:import-lexicon-examples": "node scripts/vtyping-import-lexicon-examples.mjs"
   },
   "devDependencies": {
     "@types/better-sqlite3": "9.6.0",

@@ -26,6 +26,7 @@ export interface TypingDictationRouteOptions {
   /** called after a lesson has been queued so the dispatcher starts at once */
   onQueued?: () => void;
   realAudit?: RealAudit;
+  projectRoot?: string;
 }
 
 /** Audio Dictation (TASK_028). Mutations run in their own transactions inside the domain functions. */
@@ -149,6 +150,6 @@ export function registerTypingDictationRoutes(app: FastifyInstance, db: Db, deps
     } catch {
       throw new ApiError(422, "TIMEZONE_INVALID", `Unknown time zone ${timezone}`);
     }
-    return dictationAnalytics(db, { days, timezone, now: deps.now(), voices: env.voices.list(db, { purpose: "dictation", ...modelShaOpt(env.tts) }) });
+    return dictationAnalytics(db, { days, timezone, now: deps.now(), ...(opts.projectRoot ? { projectRoot: opts.projectRoot } : {}), voices: env.voices.list(db, { purpose: "dictation", ...modelShaOpt(env.tts) }) });
   });
 }

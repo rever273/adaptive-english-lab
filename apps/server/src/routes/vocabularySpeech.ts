@@ -9,7 +9,19 @@ import { getEntry } from "../domain/vocabulary/repository.js";
 import type { SessionDeps } from "../domain/sessions/policy.js";
 
 const DAY = 86_400_000;
-const MODEL = "eleven_multilingual_v2";
+/**
+ * Turbo v2.5 takes a language code, so a single word is always read as English; eleven_multilingual_v2 guessed the language from the
+ * word alone and read some (place, chance) as French. The model is part of every cache key, so clips of the old model are not reused.
+ */
+export const SPEECH_MODEL = "eleven_turbo_v2_5";
+const MODEL = SPEECH_MODEL;
+const LANGUAGE = "en";
+/**
+ * A bare word with nothing after it lets the model run on and add a sound at the end ("dinner" came out as "dinners"); a full stop
+ * tells it the utterance is over. The marker is part of the cache key, so clips made without it are not reused.
+ */
+const CLIP_FORMAT = "full-stop";
+export const spokenText = (text: string): string => (/[.!?]$/.test(text) ? text : `${text}.`);
 /** `voiceIds`: every ElevenLabs voice in use (equal weight); `voiceId` is the single-voice form kept for older callers; `random` is for tests */
 type Options = { key?: string; voiceId?: string; voiceIds?: string[]; cacheDir: string; request?: typeof fetch; random?: () => number };
 /** a voice id as a folder name */
@@ -54,13 +66,14 @@ export function registerVocabularySpeechRoutes(app: FastifyInstance, db: Db, dep
     db.prepare("UPDATE vocabulary_speech_settings SET enabled = ? WHERE id = 1").run(req.body.enabled ? 1 : 0);
     return status();
   });
-  async function speak(word: string, automatic: boolean, reply: FastifyReply) {
+  /** `cacheOnly`: a clip already on disk is served, otherwise 204 and nothing is requested from ElevenLabs (no credits spent) */
+  async function speak(word: string, automatic: boolean, reply: FastifyReply, cacheOnly = false) {
     if (automatic && !status().enabled) return reply.code(204).send();
     const text = word.trim().replace(/\s+/g, " ");
     if (!text || text.length > 200) throw new ApiError(400, "SPEECH_INVALID", "Word is not available for pronunciation");
-    if (voiceIds.length === 0) throw new ApiError(503, "SPEECH_NOT_CONFIGURED", "ElevenLabs voice ID is missing.");
+    if (voiceIds.length === 0 && !cacheOnly) throw new ApiError(503, "SPEECH_NOT_CONFIGURED", "ElevenLabs voice ID is missing.");
     // the file name depends on the text only: any voice's folder (or an old flat file) can answer, so a word is never paid for twice
-    const hash = createHash("sha256").update(JSON.stringify([MODEL, text.toLowerCase()])).digest("hex");
+    const hash = createHash("sha256").update(JSON.stringify([MODEL, CLIP_FORMAT, text.toLowerCase()])).digest("hex");
     const legacy = (voice: string) => createHash("sha256").update(JSON.stringify([voice, MODEL, text.toLowerCase()])).digest("hex");
     async function findCached(): Promise<Buffer | null> {
       const candidates = voiceIds.map((v) => path.join(options.cacheDir, voiceFolder(v), `${hash}.mp3`));
@@ -85,7 +98,7 @@ export function registerVocabularySpeechRoutes(app: FastifyInstance, db: Db, dep
       db.prepare("INSERT INTO vocabulary_speech_requests(slot_id, lemma, requested_at) VALUES (?, ?, ?)").run(`eleven:req:${randomUUID()}`, text.toLowerCase(), deps.now().toISOString());
       let response: Response;
       try {
-        response = await request(`https://api.elevenlabs.io/v1/text-to-speech/${encodeURIComponent(voice)}/stream?output_format=mp3_44100_128`, { method: "POST", headers: { "xi-api-key": options.key, "Content-Type": "application/json" }, body: JSON.stringify({ text, model_id: MODEL }), signal: AbortSignal.timeout(30000) });
+        response = await request(`https://api.elevenlabs.io/v1/text-to-speech/${encodeURIComponent(voice)}/stream?output_format=mp3_44100_128`, { method: "POST", headers: { "xi-api-key": options.key, "Content-Type": "application/json" }, body: JSON.stringify({ text: spokenText(text), model_id: MODEL, language_code: LANGUAGE }), signal: AbortSignal.timeout(30000) });
       } catch { throw new ApiError(502, "SPEECH_UNAVAILABLE", "Could not reach ElevenLabs."); }
       if (!response.ok) {
         if (response.status === 429) {
@@ -106,6 +119,11 @@ export function registerVocabularySpeechRoutes(app: FastifyInstance, db: Db, dep
       try { await writeFile(temp, data); await rename(temp, file); } finally { await rm(temp, { force: true }); }
       return data;
     }
+    if (cacheOnly) {
+      const cached = await findCached();
+      if (!cached) return reply.code(204).send();
+      return reply.header("Cache-Control", "no-store").type("audio/mpeg").send(cached);
+    }
     let task = pending.get(hash);
     if (!task) { task = load(); pending.set(hash, task); void task.finally(() => pending.delete(hash)).catch(() => {}); }
     const audio = await task;
@@ -125,5 +143,11 @@ export function registerVocabularySpeechRoutes(app: FastifyInstance, db: Db, dep
     const text = typeof req.body?.text === "string" ? req.body.text.trim().replace(/\s+/g, " ") : "";
     if (!/^[A-Za-z][A-Za-z' -]{0,60}$/.test(text.replace(/\u2019/g, "'"))) throw new ApiError(400, "SPEECH_INVALID", "Expected an English word or short phrase");
     return speak(text, false, reply);
+  });
+  // automatic playback (Vocabulary Typing screening): only a clip that is already stored, never a new paid request; silent when speech is off
+  app.post<{ Body: { text?: unknown } }>("/api/v1/vocabulary-speech/cached", async (req, reply) => {
+    const text = typeof req.body?.text === "string" ? req.body.text.trim().replace(/\s+/g, " ") : "";
+    if (!/^[A-Za-z][A-Za-z' -]{0,60}$/.test(text.replace(/\u2019/g, "'"))) throw new ApiError(400, "SPEECH_INVALID", "Expected an English word or short phrase");
+    return speak(text, true, reply, true);
   });
 }

@@ -66,7 +66,7 @@ describe("settings over HTTP", () => {
     expect(newWords.json().values.vocabularyNewWordsPerSession).toBe(2);
     expect(vocabularyNewWordsPerSession((await call("GET")).json().values)).toBe(2);
     // matching-game repeats: optional, 1..10, default 4
-    expect(vocabularyMatchRounds(first.values)).toBe(4);
+    expect(vocabularyMatchRounds(first.values)).toBe(3);
     expect((await call("POST", { vocabularyMatchRounds: 0 })).statusCode).toBe(400);
     expect((await call("POST", { vocabularyMatchRounds: 11 })).statusCode).toBe(400);
     expect(vocabularyMatchRounds((await call("POST", { vocabularyMatchRounds: 6 })).json().values)).toBe(6);

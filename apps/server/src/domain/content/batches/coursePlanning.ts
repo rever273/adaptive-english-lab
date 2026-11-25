@@ -1,6 +1,7 @@
 import { difficultyLevels, voiceTaskCount, type ExerciseType } from "@english-lab/contracts";
-import { FORMAT_ORDER, hardViolations, scaleQuotas, selectSession, type Candidate, type Format } from "@english-lab/learning";
+import { FORMAT_ORDER, familyCap, hardViolations, scaleQuotas, selectSession, type Candidate, type Format } from "@english-lab/learning";
 import type { Db } from "../../../db/open.js";
+import { ApiError } from "../../../errors.js";
 import { loadBlockedFingerprints, loadCandidates } from "../../sessions/bank.js";
 import { courseLessons } from "../../sessions/course.js";
 import { loadBlueprint, loadSettings } from "../../sessions/policy.js";
@@ -26,6 +27,11 @@ export function calculateCoursePlan(db: Db, now: Date): CoursePlan {
     const policy = loadBlueprint(db, lesson.id).policy;
     const skills = policy.skillPool.length ? policy.skillPool : allSkills;
     if (!skills.length) throw new Error(`No target skills available for ${lesson.key}`);
+    const families = new Set(skills.map(skill => skill.split(".")[0]!));
+    const minimumFamilies = Math.max(settings.taskCount >= 10 ? 3 : 1, Math.ceil(settings.taskCount / familyCap(settings.taskCount)));
+    if (families.size < minimumFamilies) {
+      throw new ApiError(422, "COURSE_LESSON_POLICY_INVALID", `Cannot calculate lessons: ${policy.title} (${lesson.key}) has skills from ${families.size} grammar families; at least ${minimumFamilies} are required for ${settings.taskCount} tasks. Revise this lesson's skill pool before calculating again.`);
+    }
     for (let play = lesson.completed; play < MAX_LESSON_PLAYS; play++) {
       sessions++;
       const n = settings.taskCount;
@@ -44,8 +50,8 @@ export function calculateCoursePlan(db: Db, now: Date): CoursePlan {
         }
       }
       const all = [...pool, ...extras];
-      const result = selectSession({ n, weakRatio: settings.weakRatio, voiceTarget: voiceTaskCount(settings), seed: `course-plan-${sessions}`, quotas, readingBlocks: policy.readingBlocks, candidates: all, blocked, priority: () => 0.5, planMultiplier: () => 1, discovery: { bonusBySkill: {}, limit: 0 }, maxNodes: 100000, candidatePenalty: c => fake.has(c.revisionId) ? 10000 : 0 });
-      if (!result.feasible) throw new Error(`Could not calculate ${lesson.key} session ${play + 1}: ${result.deficits.map(d => d.message).join("; ")}`);
+      const result = selectSession({ preferSingleNoMistake: true, n, weakRatio: settings.weakRatio, voiceTarget: voiceTaskCount(settings), seed: `course-plan-${sessions}`, quotas, readingBlocks: policy.readingBlocks, candidates: all, blocked, priority: () => 0.5, planMultiplier: () => 1, discovery: { bonusBySkill: {}, limit: 0 }, maxNodes: 100000, candidatePenalty: c => fake.has(c.revisionId) ? 10000 : 0 });
+      if (!result.feasible) throw new ApiError(422, "COURSE_PLAN_UNRESOLVED", `Could not calculate ${lesson.key} session ${play + 1}: ${result.deficits.map(d => d.message).join("; ")}`);
       const byId = new Map(all.map(c => [c.revisionId, c]));
       const violations = hardViolations(result.slots, n, byId, blocked, quotas);
       if (violations.length) throw new Error(`Invalid course simulation: ${violations.join("; ")}`);

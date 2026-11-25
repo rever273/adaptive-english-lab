@@ -5,7 +5,7 @@ import { wilson } from "../stats";
 import { ClozeRules } from "./GrammarClozeRules";
 import { fmtDuration } from "../format";
 
-const time = (ms: number) => `${Math.floor(ms / 60000)}:${String(Math.floor(ms / 1000) % 60).padStart(2, "0")}`;
+const time = fmtDuration;
 const pct = (x: number | null) => (x === null ? "—" : `${(x * 100).toFixed(1)}%`);
 const sec = (ms: number | null) => (ms === null ? "—" : `${(ms / 1000).toFixed(1)} s`);
 

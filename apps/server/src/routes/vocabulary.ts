@@ -2,6 +2,7 @@ import type { FastifyInstance } from "fastify";
 import { z } from "zod";
 import type { Db } from "../db/open.js";
 import { ApiError } from "../errors.js";
+import { strengthOf } from "../domain/vocabulary/strength.js";
 import { addWord, getEntry, listWords, lookupWord, matchWords, patchWord, removeWord, revisionHistory, vocabularyTotals } from "../domain/vocabulary/repository.js";
 import { lookupWordBank } from "../domain/vocabulary/wordBankLookup.js";
 
@@ -21,7 +22,10 @@ export function registerVocabularyRoutes(app: FastifyInstance, db: Db, deps: { n
   app.get("/api/v1/vocabulary", async (req) => {
     const q = ListQuery.safeParse(req.query);
     if (!q.success) throw new ApiError(400, "VALIDATION_ERROR", "Query is invalid", q.error.issues.map((i) => ({ path: i.path.join("."), message: i.message })));
-    return { ...listWords(db, { q: q.data.q, learned: q.data.learned === undefined ? undefined : q.data.learned === "true", limit: q.data.limit }), totals: vocabularyTotals(db) };
+    const list = listWords(db, { q: q.data.q, learned: q.data.learned === undefined ? undefined : q.data.learned === "true", limit: q.data.limit });
+    // word-strength-v1 (TASK_037 §6): computed for the page being sent, from raw events
+    const strength = strengthOf(db, list.words.map((w) => w.id));
+    return { ...list, words: list.words.map((w) => ({ ...w, strength: strength.get(w.id) ?? null })), totals: vocabularyTotals(db) };
   });
 
   // for the word popup: is this word (or a form of it) already saved?

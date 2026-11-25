@@ -58,6 +58,7 @@ function simulateReadiness(db: Db, deps: SessionDeps, blueprintRevisionId: strin
   let ready = 0;
   for (; ready < SIMULATION_CAP; ready++) {
     const solve = (pool: Candidate[]) => selectSession({
+      preferSingleNoMistake: true,
       n,
       weakRatio: settings.values.weakRatio,
       voiceTarget: voiceTaskCount(settings.values),

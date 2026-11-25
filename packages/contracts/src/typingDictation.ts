@@ -1,4 +1,5 @@
 import { z } from "zod";
+import { TypingKeyboardAnalyticsSchema } from "./typing.js";
 
 export const DICTATION_CHECK_VERSION = "dictation-check-v2";
 export const DICTATION_XP_VERSION = "typing-dictation-xp-v1";
@@ -47,7 +48,7 @@ export const DictationStateSchema = z.object({
 export const DictationPlayRequestSchema = z.object({ source: z.enum(["auto", "manual", "wrong_answer"]) }).strict();
 export const DictationHintRequestSchema = z.object({ typedText: z.string().max(1000) }).strict();
 /** typingMs: time spent typing this attempt (pauses over 5 s between keys are not counted); keystrokes: keys pressed. Both measured by the page. */
-export const DictationAnswerRequestSchema = z.object({ attemptId: z.string().uuid(), text: z.string().min(1).max(1000), activeMs: z.number().int().nonnegative(), typingMs: z.number().int().min(0).max(3_600_000).optional(), keystrokes: z.number().int().min(0).max(10_000).optional() }).strict();
+export const DictationAnswerRequestSchema = z.object({ attemptId: z.string().uuid(), text: z.string().min(1).max(1000), activeMs: z.number().int().nonnegative(), typingMs: z.number().int().min(0).max(3_600_000).optional(), keystrokes: z.number().int().min(0).max(10_000).optional(), keyTimes: z.array(z.object({ letter: z.string().regex(/^[a-z]$/), ms: z.number().int().min(0).max(3_600_000), timed: z.number().int().min(0).max(10_000) }).strict()).max(26).optional() }).strict();
 export const DictationPrepareRequestSchema = z.object({ count: z.number().int().min(1).max(50) }).strict();
 export const DictationTimeRequestSchema = z.object({ activeMs: z.number().int().nonnegative() }).strict();
 
@@ -96,6 +97,8 @@ export const DictationAnalyticsSchema = z.object({
   /** how the Whisper check hears each voice and the share of sentences it gets now (a voice that is often misheard gets a smaller share) */
   voiceBalance: z.array(z.object({ name: z.string(), ageGroup: z.string().nullable(), checks: z.number().int(), heardRate: z.number().nullable(), weight: z.number(), share: z.number(), flags: z.number().int(), enabled: z.boolean() }).strict()),
   /** a voice is listed with `enoughData: false` below 20 exercises and its numbers are then null */
+  /** per-key view (speed, wrong presses, progress heatmap) from the typed answers; absent when the server cannot build it */
+  keyboard: z.lazy(() => TypingKeyboardAnalyticsSchema).optional(),
   voices: z.array(z.object({ name: z.string(), exercises: z.number().int(), enoughData: z.boolean(), firstAttemptAccuracy: z.number().nullable(), avgManualReplays: z.number().nullable(), hintRate: z.number().nullable() }).strict()),
 }).strict();
 

@@ -10,7 +10,7 @@ export interface PlanSkill {
 }
 /** what the model is asked to build one lesson from; stored with the lesson (plan_json) so the lesson can be explained later */
 export interface LessonPlan {
-  version: "word-lesson-plan-v1";
+  version: "word-lesson-plan-v1" | "word-lesson-plan-v2";
   seed: number;
   topics: string[];
   difficulty: { min: string; max: string };
@@ -49,15 +49,25 @@ export const SAFE_STAGE3: string[] = REWRITE_KINDS.map((k) => k.label);
 export interface SkillPool {
   weak: PlanSkill[];
   familiar: PlanSkill[];
+  recentLabels?: ReadonlySet<string>;
 }
 
 /** Confirmed grammar evidence only (the lesson-priorities export). Called once for a whole request, never inside a write transaction. */
 export function loadSkillPool(db: Db, asOf: string): SkillPool {
-  const rows = (exportLessonPriorities(db, asOf, 5).json as { skills: Array<{ id: string; label: string; confirmedAttempts: number; priority: number | null }> }).skills;
+  const rows = (exportLessonPriorities(db, asOf, 5).json as { skills: Array<{ id: string; label: string; confirmedAttempts: number; priority: number | null; series: Array<{ dimension: string; priority: number }> }> }).skills;
   const started = rows.filter((r) => r.confirmedAttempts >= 1);
-  const weak = started.filter((r) => r.priority !== null).sort((a, b) => (b.priority ?? 0) - (a.priority ?? 0) || a.id.localeCompare(b.id));
+  const priority = (r: typeof started[number]) => r.series.find(s => s.dimension === "production")?.priority ?? r.priority ?? 0;
+  const weak = started.filter((r) => r.priority !== null).sort((a, b) => priority(b) - priority(a) || a.id.localeCompare(b.id));
+  const recent = db.prepare(`SELECT l.content_json AS content FROM word_lesson_runs r
+    JOIN word_lessons l ON l.id = r.lesson_id WHERE r.status = 'completed'
+    ORDER BY r.completed_at DESC, r.rowid DESC LIMIT 5`).all() as Array<{ content: string }>;
+  const recentLabels = new Set(recent.flatMap(({ content }) => {
+    const c = JSON.parse(content) as { stage3: { items: Array<{ construction_en: string }> }; stage4: { construction_en: string } };
+    return [...c.stage3.items.map(i => i.construction_en.toLowerCase()), c.stage4.construction_en.toLowerCase()];
+  }));
   const weakIds = new Set(weak.slice(0, 12).map((r) => r.id));
   return {
+    recentLabels,
     weak: weak.slice(0, 12).map((r) => ({ id: r.id, label: r.label })),
     familiar: started.filter((r) => !weakIds.has(r.id)).sort((a, b) => b.confirmedAttempts - a.confirmedAttempts || a.id.localeCompare(b.id)).map((r) => ({ id: r.id, label: r.label })),
   };
@@ -82,7 +92,7 @@ function rng(seed: number): () => number {
  */
 export function buildPlan(settings: Pick<SettingsV1, "difficultyMin" | "difficultyMax">, pool: SkillPool, index: number, seed: number): LessonPlan {
   const rand = rng(seed);
-  const transformations: 2 | 3 = rand() < 0.5 ? 2 : 3;
+  const transformations = 2;
   const slots = transformations + 1;
   const weakCount = pool.weak.length === 0 ? 0 : Math.min(pool.weak.length, Math.round(slots * 0.6));
   const used = new Set<string>();
@@ -118,12 +128,13 @@ export function buildPlan(settings: Pick<SettingsV1, "difficultyMin" | "difficul
   // Stage 4 (build a sentence from an idea) takes a weak skill of any kind; the transformations of stage 3 take skills that can really be applied to a given sentence.
   const skills: PlanSkill[] = [];
   let weakLeft = weakCount;
-  const fourth = (weakLeft > 0 ? take(pool.weak, index * 2, any) : null) ?? take(pool.familiar, index * 3, any) ?? take(pool.weak, index, any);
+  const unseen = (s: PlanSkill) => !pool.recentLabels?.has(s.label.toLowerCase());
+  const fourth = (weakLeft > 0 ? take(pool.weak, index * 2, unseen) ?? take(pool.weak, index * 2, any) : null) ?? take(pool.familiar, index * 3, any) ?? take(pool.weak, index, any);
   if (fourth && pool.weak.some((w) => keyOf(w) === keyOf(fourth))) weakLeft--;
   for (let k = 0; k < transformations; k++) {
     // after the weak skills, half of the tasks come from the wider list of rewrites (see REWRITE_KINDS) so the three tasks differ from lesson to lesson
     const own = rand() < 0.5;
-    const pick = (weakLeft > 0 ? take(pool.weak, index * 2 + k, transformable) : null) ?? (own ? take(pool.familiar, index * 3 + k, transformable) : null);
+    const pick = (weakLeft > 0 ? take(pool.weak, index * 2 + k, s => unseen(s) && transformable(s)) ?? take(pool.weak, index * 2 + k, transformable) : null) ?? (own ? take(pool.familiar, index * 3 + k, transformable) : null);
     if (pick && pool.weak.some((w) => keyOf(w) === keyOf(pick))) weakLeft--;
     skills.push(pick ?? fallback(true));
   }
@@ -134,7 +145,7 @@ export function buildPlan(settings: Pick<SettingsV1, "difficultyMin" | "difficul
   const levels = difficultyLevels(settings);
   const range = levels ?? [...CEFR_RANGE];
   return {
-    version: "word-lesson-plan-v1",
+    version: "word-lesson-plan-v2",
     seed,
     topics: [pickVocabularyTopic(index, seed % 7), pickVocabularyTopic(index + 1, (seed >> 3) % 7 + 3), pickVocabularyTopic(index + 2, (seed >> 6) % 7 + 6), pickVocabularyTopic(index + 3, (seed >> 9) % 7 + 9), pickVocabularyTopic(index + 4, (seed >> 12) % 7 + 12)],
     difficulty: { min: range[0]!, max: range[range.length - 1]! },

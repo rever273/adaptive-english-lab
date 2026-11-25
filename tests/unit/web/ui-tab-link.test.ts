@@ -17,7 +17,8 @@ async function seen(url: string, text: string, ms: number): Promise<{ got: boole
 }
 
 it("a page that connects later replaces the earlier one; the same page reconnecting does not", async () => {
-  const app = Fastify();
+  // the kept-alive sockets of the aborted streams would hold app.close() for several seconds on Windows and push the test over the default 5 s timeout
+  const app = Fastify({ forceCloseConnections: true });
   registerUiRoutes(app);
   await app.listen({ port: 0, host: "127.0.0.1" });
   const base = `http://127.0.0.1:${(app.server.address() as { port: number }).port}/api/v1/ui`;

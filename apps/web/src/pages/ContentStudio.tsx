@@ -1,6 +1,8 @@
 import { useCallback, useEffect, useState } from 'react';
+import { GrammarClozeAudit } from './GrammarClozeAudit';
 import { VocabularyStudio } from './VocabularyStudio';
 import { WordLessonStudio } from './WordLessonStudio';
+import { ContextLoopStudio } from './ContextLoopStudio';
 import { STATUS_LABEL, errorText } from './studio/shared';
 import { DictationTracks } from './studio/DictationTracks';
 import { BatchDetail } from './studio/BatchDetail';
@@ -49,6 +51,8 @@ export function ContentStudio({ initialView = 'grammar' }: { initialView?: 'gram
             ) : (
                 <>
                     {category === 'vocabulary' && <WordLessonStudio />}
+                    {category === 'vocabulary' && <ContextLoopStudio />}
+                    {category === 'grammar' && <GrammarClozeAudit />}
                     {category === 'grammar' && <CreateLessonsTask />}
                     <BatchStudio key={category} category={category} onCategoryChange={setCategory} />
                 </>

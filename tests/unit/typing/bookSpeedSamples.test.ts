@@ -28,4 +28,17 @@ describe("temporary Books speed samples", () => {
     sampler.advance(3000, { charsTyped: 10, errorCount: 0 });
     expect(sampler.finish({ charsTyped: 10, errorCount: 0 })[0]).toMatchObject({ elapsedMs: 5000, wpm: 24, errors: 0 });
   });
+  it("merges a very short final interval, including its errors, into the previous point", () => {
+    const sampler = new BookSpeedSamples({ charsTyped: 0, errorCount: 0 });
+    sampler.advance(5000, { charsTyped: 20, errorCount: 1 });
+    sampler.advance(10, { charsTyped: 20, errorCount: 1 });
+    expect(sampler.finish({ charsTyped: 22, errorCount: 2 })).toEqual([
+      { elapsedMs: 5010, intervalMs: 5010, wpm: 47.9, errors: 2 },
+    ]);
+  });
+  it("does not invent a speed for a sub-second visit with no previous interval", () => {
+    const sampler = new BookSpeedSamples({ charsTyped: 0, errorCount: 0 });
+    sampler.advance(10, { charsTyped: 1, errorCount: 0 });
+    expect(sampler.finish({ charsTyped: 1, errorCount: 0 })).toEqual([]);
+  });
 });

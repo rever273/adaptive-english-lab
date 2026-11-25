@@ -473,6 +473,36 @@
     background: var(--ok-bg);
     color: var(--ok-fg);
 }
+.wl-yours-typo {
+    border-color: #e08a2e;
+    background: var(--warn-bg);
+    color: var(--warn-fg);
+}
+/* word-by-word comparison of the answer with the corrected sentence */
+.wl-w-same {
+    color: var(--ok);
+}
+.wl-w-wrong {
+    color: var(--err);
+    font-weight: 600;
+    text-decoration: underline wavy;
+    text-underline-offset: 3px;
+}
+.wl-w-typo {
+    color: #f0a040;
+    font-weight: 600;
+    text-decoration: underline wavy;
+    text-underline-offset: 3px;
+}
+.wl-typo-tag {
+    font-size: 0.7rem;
+    text-transform: uppercase;
+    letter-spacing: 0.04em;
+    padding: 0 0.35rem;
+    border-radius: 0.3rem;
+    border: 1px solid #e08a2e;
+    color: #f0a040;
+}
 
 /* matching game after a vocabulary practice */
 .match-cols {
